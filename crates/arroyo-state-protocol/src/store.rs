@@ -35,6 +35,11 @@ pub enum StoreError {
         path: CheckpointRef,
         source: prost::DecodeError,
     },
+    #[error("protobuf at path at {path} is invalid: {msg}")]
+    InvalidProtobuf {
+        path: CheckpointRef,
+        msg: String,
+    },
     #[error("conditional create for {path} reported an existing object, but it could not be read")]
     ExistingObjectMissing { path: CheckpointRef },
     #[error("protocol error: {0}")]
@@ -68,6 +73,9 @@ pub trait ProtocolStore: Send + Sync {
         path: &CheckpointRef,
         bytes: Vec<u8>,
     ) -> Result<CreateResult<Vec<u8>>, StoreError>;
+
+    /// Deletes raw object bytes, succeeding if the object is already absent.
+    async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError>;
 }
 
 /// Reads and JSON-decodes an optional protocol object.
@@ -232,6 +240,12 @@ impl ProtocolStore for StorageProvider {
             Err(error) => Err(StoreError::Storage(error)),
         }
     }
+
+    async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError> {
+        self.delete_if_present(path.as_str())
+            .await
+            .map_err(StoreError::from)
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +286,11 @@ pub(crate) mod tests {
 
             objects.insert(path.as_str().to_string(), bytes);
             Ok(CreateResult::Created)
+        }
+
+        async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError> {
+            self.objects.lock().unwrap().remove(path.as_str());
+            Ok(())
         }
     }
 }

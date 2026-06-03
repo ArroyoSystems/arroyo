@@ -9,6 +9,7 @@ pub mod state;
 pub mod store;
 pub mod types;
 pub mod workflow;
+pub mod gc;
 
 use crate::types::{CheckpointRef, Epoch, Generation};
 use arroyo_types::{JobId, PipelineId};

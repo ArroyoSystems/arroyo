@@ -63,7 +63,7 @@ use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::store::read_protobuf;
-use arroyo_state_protocol::types::CheckpointRef;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
@@ -254,8 +254,8 @@ impl WorkerState {
         &mut self,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u64,
-        min_epoch: u64,
+        epoch: Epoch,
+        min_epoch: Epoch,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
         parent: Option<(CheckpointRef, CheckpointManifest)>,
@@ -383,8 +383,8 @@ impl WorkerState {
                 .initialize_job_controller(
                     logical.clone(),
                     &req.tasks,
-                    req.start_epoch,
-                    req.min_epoch,
+                    Epoch(req.start_epoch),
+                    Epoch(req.min_epoch),
                     &shutdown_guard,
                     Duration::from_micros(req.checkpoint_interval_micros),
                     parent.clone(),
@@ -894,7 +894,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in &sinks {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: HashMap::new(),
                     })
                     .await
@@ -904,8 +904,8 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let barrier = CheckpointBarrier {
-            epoch: req.epoch,
-            min_epoch: req.min_epoch,
+            epoch: req.epoch as u32,
+            min_epoch: req.min_epoch as u32,
             timestamp: from_millis(req.timestamp),
             then_stop: req.then_stop,
         };
@@ -952,7 +952,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in senders {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: commit_map.clone(),
                     })
                     .await

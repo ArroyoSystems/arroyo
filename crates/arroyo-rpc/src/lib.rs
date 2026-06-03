@@ -209,7 +209,7 @@ impl From<LoadCompactedDataReq> for CompactionResult {
 
 #[derive(Debug, Clone)]
 pub struct CheckpointCompleted {
-    pub checkpoint_epoch: u32,
+    pub checkpoint_epoch: u64,
     pub operator_idx: u32,
     pub operator_id: String,
     pub subtask_metadata: SubtaskCheckpointMetadata,
@@ -217,7 +217,7 @@ pub struct CheckpointCompleted {
 
 #[derive(Debug, Clone)]
 pub struct CheckpointEvent {
-    pub checkpoint_epoch: u32,
+    pub checkpoint_epoch: u64,
     pub operator_idx: u32,
     pub operator_id: String,
     pub subtask_idx: u32,

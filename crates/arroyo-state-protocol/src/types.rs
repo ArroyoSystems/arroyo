@@ -4,6 +4,7 @@ pub use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId, to_micros};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::ops::Deref;
 use std::time::SystemTime;
 use thiserror::Error;
 
@@ -36,6 +37,8 @@ pub enum ProtocolError {
     CheckpointManifestMismatch,
     #[error("update to current generation would have caused a non-monotonic generation update")]
     NonMonotonicGenerationUpdate,
+    #[error("checkpoint parent chain contains a cycle at generation {generation}, epoch {epoch}")]
+    CheckpointCycle { generation: Generation, epoch: Epoch },
 }
 
 /// Monotonic identifier for a worker cluster generation of a job.
@@ -51,12 +54,34 @@ impl Display for Generation {
     }
 }
 
+impl Deref for Generation {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// Monotonic identifier for a checkpoint epoch.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
 )]
 #[serde(transparent)]
 pub struct Epoch(pub u64);
+
+impl Epoch {
+    pub fn next(self) -> Self {
+        Self(self.0 + 1)
+    }
+}
+
+impl Deref for Epoch {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl Display for Epoch {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {

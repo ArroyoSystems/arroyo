@@ -7,7 +7,7 @@ use utoipa::ToSchema;
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Checkpoint {
-    pub epoch: u32,
+    pub epoch: u64,
     pub backend: String,
     pub start_time: u64,
     pub finish_time: Option<u64>,

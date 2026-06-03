@@ -600,7 +600,7 @@ impl TryFrom<DbCheckpoint> for Checkpoint {
         let events: Vec<JobCheckpointSpan> = serde_json::from_value(val.event_spans)?;
 
         Ok(Checkpoint {
-            epoch: val.epoch as u32,
+            epoch: val.epoch as u64,
             backend: val.state_backend,
             start_time: to_micros(val.start_time),
             finish_time: val.finish_time.map(to_micros),
