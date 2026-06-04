@@ -18,6 +18,7 @@ pub struct CreateCheckpointReq {
     pub epoch: u64,
     pub min_epoch: u64,
     pub start_time: SystemTime,
+    pub is_stopping: bool,
 }
 
 #[derive(Debug, Clone)]
