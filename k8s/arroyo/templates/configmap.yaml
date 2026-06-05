@@ -37,7 +37,9 @@ data:
         port: {{ .Values.postgresql.externalDatabase.port }}
         database-name: "{{ .Values.postgresql.externalDatabase.name }}"
         user: "{{ .Values.postgresql.externalDatabase.user }}"
+    {{- if not .Values.postgresql.externalDatabase.existingSecret }}
         password: "{{ .Values.postgresql.externalDatabase.password }}"
+    {{- end }}
     {{- end }}
 
     kubernetes-scheduler:

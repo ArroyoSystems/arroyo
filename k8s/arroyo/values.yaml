@@ -18,6 +18,15 @@ controller:
       cpu: 500m
 
   service:
+    # Service type for the controller service. Set to "LoadBalancer" to expose
+    # Arroyo externally on cloud providers that support it, or "NodePort" for
+    # bare-metal clusters. Defaults to "ClusterIP".
+    type: ClusterIP
+    # Annotations to add to the controller service (e.g. cloud load balancer settings)
+    annotations: {}
+    # Only used when type is "LoadBalancer"
+    loadBalancerIP: ""
+    loadBalancerSourceRanges: []
     grpcPort: 5116
     compilerPort: 5117
     adminPort: 5114
@@ -57,6 +66,11 @@ postgresql:
     name: arroyo
     user: arroyo
     password: arroyo
+    # Instead of setting `password` in plaintext above, you can supply the
+    # password from an existing Kubernetes secret. When `existingSecret` is set,
+    # the plaintext `password` is ignored and the value is read from the secret.
+    existingSecret: ""
+    existingSecretPasswordKey: "password"
 
   # postgresql configuration
   auth:
