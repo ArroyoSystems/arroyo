@@ -66,7 +66,7 @@ data:
         {{- toYaml . | nindent 10 }}
         {{- end }} 
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
-        service-account-name: {{ .Values.serviceAccount.name | quote }}
+        service-account-name: {{ include "arroyo.serviceAccountName" | quote }}
         {{- with .Values.worker.nodeSelector }}
         node-selector:
           {{- toYaml . | nindent 10 }}
