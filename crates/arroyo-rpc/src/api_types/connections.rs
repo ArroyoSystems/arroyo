@@ -504,16 +504,15 @@ impl ConnectionSchema {
                     "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
                 );
             }
-            Some(Format::MsgPack(msgpack_format)) => {
+            Some(Format::MsgPack(msgpack_format))
                 if msgpack_format.into_unstructured_json
                     && (non_metadata_fields.len() != 1
                         || non_metadata_fields.first().unwrap().field_type != FieldType::Json
-                        || non_metadata_fields.first().unwrap().name != "value")
-                {
-                    bail!(
-                        "msgpack format with into_unstructured_json enabled requires a schema with a single field called `value` of type JSON"
-                    );
-                }
+                        || non_metadata_fields.first().unwrap().name != "value") =>
+            {
+                bail!(
+                    "msgpack format with into_unstructured_json enabled requires a schema with a single field called `value` of type JSON"
+                );
             }
             _ => {
                 // Other formats currently do not impose schema-shape checks here.
