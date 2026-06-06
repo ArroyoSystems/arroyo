@@ -1,6 +1,6 @@
 use crate::avro::de;
 use crate::proto::schema::get_pool;
-use crate::{proto, should_flush};
+use crate::{msgpack, proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
 use arrow::json::reader::{FailureKind, JsonType, ValidationError};
@@ -13,7 +13,9 @@ use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
-use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
+use arroyo_rpc::formats::{
+    AvroFormat, BadData, Format, Framing, JsonFormat, MsgPackFormat, ProtobufFormat,
+};
 use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
 use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
@@ -432,6 +434,10 @@ impl ArrowDeserializer {
             | Format::Protobuf(ProtobufFormat {
                 into_unstructured_json: false,
                 ..
+            })
+            | Format::MsgPack(MsgPackFormat {
+                into_unstructured_json: false,
+                ..
             }) => BufferDecoder::JsonDecoder {
                 decoder: arrow_json::reader::ReaderBuilder::new(schema_without_additional.clone())
                     .with_limit_to_batch_size(false)
@@ -650,6 +656,21 @@ impl ArrowDeserializer {
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
                 }
             }
+            Format::MsgPack(msgpack) => {
+                let json = msgpack::msgpack_to_json(msg)?;
+
+                if msgpack.into_unstructured_json {
+                    self.decode_into_json(json);
+                } else {
+                    if !json.is_object() {
+                        return Err(SourceError::bad_data("MsgPack record must be a map/object"));
+                    }
+
+                    self.buffer_decoder
+                        .decode_json(json.to_string().as_bytes())
+                        .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
+                }
+            }
             Format::Avro(_) => unreachable!("this should not be called for avro"),
             Format::Parquet(_) => todo!("parquet is not supported as an input format"),
         }
@@ -809,9 +830,11 @@ mod tests {
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::errors::DataflowError;
     use arroyo_rpc::formats::{
-        BadData, Format, Framing, JsonFormat, NewlineDelimitedFraming, RawBytesFormat,
+        BadData, Format, Framing, JsonFormat, MsgPackFormat, NewlineDelimitedFraming,
+        RawBytesFormat,
     };
     use arroyo_types::to_nanos;
+    use rmpv::Value as MsgPackValue;
     use serde_json::json;
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -1014,6 +1037,142 @@ mod tests {
                 .value(0),
             to_nanos(time) as i64
         );
+    }
+
+    fn encode_msgpack(value: MsgPackValue) -> Vec<u8> {
+        let mut buf = Vec::new();
+        rmpv::encode::write_value(&mut buf, &value).unwrap();
+        buf
+    }
+
+    #[tokio::test]
+    async fn test_msgpack_deserializes_structured_map() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("id", arrow_schema::DataType::Int64, false),
+            arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
+            arrow_schema::Field::new("payload", arrow_schema::DataType::Binary, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema).unwrap());
+        let mut deserializer = ArrowDeserializer::new(
+            Format::MsgPack(MsgPackFormat::default()),
+            arroyo_schema,
+            &[],
+            None,
+            BadData::Fail {},
+        );
+
+        let msg = encode_msgpack(MsgPackValue::Map(vec![
+            (MsgPackValue::from("id"), MsgPackValue::from(7)),
+            (MsgPackValue::from("name"), MsgPackValue::from("ada")),
+            (
+                MsgPackValue::from("payload"),
+                MsgPackValue::Binary(vec![0, 1, 2, 3]),
+            ),
+        ]));
+
+        let time = SystemTime::now();
+        let errors = deserializer.deserialize_slice(&msg, time, None).await;
+        assert!(errors.is_empty());
+
+        let (batch, errors) = deserializer.flush_buffer();
+        assert!(errors.is_empty());
+        let batch = batch.unwrap();
+
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 7);
+        assert_eq!(batch.columns()[1].as_string::<i32>().value(0), "ada");
+        assert_eq!(
+            batch.columns()[2]
+                .as_bytes::<GenericBinaryType<i32>>()
+                .value(0),
+            &[0, 1, 2, 3]
+        );
+        assert_eq!(
+            batch.columns()[3]
+                .as_primitive::<TimestampNanosecondType>()
+                .value(0),
+            to_nanos(time) as i64
+        );
+    }
+
+    #[tokio::test]
+    async fn test_msgpack_can_decode_into_unstructured_json() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("value", arrow_schema::DataType::Utf8, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema).unwrap());
+        let mut deserializer = ArrowDeserializer::new(
+            Format::MsgPack(MsgPackFormat {
+                into_unstructured_json: true,
+                ..Default::default()
+            }),
+            arroyo_schema,
+            &[],
+            None,
+            BadData::Fail {},
+        );
+
+        let msg = encode_msgpack(MsgPackValue::Array(vec![
+            MsgPackValue::from(1),
+            MsgPackValue::from("two"),
+        ]));
+
+        let errors = deserializer
+            .deserialize_slice(&msg, SystemTime::now(), None)
+            .await;
+        assert!(errors.is_empty());
+
+        let (batch, errors) = deserializer.flush_buffer();
+        assert!(errors.is_empty());
+        let batch = batch.unwrap();
+
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(
+            batch.columns()[0].as_string::<i32>().value(0),
+            r#"[1,"two"]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn test_msgpack_structured_records_must_be_maps() {
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("id", arrow_schema::DataType::Int64, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let arroyo_schema = Arc::new(ArroyoSchema::from_schema_unkeyed(schema).unwrap());
+        let mut deserializer = ArrowDeserializer::new(
+            Format::MsgPack(MsgPackFormat::default()),
+            arroyo_schema,
+            &[],
+            None,
+            BadData::Fail {},
+        );
+
+        let msg = encode_msgpack(MsgPackValue::Array(vec![MsgPackValue::from(1)]));
+
+        let errors = deserializer
+            .deserialize_slice(&msg, SystemTime::now(), None)
+            .await;
+
+        assert_eq!(errors.len(), 1);
+        assert!(format!("{}", errors[0]).contains("MsgPack record must be a map"));
     }
 
     #[tokio::test]

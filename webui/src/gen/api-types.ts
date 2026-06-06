@@ -649,6 +649,11 @@ export interface components {
             type: "protobuf";
         })) | ({
             type: "Format";
+        } & (components["schemas"]["MsgPackFormat"] & {
+            /** @enum {string} */
+            type: "msgpack";
+        })) | ({
+            type: "Format";
         } & (components["schemas"]["ParquetFormat"] & {
             /** @enum {string} */
             type: "parquet";
@@ -695,6 +700,10 @@ export interface components {
             /** Format: int64 */
             run_id: number;
             running_desired: boolean;
+            /** @description Per-job scheduler configuration overlay (see `PipelinePost`).
+             *     An empty object means "no overrides, use the controller's
+             *     global scheduler config unchanged". */
+            scheduler_config: unknown;
             /** Format: int64 */
             start_time?: number | null;
             state: string;
@@ -757,6 +766,11 @@ export interface components {
         };
         /** @enum {string} */
         MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
+        MsgPackFormat: {
+            decimal_encoding?: components["schemas"]["DecimalEncoding"];
+            into_unstructured_json?: boolean;
+            timestamp_format?: components["schemas"]["TimestampFormat"];
+        };
         NewlineDelimitedFraming: {
             /** Format: int64 */
             max_line_length?: number | null;
@@ -811,6 +825,7 @@ export interface components {
             checkpoint_interval_micros: number;
             /** Format: int64 */
             created_at: number;
+            env_vars: unknown;
             graph: components["schemas"]["PipelineGraph"];
             id: string;
             name: string;
@@ -854,10 +869,21 @@ export interface components {
         PipelinePost: {
             /** Format: int64 */
             checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             name: string;
             /** Format: int64 */
             parallelism: number;
             query: string;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             state_url?: string | null;
             tags?: {
                 [key: string]: string;
