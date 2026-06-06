@@ -64,7 +64,13 @@ spec:
               secretKeyRef:
                 name: {{ include "arroyo.fullname" . }}-postgresql
                 key: password
-          {{- end }}
+        {{- else if .Values.postgresql.externalDatabase.existingSecret }}
+          - name: ARROYO__DATABASE__POSTGRES__PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.postgresql.externalDatabase.existingSecret }}
+                key: {{ .Values.postgresql.externalDatabase.existingSecretPasswordKey | default "password" }}
+        {{- end }}
 
         {{ if .Values.env }}
         {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 10 }}
@@ -84,7 +90,13 @@ spec:
             secretKeyRef:
               name: {{ include "arroyo.fullname" . }}-postgresql
               key: password
-          {{- end }}
+        {{- else if .Values.postgresql.externalDatabase.existingSecret }}
+        - name: ARROYO__DATABASE__POSTGRES__PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.postgresql.externalDatabase.existingSecret }}
+              key: {{ .Values.postgresql.externalDatabase.existingSecretPasswordKey | default "password" }}
+        {{- end }}
 
         - name: ARROYO__KUBERNETES_SCHEDULER__NAMESPACE
           valueFrom:
@@ -150,7 +162,21 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "arroyo.fullname" . }}
+  {{- with .Values.controller.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
+  type: {{ .Values.controller.service.type | default "ClusterIP" }}
+  {{- if eq (.Values.controller.service.type | default "ClusterIP") "LoadBalancer" }}
+  {{- with .Values.controller.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with .Values.controller.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
   selector:
     app: {{ include "arroyo.fullname" . }}-controller
   ports:
