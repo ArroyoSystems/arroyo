@@ -1,10 +1,10 @@
 use super::{JobContext, State, Transition, controller_job_failure};
 use crate::JobMessage;
+use crate::states::StateError;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
-use crate::states::{StateError, fatal};
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
@@ -169,11 +169,11 @@ impl State for LeaderRunning {
                                     // in progress
                                 }
                                 rpc::JobState::JobStopping | rpc::JobState::JobStopped => {
-                                    // the job somehow is stopping without us telling it to
-                                    // we may want to automatically handle this in the future, but
-                                    // initially I'm being conservative about automation
-                                    return Err(fatal("job unexpectedly stopped",
-                                        anyhow!("job unexpectedly entered {:?} state", state)));
+                                    return ctx.handle_job_failure(*self, controller_job_failure(
+                                        format!("job unexpectedly in {:?} state, should be running", state),
+                                        rpc::ErrorDomain::Internal,
+                                        rpc::RetryHint::WithBackoff,
+                                    )).await;
                                 }
                                 rpc::JobState::JobFinishing | rpc::JobState::JobFinished => {
                                     // finishing is initiated by the workers themselves (via the

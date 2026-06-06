@@ -740,7 +740,10 @@ impl WorkerServer {
             JobStatusGrpcServer::new(leader)
                 .send_compressed(CompressionEncoding::Zstd)
                 .accept_compressed(CompressionEncoding::Zstd),
-            VerifyWorkerId(*context.worker_id),
+            VerifyWorkerId {
+                service: "job-status",
+                worker_id: context.worker_id,
+            },
         );
 
         self.shutdown_guard
@@ -754,7 +757,10 @@ impl WorkerServer {
                         .await?
                         .add_service(WorkerGrpcServer::with_interceptor(
                             self,
-                            VerifyWorkerId(*context.worker_id),
+                            VerifyWorkerId {
+                                service: "worker-grpc",
+                                worker_id: context.worker_id,
+                            },
                         ))
                         .add_service(job_controller)
                         .add_service(leader)
@@ -764,7 +770,10 @@ impl WorkerServer {
                     arroyo_server_common::grpc_server()
                         .add_service(WorkerGrpcServer::with_interceptor(
                             self,
-                            VerifyWorkerId(*context.worker_id),
+                            VerifyWorkerId {
+                                service: "worker-grpc",
+                                worker_id: context.worker_id,
+                            },
                         ))
                         .add_service(job_controller)
                         .add_service(leader)
