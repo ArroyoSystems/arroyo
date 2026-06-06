@@ -163,10 +163,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
 
         let prev_size = writer.in_progress_size();
         writer.write(&data).unwrap();
-        let uncompressed_bytes = writer
-            .in_progress_size()
-            .checked_sub(prev_size)
-            .unwrap_or_default();
+        let uncompressed_bytes = writer.in_progress_size().saturating_sub(prev_size);
 
         let row_groups = if writer.in_progress_size() > self.row_group_size_bytes {
             writer.flush().unwrap();

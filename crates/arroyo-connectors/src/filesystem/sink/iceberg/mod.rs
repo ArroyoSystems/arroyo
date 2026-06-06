@@ -88,7 +88,8 @@ fn extract_catalog_status(display: &str) -> Option<u16> {
 }
 
 fn extract_catalog_message(display: &str) -> Option<String> {
-    let re = Regex::new(r#""message"\s*:\s*"([^"]+)""#).unwrap();
+    // Capture the full JSON string value, such as `NoSuchBucket`
+    let re = Regex::new(r#""message"\s*:\s*"((?:[^"\\]|\\.)*)""#).unwrap();
     re.captures(display).map(|c| c[1].to_string())
 }
 

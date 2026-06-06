@@ -43,6 +43,7 @@ use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use prost::Message;
 
 pub(crate) mod checkpoint_stopping;
@@ -271,6 +272,8 @@ impl TransitionTo<Failed> for Failing {}
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
     ctx.job_controller = None;
+    ctx.leader_manager = None;
+    ctx.status.state_context.leader = None;
 }
 
 impl TransitionTo<Stopped> for Stopping {
@@ -521,7 +524,6 @@ pub fn controller_job_failure(
     }
 }
 
-use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::states::restarting::Restarting;
 pub(crate) use leader_stop_if_desired_running;
@@ -1165,13 +1167,12 @@ impl StateMachine {
     ) {
         match (applied, status.state.as_str()) {
             (_, "Running" | "Recovering" | "Rescaling" | "Restarting")
-            | (AppliedStatus::NotApplied, _) => {
+            | (AppliedStatus::NotApplied, _)
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
-                if self.done() {
+                if self.done() => {
                     self.start(status, shutdown_guard.clone_temporary()).await;
                 }
-            }
             _ => {}
         }
     }

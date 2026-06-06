@@ -207,41 +207,41 @@ impl TreeNodeVisitor<'_> for WindowDetectingVisitor {
                     self.fields.insert(schema.qualified_field(index).into());
                 }
             }
-            LogicalPlan::Extension(Extension { node }) => {
-                if node.name() == AGGREGATE_EXTENSION_NAME {
-                    let aggregate_extension = node
-                        .as_any()
-                        .downcast_ref::<AggregateExtension>()
-                        .expect("should be aggregate extension");
+            LogicalPlan::Extension(Extension { node })
+                if node.name() == AGGREGATE_EXTENSION_NAME =>
+            {
+                let aggregate_extension = node
+                    .as_any()
+                    .downcast_ref::<AggregateExtension>()
+                    .expect("should be aggregate extension");
 
-                    match &aggregate_extension.window_behavior {
-                        WindowBehavior::FromOperator {
-                            window,
-                            window_field,
-                            window_index: _,
-                            is_nested,
-                        } => {
-                            if self.window.is_some() && !*is_nested {
-                                return Err(DataFusionError::Plan(
+                match &aggregate_extension.window_behavior {
+                    WindowBehavior::FromOperator {
+                        window,
+                        window_field,
+                        window_index: _,
+                        is_nested,
+                    } => {
+                        if self.window.is_some() && !*is_nested {
+                            return Err(DataFusionError::Plan(
                                     "aggregate node should not be recalculating window, as input is windowed.".to_string(),
                                 ));
-                            }
-                            self.window = Some(window.clone());
-                            self.fields.insert(window_field.clone());
                         }
-                        WindowBehavior::InData => {
-                            let input_fields = self.fields.clone();
-                            self.fields.clear();
-                            for field in fields_with_qualifiers(node.schema()) {
-                                if input_fields.contains(&field) {
-                                    self.fields.insert(field);
-                                }
+                        self.window = Some(window.clone());
+                        self.fields.insert(window_field.clone());
+                    }
+                    WindowBehavior::InData => {
+                        let input_fields = self.fields.clone();
+                        self.fields.clear();
+                        for field in fields_with_qualifiers(node.schema()) {
+                            if input_fields.contains(&field) {
+                                self.fields.insert(field);
                             }
-                            if self.fields.is_empty() {
-                                return Err(DataFusionError::Plan(
+                        }
+                        if self.fields.is_empty() {
+                            return Err(DataFusionError::Plan(
                                     "must have window in aggregate. Make sure you are calling one of the windowing functions (hop, tumble, session) or using the window field of the input".to_string(),
                                 ));
-                            }
                         }
                     }
                 }

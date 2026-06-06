@@ -20,13 +20,15 @@ use std::collections::{HashMap, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 // Re-export shared types from arroyo-rpc
 pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContext};
 
-pub const CHECKPOINTS_TO_KEEP: u32 = 10;
-pub const COMPACT_EVERY: u32 = 2;
+pub mod job_metrics;
+
+pub const CHECKPOINTS_TO_KEEP: u64 = 10;
+pub const COMPACT_EVERY: u64 = 2;
 
 #[derive(Debug, Clone)]
 pub struct StoredCheckpointMetadata {
@@ -37,6 +39,7 @@ pub struct StoredCheckpointMetadata {
     finish_time: Option<SystemTime>,
     event_spans: Vec<JobCheckpointSpan>,
     operator_details: HashMap<String, OperatorCheckpointDetail>,
+    is_stopping: bool,
     status: arroyo_rpc::checkpoints::CheckpointStatus,
 }
 
@@ -78,12 +81,13 @@ impl CheckpointHistory {
     fn create_checkpoint(&mut self, req: &CreateCheckpointReq) {
         let checkpoint = StoredCheckpointMetadata {
             checkpoint_id: req.checkpoint_id.clone(),
-            epoch: req.epoch as u64,
+            epoch: req.epoch,
             state_backend: StateBackend::name().to_string(),
             start_time: req.start_time,
             finish_time: None,
             event_spans: vec![],
             operator_details: HashMap::new(),
+            is_stopping: req.is_stopping,
             status: arroyo_rpc::checkpoints::CheckpointStatus::InProgress,
         };
 
@@ -117,6 +121,8 @@ impl CheckpointHistory {
             checkpoint.event_spans = event_spans;
             checkpoint.finish_time = finish_time;
             checkpoint.status = status;
+        } else {
+            warn!("tried to update checkpoint for unknown id {checkpoint_id}")
         }
     }
 
@@ -134,6 +140,8 @@ impl CheckpointHistory {
             checkpoint.finish_time = Some(finish_time);
             checkpoint.event_spans = event_spans;
             checkpoint.status = arroyo_rpc::checkpoints::CheckpointStatus::Ready;
+        } else {
+            warn!("tried to finish checkpoint for unknown id {checkpoint_id}")
         }
     }
 
@@ -148,7 +156,7 @@ impl CheckpointHistory {
                 )
             })
             .map(|c| rpc::JobCheckpointMetadata {
-                epoch: c.epoch as u32,
+                epoch: c.epoch,
                 state_backend: c.state_backend.clone(),
                 start_time: to_micros(c.start_time),
                 finish_time: c.finish_time.map(to_micros),
@@ -158,6 +166,7 @@ impl CheckpointHistory {
                     .cloned()
                     .map(checkpoint_span_to_rpc)
                     .collect(),
+                is_stopping: c.is_stopping,
             })
             .collect()
     }
@@ -180,6 +189,42 @@ pub mod checkpoint_state;
 pub mod committing_state;
 pub mod controller;
 pub mod model;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arroyo_rpc::checkpoints::CreateCheckpointReq;
+
+    fn create_req(epoch: u64, is_stopping: bool) -> CreateCheckpointReq {
+        CreateCheckpointReq {
+            checkpoint_id: format!("checkpoint-{epoch}"),
+            epoch,
+            min_epoch: 0,
+            start_time: SystemTime::now(),
+            is_stopping,
+        }
+    }
+
+    #[test]
+    fn checkpoint_history_marks_scheduled_checkpoints() {
+        let mut history = CheckpointHistory::default();
+        history.create_checkpoint(&create_req(1, false));
+
+        let checkpoints = history.checkpoints();
+        assert_eq!(checkpoints.len(), 1);
+        assert!(!checkpoints[0].is_stopping);
+    }
+
+    #[test]
+    fn checkpoint_history_marks_stopping_checkpoints() {
+        let mut history = CheckpointHistory::default();
+        history.create_checkpoint(&create_req(1, true));
+
+        let checkpoints = history.checkpoints();
+        assert_eq!(checkpoints.len(), 1);
+        assert!(checkpoints[0].is_stopping);
+    }
+}
 
 #[derive(Debug)]
 pub struct RetireWorkerLeader {

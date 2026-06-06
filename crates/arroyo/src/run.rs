@@ -134,7 +134,7 @@ async fn get_pipelines(client: &Client) -> anyhow::Result<Vec<Pipeline>> {
             starting_after = next;
         }
 
-        result.extend(pipelines.data.into_iter());
+        result.extend(pipelines.data);
 
         if !pipelines.has_more {
             break;
@@ -446,7 +446,10 @@ pub async fn run(args: RunArgs) {
         }
         c.controller.rpc_port = 0;
 
-        if c.controller.scheduler != Scheduler::Embedded {
+        if !matches!(
+            c.controller.scheduler,
+            Scheduler::Embedded | Scheduler::Manual
+        ) {
             c.controller.scheduler = Scheduler::Process;
         }
 

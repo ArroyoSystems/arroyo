@@ -7,11 +7,29 @@ use utoipa::ToSchema;
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Checkpoint {
-    pub epoch: u32,
+    pub epoch: u64,
     pub backend: String,
+    pub checkpoint_type: CheckpointType,
     pub start_time: u64,
     pub finish_time: Option<u64>,
     pub events: Vec<CheckpointEventSpan>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointType {
+    Scheduled,
+    Stopping,
+}
+
+impl CheckpointType {
+    pub fn from_is_stopping(is_stopping: bool) -> Self {
+        if is_stopping {
+            Self::Stopping
+        } else {
+            Self::Scheduled
+        }
+    }
 }
 
 impl From<grpc::rpc::JobCheckpointMetadata> for Checkpoint {
@@ -19,6 +37,7 @@ impl From<grpc::rpc::JobCheckpointMetadata> for Checkpoint {
         Self {
             epoch: value.epoch,
             backend: value.state_backend,
+            checkpoint_type: CheckpointType::from_is_stopping(value.is_stopping),
             start_time: value.start_time,
             finish_time: value.finish_time,
             events: value
@@ -115,5 +134,22 @@ impl From<JobCheckpointSpan> for CheckpointEventSpan {
             event: format!("{:?}", value.event),
             description,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_type_maps_from_stopping_flag() {
+        assert_eq!(
+            CheckpointType::from_is_stopping(false),
+            CheckpointType::Scheduled
+        );
+        assert_eq!(
+            CheckpointType::from_is_stopping(true),
+            CheckpointType::Stopping
+        );
     }
 }

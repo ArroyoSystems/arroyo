@@ -26,6 +26,7 @@ use arroyo_rpc::{StateContext, config, errors};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use cornucopia_async::DatabaseSource;
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
@@ -53,8 +54,7 @@ const TTL_PIPELINE_CLEANUP_TIME: Duration = Duration::from_secs(60 * 60);
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
-use crate::job_controller::job_metrics::JobMetrics;
-use crate::schedulers::{NodeScheduler, ProcessScheduler, Scheduler};
+use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
 
@@ -562,6 +562,10 @@ impl ControllerServer {
             config::Scheduler::Process => {
                 info!("Using process scheduler");
                 Arc::new(ProcessScheduler::new())
+            }
+            config::Scheduler::Manual => {
+                info!("Using manual scheduler");
+                Arc::new(ManualScheduler::new())
             }
         };
 

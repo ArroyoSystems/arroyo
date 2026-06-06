@@ -58,7 +58,7 @@ message TaskCheckpointEventReq {
   uint64 time = 2;
   string operator_id = 8;
   uint32 subtask_idx = 5;
-  uint32 epoch = 6;
+  uint64 epoch = 6;
   TaskCheckpointEventType event_type = 7;
 }
 
@@ -69,7 +69,7 @@ message TaskCheckpointCompletedReq {
   WorkerContext worker_context = 1;
   uint64  time = 2;
   string operator_id = 4;
-  uint32 epoch = 5;
+  uint64 epoch = 5;
   SubtaskCheckpointMetadata metadata = 6;
   bool needs_commit = 7;
 }
@@ -254,7 +254,7 @@ message JobStatusReq {
 }
 
 message CheckpointStatus {
-  uint32 epoch = 1;
+  uint64 epoch = 1;
   uint64 started_at = 2;
   optional uint64 finished_at = 3;
   uint64 size_bytes = 4;
@@ -268,11 +268,12 @@ message JobCheckpointEventSpan {
 }
 
 message JobCheckpointMetadata {
-  uint32 epoch = 1;
+  uint64 epoch = 1;
   string state_backend = 2;
   uint64 start_time = 3;
   optional uint64 finish_time = 4;
   repeated JobCheckpointEventSpan event_spans = 5;
+  bool is_stopping = 6;
 }
 
 enum JobState {
@@ -497,8 +498,8 @@ message StartExecutionResp {
 }
 
 message CheckpointReq {
-  uint32 epoch = 1;
-  uint32 min_epoch = 2;
+  uint64 epoch = 1;
+  uint64 min_epoch = 2;
   uint64 timestamp = 3;
   // if set, tasks will finish after completing the checkpoint
   bool then_stop = 4;
@@ -510,7 +511,7 @@ message CheckpointResp {
 }
 
 message CommitReq {
-  uint32 epoch = 1;
+  uint64 epoch = 1;
   map<string, OperatorCommitData> committing_data = 2;
 }
 

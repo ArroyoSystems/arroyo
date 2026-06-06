@@ -937,6 +937,7 @@ dependencies = [
  "arroyo-planner",
  "arroyo-rpc",
  "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-udf-host",
  "arroyo-udf-macros",
@@ -990,11 +991,13 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "async-trait",
+ "futures",
  "prost",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

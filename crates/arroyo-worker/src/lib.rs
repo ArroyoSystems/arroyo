@@ -58,14 +58,17 @@ use arroyo_rpc::{
     local_address, retry,
 };
 
+use crate::job_controller::job_metrics::JobMetrics;
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::store::read_protobuf;
-use arroyo_state_protocol::types::CheckpointRef;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
+use tonic::codec::CompressionEncoding;
+use tonic::codegen::InterceptedService;
 use uuid::Uuid;
 
 pub mod arrow;
@@ -208,6 +211,7 @@ pub struct WorkerState {
     job_controller_tx: Arc<OnceLock<Sender<RunningMessage>>>,
     job_status: Arc<Mutex<JobStatus>>,
     checkpoint_history: Arc<Mutex<CheckpointHistory>>,
+    metrics: Arc<OnceLock<JobMetrics>>,
 }
 
 impl WorkerState {
@@ -247,11 +251,11 @@ impl WorkerState {
 
     #[allow(clippy::too_many_arguments)]
     async fn initialize_job_controller(
-        &self,
+        &mut self,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u64,
-        min_epoch: u64,
+        epoch: Epoch,
+        min_epoch: Epoch,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
         parent: Option<(CheckpointRef, CheckpointManifest)>,
@@ -263,6 +267,16 @@ impl WorkerState {
         self.job_controller_tx.set(tx).map_err(|_| {
             anyhow!("tried to initialize job controller but it was already initialized!")
         })?;
+
+        let metrics = if config().controller.metrics.enabled {
+            let metrics = JobMetrics::new(program.clone());
+            if self.metrics.set(metrics.clone()).is_err() {
+                panic!("job controller already initialized!");
+            }
+            Some(metrics)
+        } else {
+            None
+        };
 
         debug!(
             "[{:?}] initialized job controller",
@@ -280,6 +294,7 @@ impl WorkerState {
             self.checkpoint_history.clone(),
             checkpoint_interval,
             parent,
+            metrics,
         )
         .await
         {
@@ -303,7 +318,7 @@ impl WorkerState {
     }
 
     async fn initialize_inner(
-        self,
+        mut self,
         shutdown_guard: ShutdownGuard,
         req: StartExecutionReq,
     ) -> Result<()> {
@@ -368,8 +383,8 @@ impl WorkerState {
                 .initialize_job_controller(
                     logical.clone(),
                     &req.tasks,
-                    req.start_epoch,
-                    req.min_epoch,
+                    Epoch(req.start_epoch),
+                    Epoch(req.min_epoch),
                     &shutdown_guard,
                     Duration::from_micros(req.checkpoint_interval_micros),
                     parent.clone(),
@@ -668,6 +683,7 @@ impl WorkerServer {
                     job_failure: None,
                 })),
                 checkpoint_history: Arc::new(Mutex::new(CheckpointHistory::default())),
+                metrics: Arc::new(OnceLock::new()),
             },
             shutdown_guard,
         }
@@ -716,6 +732,17 @@ impl WorkerServer {
             state: self.state.clone(),
         };
 
+        let job_controller = JobControllerGrpcServer::new(leader.clone())
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd);
+
+        let leader = InterceptedService::new(
+            JobStatusGrpcServer::new(leader)
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd),
+            VerifyWorkerId(*context.worker_id),
+        );
+
         self.shutdown_guard
             .child("grpc")
             .into_spawn_task(wrap_start(
@@ -729,11 +756,8 @@ impl WorkerServer {
                             self,
                             VerifyWorkerId(*context.worker_id),
                         ))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::with_interceptor(
-                            leader,
-                            VerifyWorkerId(*context.worker_id),
-                        ))
+                        .add_service(job_controller)
+                        .add_service(leader)
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
@@ -742,11 +766,8 @@ impl WorkerServer {
                             self,
                             VerifyWorkerId(*context.worker_id),
                         ))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::with_interceptor(
-                            leader,
-                            VerifyWorkerId(*context.worker_id),
-                        ))
+                        .add_service(job_controller)
+                        .add_service(leader)
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 },
             ));
@@ -873,7 +894,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in &sinks {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: HashMap::new(),
                     })
                     .await
@@ -883,8 +904,8 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let barrier = CheckpointBarrier {
-            epoch: req.epoch,
-            min_epoch: req.min_epoch,
+            epoch: req.epoch as u32,
+            min_epoch: req.min_epoch as u32,
             timestamp: from_millis(req.timestamp),
             then_stop: req.then_stop,
         };
@@ -931,7 +952,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in senders {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: commit_map.clone(),
                     })
                     .await
@@ -1015,17 +1036,32 @@ impl WorkerGrpc for WorkerServer {
         &self,
         _request: Request<JobFinishedReq>,
     ) -> Result<Response<JobFinishedResp>, Status> {
+        let is_worker_leader = self.state.job_controller_tx.get().is_some();
+
         let mut phase = self.state.phase.lock().unwrap();
         if let WorkerExecutionPhase::Running(engine_state) = &*phase {
             engine_state.shutdown_guard.cancel();
         }
         *phase = WorkerExecutionPhase::Idle;
+        drop(phase);
 
-        let token = self.shutdown_guard.token();
-        tokio::task::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            token.cancel();
-        });
+        if is_worker_leader {
+            // Keep the worker leader reachable so the controller can observe the
+            // terminal job status before explicitly stopping the worker process.
+            info!(
+                message =
+                    "job finished on worker leader; waiting for controller to stop worker process",
+                worker_id = self.state.worker_context.worker_id.0,
+                job_id = *self.state.worker_context.job_id,
+                generation = self.state.worker_context.generation,
+            );
+        } else {
+            let token = self.shutdown_guard.token();
+            tokio::task::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                token.cancel();
+            });
+        }
 
         Ok(Response::new(JobFinishedResp {}))
     }
@@ -1256,15 +1292,24 @@ impl JobControllerGrpc for LeaderServer {
         self.validate_req(req.worker_context.as_ref())?;
 
         debug!(
-            "[{:?}] Received heartbeat {:?}",
-            self.state.worker_context.worker_id, req
+            worker_id =? self.state.worker_context.worker_id,
+            ?req,
+            "received heartbeat",
         );
 
-        self.send_job_message(RunningMessage::WorkerHeartbeat {
-            worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
-            time: Instant::now(),
-        })
-        .await?;
+        if self
+            .send_job_message(RunningMessage::WorkerHeartbeat {
+                worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
+                time: Instant::now(),
+            })
+            .await
+            .is_err()
+        {
+            debug!(
+                worker_id =? self.state.worker_context.worker_id,
+                "received heartbeat while shutting down"
+            )
+        };
 
         Ok(Response::new(HeartbeatResp {}))
     }
@@ -1297,9 +1342,23 @@ impl JobControllerGrpc for LeaderServer {
 
     async fn job_metrics(
         &self,
-        _request: Request<JobMetricsReq>,
+        request: Request<JobMetricsReq>,
     ) -> Result<Response<JobMetricsResp>, Status> {
-        todo!("metric support")
+        let req = request.into_inner();
+        if req.job_id != *self.state.worker_context.job_id {
+            return Err(Status::failed_precondition(format!(
+                "requested metrics for incorrect job {}, this is the leader for {}",
+                req.job_id, *self.state.worker_context.job_id
+            )));
+        }
+
+        let Some(metrics) = self.state.metrics.get() else {
+            return Err(Status::not_found("No metrics for job"));
+        };
+
+        Ok(Response::new(JobMetricsResp {
+            metrics: serde_json::to_string(&metrics.get_groups()).unwrap(),
+        }))
     }
 }
 

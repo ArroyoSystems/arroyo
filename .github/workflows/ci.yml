@@ -35,7 +35,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: clippy, rustfmt
-          toolchain: 1.93
+          toolchain: 1.95
       - uses: actions/cache@v4
         with:
           path: |
@@ -103,20 +103,65 @@ jobs:
       - name: Build
         run: cargo build --all-features
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+        run: cargo clippy --no-deps --all-features --all-targets --workspace -- -D warnings
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
-      - name: Integ postgres
+      - name: Integ
         run: |
-          mkdir /tmp/arroyo-integ
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo cluster &
-          cargo nextest run --package integ -E 'kind(test)'
-      - name: Integ sqlite
-        run: |
-          killall arroyo
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts ARROYO__DATABASE__TYPE=sqlite target/debug/arroyo cluster &
-          timeout=10; while ! nc -z localhost 5115 && [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; [ $timeout -gt 0 ]
-          cargo nextest run --package integ -E 'kind(test)'
+          set -euo pipefail
+
+          cluster_pid=""
+
+          cleanup_cluster() {
+            if [ -n "${cluster_pid}" ]; then
+              kill "${cluster_pid}" 2>/dev/null || true
+              wait "${cluster_pid}" 2>/dev/null || true
+              cluster_pid=""
+            fi
+            killall arroyo 2>/dev/null || true
+          }
+
+          trap cleanup_cluster EXIT
+
+          run_integ() {
+            name="$1"
+            shift
+
+            echo "Starting integration scenario: ${name}"
+            cleanup_cluster
+            rm -rf "/tmp/arroyo-integ-${name}"
+            mkdir -p "/tmp/arroyo-integ-${name}" /tmp/artifacts
+
+            env \
+              ARROYO__DISABLE_TELEMETRY=true \
+              ARROYO__CHECKPOINT_URL="file:///tmp/arroyo-integ-${name}" \
+              ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts \
+              "$@" \
+              target/debug/arroyo cluster &
+            cluster_pid=$!
+
+            timeout=20
+            while ! nc -z localhost 5115 && [ "${timeout}" -gt 0 ]; do
+              sleep 1
+              timeout=$((timeout - 1))
+            done
+
+            if [ "${timeout}" -le 0 ]; then
+              echo "Timed out waiting for integration scenario ${name} to start"
+              cleanup_cluster
+              return 1
+            fi
+
+            status=0
+            cargo nextest run --package integ -E 'kind(test)' || status=$?
+            cleanup_cluster
+            return "${status}"
+          }
+
+          run_integ controller-postgres ARROYO__DATABASE__TYPE=postgres
+          run_integ controller-sqlite ARROYO__DATABASE__TYPE=sqlite
+          run_integ leader-postgres ARROYO__DATABASE__TYPE=postgres ARROYO__JOB_CONTROLLER=worker
+          run_integ leader-sqlite ARROYO__DATABASE__TYPE=sqlite ARROYO__JOB_CONTROLLER=worker
           
   build-console:
     runs-on: ubuntu-latest

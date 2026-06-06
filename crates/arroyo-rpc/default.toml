@@ -34,6 +34,9 @@ rpc-port = 5116
 scheduler = "process"
 leader-poll-interval = "500ms"
 
+[controller.metrics]
+enabled = true
+
 [compiler]
 bind-address = "0.0.0.0"
 rpc-port = 5117
@@ -65,6 +68,9 @@ http-port = 5114
 [process-scheduler]
 slots-per-process = 16
 shutdown-with-controller = true
+
+[manual-scheduler]
+slots-per-process = 16
 
 [kubernetes-scheduler]
 namespace = "default"

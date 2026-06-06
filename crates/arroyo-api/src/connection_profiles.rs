@@ -223,7 +223,7 @@ pub(crate) async fn get_connection_profile_autocomplete(
         .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {e}")))?;
 
     Ok(Json(ConnectionAutocompleteResp {
-        values: BTreeMap::from_iter(result.into_iter()),
+        values: BTreeMap::from_iter(result),
     }))
 }
 

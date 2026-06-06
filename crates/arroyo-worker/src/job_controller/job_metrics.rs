@@ -178,6 +178,12 @@ impl TaskMetrics {
     }
 }
 
+impl Default for TaskMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Calculates an exponentially-weighted moving average over metrics collected from the job
 pub struct RateMetric {
     values: CircularBuffer<(SystemTime, f64), NUM_BUCKETS>,
@@ -209,7 +215,7 @@ impl RateMetric {
             // TODO: The unwrap case should never happen because a new RateMetric will be created
             //       for any process restart, but for full generality we'd want to implement counter
             //       reset behavior for it
-            let diff = value.checked_sub(prev_value).unwrap_or_default();
+            let diff = value.saturating_sub(prev_value);
             let r = diff as f64 / delta_t;
             self.values
                 .push(if let Some((_, last_r)) = self.values.last() {
@@ -226,6 +232,12 @@ impl RateMetric {
 
     pub fn iter(&self) -> impl Iterator<Item = (SystemTime, f64)> + '_ {
         self.values.iter()
+    }
+}
+
+impl Default for RateMetric {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

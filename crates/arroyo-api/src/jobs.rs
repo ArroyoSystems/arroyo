@@ -1,7 +1,7 @@
 use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
 use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
+    Checkpoint, CheckpointType, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
@@ -600,8 +600,9 @@ impl TryFrom<DbCheckpoint> for Checkpoint {
         let events: Vec<JobCheckpointSpan> = serde_json::from_value(val.event_spans)?;
 
         Ok(Checkpoint {
-            epoch: val.epoch as u32,
+            epoch: val.epoch as u64,
             backend: val.state_backend,
+            checkpoint_type: CheckpointType::from_is_stopping(val.is_stopping),
             start_time: to_micros(val.start_time),
             finish_time: val.finish_time.map(to_micros),
             events: events.into_iter().map(|e| e.into()).collect(),

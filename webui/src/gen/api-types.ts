@@ -470,6 +470,7 @@ export interface components {
         };
         Checkpoint: {
             backend: string;
+            checkpoint_type: components["schemas"]["CheckpointType"];
             /** Format: int32 */
             epoch: number;
             events: components["schemas"]["CheckpointEventSpan"][];
@@ -489,6 +490,8 @@ export interface components {
             /** Format: int64 */
             start_time: number;
         };
+        /** @enum {string} */
+        CheckpointType: "scheduled" | "stopping";
         ConnectionAutocompleteResp: {
             values: {
                 [key: string]: string[];

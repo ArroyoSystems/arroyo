@@ -80,15 +80,11 @@ fn convert_simple_data_type(
             }
         },
         SQLDataType::Date => Ok(DataType::Date32),
-        SQLDataType::Time(None, tz_info) => {
-            if matches!(tz_info, TimezoneInfo::None)
-                || matches!(tz_info, TimezoneInfo::WithoutTimeZone)
-            {
-                Ok(DataType::Time64(TimeUnit::Nanosecond))
-            } else {
-                // We don't support TIMETZ and TIME WITH TIME ZONE for now
-                return plan_err!("Unsupported SQL type {sql_type:?}");
-            }
+        SQLDataType::Time(None, tz_info)
+            if (matches!(tz_info, TimezoneInfo::None)
+                || matches!(tz_info, TimezoneInfo::WithoutTimeZone)) =>
+        {
+            Ok(DataType::Time64(TimeUnit::Nanosecond))
         }
         SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {
             let (precision, scale) = match *exact_number_info {

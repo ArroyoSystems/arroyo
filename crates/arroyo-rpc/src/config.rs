@@ -224,6 +224,9 @@ pub struct Config {
     /// Process scheduler configuration
     pub process_scheduler: ProcessSchedulerConfig,
 
+    /// Manual scheduler configuration
+    pub manual_scheduler: ManualSchedulerConfig,
+
     // Kubernetes scheduler configuration
     pub kubernetes_scheduler: KubernetesSchedulerConfig,
 
@@ -373,6 +376,9 @@ pub struct ControllerConfig {
 
     /// Poll interval for leader status
     pub leader_poll_interval: HumanReadableDuration,
+
+    /// Metric system configurations
+    pub metrics: MetricsConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -694,11 +700,19 @@ impl Default for SqliteConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Whether to enable pipeline metric collection and storage
+    pub enabled: bool,
+}
+
 #[derive(Debug, Deserialize, Serialize, Eq, PartialEq, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Scheduler {
     Embedded,
     Process,
+    Manual,
     Node,
     Kubernetes,
 }
@@ -711,6 +725,14 @@ pub struct ProcessSchedulerConfig {
     /// shuts down. Note if disabled, this may orphan workers -- this is primarily used for testing
     /// state machine recovery.
     pub shutdown_with_controller: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ManualSchedulerConfig {
+    /// The number of task slots assigned to each worker process. The scheduler will print a command
+    /// line for `ceil(slots / slots_per_process)` workers.
+    pub slots_per_process: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -1025,6 +1047,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_config() {
         figment::Jail::expect_with(|jail| {
             // test default loading
@@ -1054,6 +1077,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_legacy_config() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("SCHEDULER", "kubernetes");
@@ -1076,6 +1100,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::result_large_err)]
     fn test_sensitive_config() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("ARROYO__DATABASE__POSTGRES__PASSWORD", "sup3r-s3cr3t-p@ss");

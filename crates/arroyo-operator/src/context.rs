@@ -445,7 +445,7 @@ pub async fn send_checkpoint_event(
     // These messages are received by the engine control thread,
     // which then sends a TaskCheckpointEventReq to the controller.
     tx.send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
-        checkpoint_epoch: barrier.epoch,
+        checkpoint_epoch: barrier.epoch as u64,
         operator_idx: info.operator_idx,
         operator_id: info.operator_id.clone(),
         subtask_idx: info.task_index,

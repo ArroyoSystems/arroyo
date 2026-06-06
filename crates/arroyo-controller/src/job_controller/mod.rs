@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use std::sync::Arc;
 use std::{
     collections::HashMap,
@@ -8,38 +7,39 @@ use std::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::bail;
 use arroyo_rpc::checkpoints::CheckpointMetadataStore;
-use arroyo_rpc::grpc::rpc::{CommitReq, LabelPair, MetricsReq, StopExecutionReq, StopMode};
+use arroyo_rpc::grpc::rpc::{CommitReq, StopExecutionReq, StopMode};
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use rand::{Rng, rng};
 
-use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::{JobConfig, JobMessage};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::api_types::metrics::MetricName;
 use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_state_protocol::ProtocolPaths;
+use arroyo_state_protocol::types::{Epoch, Generation};
 use arroyo_worker::job_controller::committing_state::CommittingState;
+use arroyo_worker::job_controller::job_metrics;
+use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use arroyo_worker::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
 };
 use tokio::{sync::mpsc::Receiver, task::JoinHandle};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub mod checkpoint_store;
-pub mod job_metrics;
 pub mod leader_manager;
 
-const CHECKPOINT_ROWS_TO_KEEP: u32 = 100;
+const CHECKPOINT_ROWS_TO_KEEP: u64 = 100;
+const CHECKPOINTS_TO_KEEP: u64 = 10;
+const COMPACT_EVERY: u64 = 4;
 
 pub struct JobController {
     checkpoint_store: Arc<dyn CheckpointMetadataStore>,
     config: JobConfig,
     model: RunningJobModel,
-    cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
-    metrics: JobMetrics,
+    cleanup_task: Option<JoinHandle<anyhow::Result<Epoch>>>,
 }
 
 impl std::fmt::Debug for JobController {
@@ -68,24 +68,23 @@ impl JobController {
         state_url: Option<String>,
         generation: u64,
         program: Arc<LogicalProgram>,
-        epoch: u32,
-        min_epoch: u32,
+        epoch: u64,
+        min_epoch: u64,
         worker_connects: HashMap<WorkerId, WorkerClient>,
         commit_state: Option<CommittingState>,
-        metrics: JobMetrics,
+        job_metrics: Option<JobMetrics>,
     ) -> Self {
         Self {
             checkpoint_store,
-            metrics,
             model: RunningJobModel {
                 protocol_paths: ProtocolPaths::new(pipeline_id.clone(), JobId(config.id.clone())),
                 pipeline_id,
                 job_id: JobId(config.id.clone()),
-                generation,
+                generation: Generation(generation),
                 state: JobState::Running,
                 checkpoint_state: commit_state.map(CheckpointingOrCommittingState::Committing),
-                epoch,
-                min_epoch,
+                epoch: Epoch(epoch),
+                min_epoch: Epoch(min_epoch),
                 // delay the initial checkpoint by a random amount so that on controller restart,
                 // checkpoint times are staggered across jobs
                 last_checkpoint: Instant::now()
@@ -132,6 +131,7 @@ impl JobController {
                 },
                 finished_operators: vec![],
                 generation_manifest: None,
+                job_metrics,
             },
             config,
             cleanup_task: None,
@@ -148,86 +148,14 @@ impl JobController {
             .await
     }
 
-    async fn update_metrics(&mut self) {
-        if self.model.metric_update_task.is_some()
-            && !self
-                .model
-                .metric_update_task
-                .as_ref()
-                .unwrap()
-                .is_finished()
+    pub fn cleanup_needed(&self) -> Option<Epoch> {
+        if *self.model.epoch - *self.model.min_epoch > CHECKPOINTS_TO_KEEP
+            && self.model.epoch.is_multiple_of(COMPACT_EVERY)
         {
-            return;
+            Some(Epoch(*self.model.epoch - CHECKPOINTS_TO_KEEP))
+        } else {
+            None
         }
-
-        let job_metrics = self.metrics.clone();
-        let workers: Vec<_> = self
-            .model
-            .workers
-            .iter()
-            .filter(|(_, w)| w.state == WorkerState::Running)
-            .map(|(id, w)| (*id, w.connect.clone()))
-            .collect();
-        let program = self.model.program.clone();
-        let operator_indices: Arc<HashMap<_, _>> = Arc::new(
-            program
-                .graph
-                .node_indices()
-                .map(|idx| (program.graph[idx].node_id, idx.index() as u32))
-                .collect(),
-        );
-
-        self.model.metric_update_task = Some(tokio::spawn(async move {
-            let mut metrics: HashMap<(u32, u32), HashMap<MetricName, u64>> = HashMap::new();
-
-            for (id, mut connect) in workers {
-                let Ok(e) = connect.get_metrics(MetricsReq {}).await else {
-                    warn!("Failed to collect metrics from worker {:?}", id);
-                    return;
-                };
-
-                fn find_label<'a>(labels: &'a [LabelPair], name: &'static str) -> Option<&'a str> {
-                    Some(
-                        labels
-                            .iter()
-                            .find(|t| t.name.as_ref().map(|t| t == name).unwrap_or(false))?
-                            .value
-                            .as_ref()?
-                            .as_str(),
-                    )
-                }
-
-                e.into_inner()
-                    .metrics
-                    .into_iter()
-                    .filter_map(|f| Some((get_metric_name(&f.name?)?, f.metric)))
-                    .flat_map(|(metric, values)| {
-                        let operator_indices = operator_indices.clone();
-                        values.into_iter().filter_map(move |m| {
-                            let subtask_idx =
-                                u32::from_str(find_label(&m.label, "subtask_idx")?).ok()?;
-                            let operator_idx = *operator_indices
-                                .get(&u32::from_str(find_label(&m.label, "node_id")?).ok()?)?;
-                            let value = m
-                                .counter
-                                .map(|c| c.value)
-                                .or_else(|| m.gauge.map(|g| g.value))??
-                                as u64;
-                            Some(((operator_idx, subtask_idx), (metric, value)))
-                        })
-                    })
-                    .for_each(|(subtask_idx, (metric, value))| {
-                        metrics
-                            .entry(subtask_idx)
-                            .or_default()
-                            .insert(metric, value);
-                    });
-            }
-
-            for ((operator_idx, subtask_idx), values) in metrics {
-                job_metrics.update(operator_idx, subtask_idx, &values);
-            }
-        }));
     }
 
     pub async fn progress(&mut self) -> anyhow::Result<ControllerProgress> {
@@ -254,7 +182,7 @@ impl JobController {
                 Ok(Ok(min_epoch)) => {
                     info!(
                         message = "setting new min epoch",
-                        min_epoch,
+                        min_epoch = *min_epoch,
                         job_id = *self.config.id
                     );
                     self.model.min_epoch = min_epoch;
@@ -282,7 +210,7 @@ impl JobController {
             }
         }
 
-        if let Some(new_epoch) = self.model.cleanup_needed()
+        if let Some(new_epoch) = self.cleanup_needed()
             && self.cleanup_task.is_none()
             && self.model.checkpoint_state.is_none()
         {
@@ -303,7 +231,7 @@ impl JobController {
 
         // update metrics
         if self.model.last_updated_metrics.elapsed() > job_metrics::COLLECTION_RATE {
-            self.update_metrics().await;
+            self.model.update_metrics().await;
             self.model.last_updated_metrics = Instant::now();
         }
 
@@ -356,7 +284,7 @@ impl JobController {
             worker
                 .connect
                 .commit(CommitReq {
-                    epoch: self.model.epoch,
+                    epoch: *self.model.epoch,
                     committing_data: committing.committing_data(),
                 })
                 .await?;
@@ -380,14 +308,12 @@ impl JobController {
                         .handle_message(msg, &*self.checkpoint_store)
                         .await?;
                 }
-                JobMessage::ConfigUpdate(c) => {
-                    if c.stop_mode == SqlStopMode::immediate {
-                        info!(
-                            message = "stopping job immediately",
-                            job_id = *self.config.id
-                        );
-                        self.stop_job(StopMode::Immediate).await?;
-                    }
+                JobMessage::ConfigUpdate(c) if c.stop_mode == SqlStopMode::immediate => {
+                    info!(
+                        message = "stopping job immediately",
+                        job_id = *self.config.id
+                    );
+                    self.stop_job(StopMode::Immediate).await?;
                 }
                 _ => {
                     // ignore other messages
@@ -400,8 +326,8 @@ impl JobController {
         self.model.operator_parallelism.get(&node_id).cloned()
     }
 
-    fn start_cleanup(&mut self, new_min: u32) -> JoinHandle<anyhow::Result<u32>> {
-        let min_epoch = self.model.min_epoch.max(1);
+    fn start_cleanup(&mut self, new_min: Epoch) -> JoinHandle<anyhow::Result<Epoch>> {
+        let min_epoch = Epoch((*self.model.min_epoch).max(1));
         let job_id = self.config.id.clone();
         let store = self.checkpoint_store.clone();
         let storage_role = self.model.storage_role.clone();
@@ -409,33 +335,44 @@ impl JobController {
         info!(
             message = "Starting cleaning",
             job_id = *job_id,
-            min_epoch,
-            new_min
+            min_epoch = *min_epoch,
+            new_min = *new_min
         );
         let start = Instant::now();
         let cur_epoch = self.model.epoch;
 
         tokio::spawn(async move {
             let checkpoint =
-                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, cur_epoch).await?;
+                StateBackend::load_checkpoint_metadata(&storage_role, &job_id, *cur_epoch as u32)
+                    .await?;
 
-            store.mark_compacting(&job_id, min_epoch, new_min).await?;
+            store
+                .mark_compacting(&job_id, *min_epoch as u32, *new_min as u32)
+                .await?;
 
-            StateBackend::cleanup_checkpoint(&storage_role, checkpoint, min_epoch, new_min).await?;
+            StateBackend::cleanup_checkpoint(
+                &storage_role,
+                checkpoint,
+                *min_epoch as u32,
+                *new_min as u32,
+            )
+            .await?;
 
-            store.mark_checkpoints_compacted(&job_id, new_min).await?;
+            store
+                .mark_checkpoints_compacted(&job_id, *new_min as u32)
+                .await?;
 
             if let Some(epoch_to_filter_before) = min_epoch.checked_sub(CHECKPOINT_ROWS_TO_KEEP) {
                 store
-                    .drop_old_checkpoint_rows(&job_id, epoch_to_filter_before)
+                    .drop_old_checkpoint_rows(&job_id, epoch_to_filter_before as u32)
                     .await?;
             }
 
             info!(
                 message = "Finished cleaning",
                 job_id = *job_id,
-                min_epoch,
-                new_min,
+                min_epoch = *min_epoch,
+                new_min = *new_min,
                 duration = start.elapsed().as_secs_f32()
             );
 
