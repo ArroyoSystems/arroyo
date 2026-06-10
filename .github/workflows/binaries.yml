@@ -55,7 +55,7 @@ jobs:
           python-version: '3.12'
           architecture: ${{ matrix.config.python_arch }}
       - name: Run DB migrations
-        run: |          
+        run: |
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
@@ -73,8 +73,6 @@ jobs:
           if-no-files-found: error
 
   macos:
-    env:
-      CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
       fail-fast: true
       matrix:
@@ -99,10 +97,10 @@ jobs:
             brew link --overwrite python@3.12
           fi
           brew list python@3.12 >/dev/null
-      - name: Install CMake 3.29
+      - name: Install CMake 4.3
         run: |
           set -euxo pipefail
-          CMAKE_VERSION=3.29.6
+          CMAKE_VERSION=4.3.3
           CMAKE_DIR="$RUNNER_TEMP/cmake-$CMAKE_VERSION"
           mkdir -p "$CMAKE_DIR"
           curl -L "https://github.com/Kitware/CMake/releases/download/v$CMAKE_VERSION/cmake-$CMAKE_VERSION-macos-universal.tar.gz" -o "$RUNNER_TEMP/cmake.tar.gz"
