@@ -130,6 +130,8 @@ pub struct FailureReason {
 #[serde(rename_all = "snake_case")]
 pub struct Job {
     pub id: String,
+    /// The `pub_id` of the pipeline this job belongs to.
+    pub pipeline_id: String,
     pub running_desired: bool,
     pub state: String,
     pub run_id: u64,

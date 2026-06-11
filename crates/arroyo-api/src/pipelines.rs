@@ -520,6 +520,7 @@ impl From<DbPipelineJob> for Job {
     fn from(val: DbPipelineJob) -> Self {
         Job {
             id: val.id,
+            pipeline_id: val.pipeline_id,
             running_desired: val.stop == StopMode::none,
             state: val.state.unwrap_or_else(|| "Created".to_string()),
             run_id: val.run_id.unwrap_or(0) as u64,
