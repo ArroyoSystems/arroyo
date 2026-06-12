@@ -692,6 +692,8 @@ export interface components {
             /** Format: int64 */
             finish_time?: number | null;
             id: string;
+            /** @description The `pub_id` of the pipeline this job belongs to. */
+            pipeline_id: string;
             /** Format: int64 */
             run_id: number;
             running_desired: boolean;
