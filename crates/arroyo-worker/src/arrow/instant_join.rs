@@ -89,8 +89,6 @@ impl InstantJoin {
             let (right_sender, right_receiver) = unbounded_channel();
             self.left_receiver.write().unwrap().replace(left_receiver);
             self.right_receiver.write().unwrap().replace(right_receiver);
-            self.join_exec.reset()?;
-
             let new_exec = self
                 .join_exec
                 .execute(0, SessionContext::new().task_ctx())?;
