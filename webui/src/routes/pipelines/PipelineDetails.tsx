@@ -35,6 +35,8 @@ import {
   Tabs,
   Text,
   useDisclosure,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import 'reactflow/dist/style.css';
@@ -168,6 +170,30 @@ export function PipelineDetails() {
             <Text>{job.state}</Text>
           </Box>
         </Box>
+        {pipeline.state_url ? (
+          <Box className="field">
+            <Box className="fieldName">State URL</Box>
+            <Box className="fieldValue">
+              <Text wordBreak="break-all">{pipeline.state_url}</Text>
+            </Box>
+          </Box>
+        ) : null}
+        {Object.keys(pipeline.tags).length > 0 ? (
+          <Box className="field">
+            <Box className="fieldName">Tags</Box>
+            <Box className="fieldValue">
+              <Wrap spacing={1}>
+                {Object.entries(pipeline.tags).map(([k, v]) => (
+                  <WrapItem key={k}>
+                    <Badge>
+                      {k}: {v}
+                    </Badge>
+                  </WrapItem>
+                ))}
+              </Wrap>
+            </Box>
+          </Box>
+        ) : null}
         {operatorDetail}
       </Stack>
     </TabPanel>

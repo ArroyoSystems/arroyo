@@ -818,7 +818,11 @@ export interface components {
             name: string;
             preview: boolean;
             query: string;
+            state_url?: string | null;
             stop: components["schemas"]["StopType"];
+            tags: {
+                [key: string]: string;
+            };
             udfs: components["schemas"]["Udf"][];
         };
         PipelineCollection: {
