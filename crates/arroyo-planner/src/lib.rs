@@ -1,6 +1,8 @@
 #![allow(clippy::new_without_default)]
 
 pub mod builder;
+mod ddl;
+mod dialect;
 pub(crate) mod extension;
 pub mod external;
 mod functions;
@@ -76,9 +78,11 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
 use datafusion::prelude::col;
+use crate::ddl::ParsedCreateTable;
+use crate::dialect::ArroyoDialect;
 use sqlparser::ast::{OneOrManyWithParens, Statement};
-use sqlparser::dialect::ArroyoDialect;
 use sqlparser::parser::{Parser, ParserError};
+use sqlparser::tokenizer::Token;
 use std::any::Any;
 use std::time::{Duration, SystemTime};
 use std::{collections::HashMap, sync::Arc};
@@ -786,6 +790,47 @@ pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
     Parser::parse_sql(&ArroyoDialect {}, sql)
 }
 
+pub(crate) enum ParsedStatement {
+    /// A connector/memory `CREATE TABLE`, parsed by [`crate::ddl`] (which supports arroyo's
+    /// WATERMARK FOR / METADATA FROM / PARTITIONED BY extensions on top of vanilla sqlparser).
+    CreateTable(ParsedCreateTable),
+    /// Any other statement (query, INSERT, CREATE VIEW, CTAS, SET), parsed by vanilla sqlparser so
+    /// that DataFusion's `SqlToRel` receives an unmodified `Statement`.
+    Sql(Statement),
+}
+
+/// Parse a full SQL program, dispatching connector/memory `CREATE TABLE` statements to arroyo's own
+/// DDL parser and everything else to vanilla sqlparser. Mirrors `Parser::parse_statements`'
+/// statement-delimiter handling.
+pub(crate) fn parse_program(sql: &str) -> Result<Vec<ParsedStatement>, ParserError> {
+    let dialect = ArroyoDialect {};
+    let mut parser = Parser::new(&dialect).try_with_sql(sql)?;
+    let mut statements = Vec::new();
+    let mut expecting_delimiter = false;
+    loop {
+        while parser.consume_token(&Token::SemiColon) {
+            expecting_delimiter = false;
+        }
+        if parser.peek_token().token == Token::EOF {
+            break;
+        }
+        if expecting_delimiter {
+            return Err(ParserError::ParserError(
+                "expected `;` between statements".to_string(),
+            ));
+        }
+        if ddl::is_connector_table(&parser) {
+            statements.push(ParsedStatement::CreateTable(ddl::parse_create_table(
+                &mut parser,
+            )?));
+        } else {
+            statements.push(ParsedStatement::Sql(parser.parse_statement()?));
+        }
+        expecting_delimiter = true;
+    }
+    Ok(statements)
+}
+
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
@@ -810,19 +855,24 @@ pub async fn parse_and_get_arrow_program(
         .build();
 
     let mut inserts = vec![];
-    for statement in parse_sql(&query)? {
-        if try_handle_set_variable(&statement, &mut schema_provider)? {
-            continue;
-        }
+    for statement in parse_program(&query)? {
+        match statement {
+            ParsedStatement::CreateTable(create_table) => {
+                let table = Table::try_from_parsed(&create_table, &schema_provider)?;
+                schema_provider.insert_table(table);
+            }
+            ParsedStatement::Sql(statement) => {
+                if try_handle_set_variable(&statement, &mut schema_provider)? {
+                    continue;
+                }
 
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
-            schema_provider.insert_table(table);
-        } else {
-            inserts.push(Insert::try_from_statement(
-                &statement,
-                &mut schema_provider,
-            )?);
-        };
+                if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+                    schema_provider.insert_table(table);
+                } else {
+                    inserts.push(Insert::try_from_statement(&statement, &mut schema_provider)?);
+                }
+            }
+        }
     }
 
     if inserts.is_empty() {

@@ -5,6 +5,7 @@ use crate::{
     external::{ProcessingMode, SqlSource},
     fields_with_qualifiers, multifield_partial_ord, parse_sql,
 };
+use crate::ddl::{ParsedColumn, ParsedCreateTable};
 use crate::{DEFAULT_IDLE_TIME, rewrite_plan};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
@@ -48,17 +49,15 @@ use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggreg
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{CreateTable, Query};
+use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{OptimizerContext, optimizer::Optimizer},
     sql::{
         planner::SqlToRel,
-        sqlparser::ast::{ColumnDef, ColumnOption, Statement},
+        sqlparser::ast::Statement,
     },
 };
-use itertools::Itertools;
 use sqlparser::ast;
-use sqlparser::ast::TableConstraint;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tracing::warn;
@@ -663,7 +662,7 @@ impl<'a> TreeNodeVisitor<'a> for MetadataFinder {
 impl Table {
     fn schema_from_columns(
         table_name: &str,
-        columns: &[ColumnDef],
+        columns: &[ParsedColumn],
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Vec<FieldSpec>> {
         let struct_field_pairs = columns
@@ -671,33 +670,14 @@ impl Table {
             .map(|column| {
                 let name = column.name.value.to_string();
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
-                let nullable = !column
-                    .options
-                    .iter()
-                    .any(|option| matches!(option.option, ColumnOption::NotNull));
+                let nullable = !column.not_null;
                 let struct_field = ArroyoExtensionType::add_metadata(
                     extension,
                     Field::new(name, data_type.clone(), nullable),
                 );
 
-                let generating_expression = column.options.iter().find_map(|option| {
-                    if let ColumnOption::Generated {
-                        generation_expr, ..
-                    } = &option.option
-                    {
-                        generation_expr.clone()
-                    } else {
-                        None
-                    }
-                });
-
-                let metadata = column.options.iter().find_map(|option| {
-                    if let ColumnOption::MetadataField(field, _) = &option.option {
-                        Some(field.clone())
-                    } else {
-                        None
-                    }
-                });
+                let generating_expression = column.generated.clone();
+                let metadata = column.metadata_key.clone();
 
                 Ok((struct_field, generating_expression, metadata))
             })
@@ -766,152 +746,135 @@ impl Table {
             .collect::<Result<Vec<_>>>()
     }
 
+    /// Build a connector/memory table from an arroyo `CREATE TABLE` (parsed by [`crate::ddl`]).
+    pub fn try_from_parsed(
+        parsed: &ParsedCreateTable,
+        schema_provider: &ArroyoSchemaProvider,
+    ) -> Result<Self> {
+        let ParsedCreateTable {
+            name,
+            temporary,
+            columns,
+            primary_key_columns,
+            watermark,
+            with_options,
+            partitions,
+        } = parsed;
+
+        let name: String = name.to_string();
+        let mut connector_opts = ConnectorOptions::new(with_options, partitions)?;
+
+        let connector = connector_opts.pull_opt_str("connector")?;
+        let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
+
+        let primary_keys: Vec<String> = columns
+            .iter()
+            .filter(|c| c.primary_key)
+            .map(|c| c.name.value.clone())
+            .chain(primary_key_columns.iter().map(|c| c.value.clone()))
+            .collect();
+
+        match connector.as_deref() {
+            Some("memory") | None => {
+                if fields.iter().any(|f| f.is_virtual()) {
+                    return plan_err!(
+                        "Virtual fields are not supported in memory tables; instead write a query"
+                    );
+                }
+
+                if !connector_opts.is_empty() {
+                    if connector.is_some() {
+                        return plan_err!("Memory tables do not allow with options");
+                    } else {
+                        return plan_err!(
+                            "Memory tables do not allow with options; to create a connection table set the 'connector' option"
+                        );
+                    }
+                }
+
+                Ok(Table::MemoryTable {
+                    name,
+                    fields: fields
+                        .into_iter()
+                        .map(|f| Arc::new(f.field().clone()))
+                        .collect(),
+                    logical_plan: None,
+                })
+            }
+            Some(connector) => {
+                let connection_profile = match connector_opts.pull_opt_str("connection_profile")? {
+                    Some(connection_profile_name) => Some(
+                        schema_provider
+                            .profiles
+                            .get(&connection_profile_name)
+                            .ok_or_else(|| {
+                                DataFusionError::Plan(format!(
+                                    "connection profile '{connection_profile_name}' not found"
+                                ))
+                            })?,
+                    ),
+                    None => None,
+                };
+
+                let watermark = watermark
+                    .as_ref()
+                    .map(|(column_name, watermark_expr)| {
+                        (column_name.to_string(), watermark_expr.clone())
+                    });
+
+                let table = ConnectorTable::from_options(
+                    &name,
+                    connector,
+                    *temporary,
+                    fields,
+                    primary_keys,
+                    watermark,
+                    &mut connector_opts,
+                    connection_profile,
+                    schema_provider,
+                )
+                .map_err(|e| e.context(format!("Failed to create table {name}")))?;
+
+                Ok(match table.connection_type {
+                    ConnectionType::Source | ConnectionType::Sink => Table::ConnectorTable(table),
+                    ConnectionType::Lookup => Table::LookupTable(table),
+                })
+            }
+        }
+    }
+
+    /// Build a view-like table from a `CREATE VIEW` / `CREATE TABLE ... AS <query>` statement (which
+    /// is parsed by vanilla sqlparser and planned by DataFusion). Returns `None` for statements that
+    /// aren't view/CTAS definitions (e.g. plain queries and INSERTs).
     pub fn try_from_statement(
         statement: &Statement,
         schema_provider: &ArroyoSchemaProvider,
     ) -> Result<Option<Self>> {
-        if let Statement::CreateTable(CreateTable {
-            name,
-            columns,
-            with_options,
-            query: None,
-            temporary,
-            constraints,
-            arroyo_partitions,
-            ..
-        }) = statement
-        {
-            let name: String = name.to_string();
-            let mut connector_opts = ConnectorOptions::new(with_options, arroyo_partitions)?;
-
-            let connector = connector_opts.pull_opt_str("connector")?;
-            let fields = Self::schema_from_columns(&name, columns, schema_provider)?;
-
-            let primary_keys = columns
-                .iter()
-                .filter(|c| {
-                    c.options.iter().any(|opt| {
-                        matches!(
-                            opt.option,
-                            ColumnOption::Unique {
-                                is_primary: true,
-                                ..
-                            }
-                        )
-                    })
-                })
-                .map(|c| c.name.value.clone())
-                .collect();
-
-            match connector.as_deref() {
-                Some("memory") | None => {
-                    if fields.iter().any(|f| f.is_virtual()) {
-                        return plan_err!(
-                            "Virtual fields are not supported in memory tables; instead write a query"
-                        );
-                    }
-
-                    if !connector_opts.is_empty() {
-                        if connector.is_some() {
-                            return plan_err!("Memory tables do not allow with options");
-                        } else {
-                            return plan_err!(
-                                "Memory tables do not allow with options; to create a connection table set the 'connector' option"
-                            );
-                        }
-                    }
-
-                    Ok(Some(Table::MemoryTable {
-                        name,
-                        fields: fields
-                            .into_iter()
-                            .map(|f| Arc::new(f.field().clone()))
-                            .collect(),
-                        logical_plan: None,
-                    }))
-                }
-                Some(connector) => {
-                    let connection_profile = match connector_opts
-                        .pull_opt_str("connection_profile")?
-                    {
-                        Some(connection_profile_name) => Some(
-                            schema_provider
-                                .profiles
-                                .get(&connection_profile_name)
-                                .ok_or_else(|| {
-                                    DataFusionError::Plan(format!(
-                                        "connection profile '{connection_profile_name}' not found"
-                                    ))
-                                })?,
-                        ),
-                        None => None,
-                    };
-
-                    let watermark_constraints: Vec<_> = constraints
-                        .iter()
-                        .map(|c| match c {
-                            TableConstraint::Watermark {
-                                column_name,
-                                watermark_expr,
-                            } => Ok((column_name.to_string(), watermark_expr.clone())),
-                            c => Err(plan_datafusion_err!("Unsupported table constraint `{}`", c)),
-                        })
-                        .try_collect()?;
-
-                    if watermark_constraints.len() > 1 {
-                        return plan_err!("Only one WATERMARK FOR constraint is allowed per table");
-                    }
-
-                    let table = ConnectorTable::from_options(
-                        &name,
-                        connector,
-                        *temporary,
-                        fields,
-                        primary_keys,
-                        watermark_constraints.into_iter().next(),
-                        &mut connector_opts,
-                        connection_profile,
-                        schema_provider,
-                    )
-                    .map_err(|e| e.context(format!("Failed to create table {name}")))?;
-
-                    Ok(Some(match table.connection_type {
-                        ConnectionType::Source | ConnectionType::Sink => {
-                            Table::ConnectorTable(table)
-                        }
-                        ConnectionType::Lookup => Table::LookupTable(table),
-                    }))
-                }
+        match &produce_optimized_plan(statement, schema_provider) {
+            // views and memory tables are the same now.
+            Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView { name, input, .. })))
+            | Ok(LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
+                name,
+                input,
+                ..
+            }))) => {
+                let rewritten_plan = rewrite_plan(input.as_ref().clone(), schema_provider)?;
+                let schema = rewritten_plan.schema().clone();
+                let remote_extension = RemoteTableExtension {
+                    input: rewritten_plan,
+                    name: name.to_owned(),
+                    schema,
+                    materialize: true,
+                };
+                // Return a TableFromQuery
+                Ok(Some(Table::TableFromQuery {
+                    name: name.to_string(),
+                    logical_plan: LogicalPlan::Extension(Extension {
+                        node: Arc::new(remote_extension),
+                    }),
+                }))
             }
-        } else {
-            match &produce_optimized_plan(statement, schema_provider) {
-                // views and memory tables are the same now.
-                Ok(LogicalPlan::Ddl(DdlStatement::CreateView(CreateView {
-                    name, input, ..
-                })))
-                | Ok(LogicalPlan::Ddl(DdlStatement::CreateMemoryTable(CreateMemoryTable {
-                    name,
-                    input,
-                    ..
-                }))) => {
-                    let rewritten_plan = rewrite_plan(input.as_ref().clone(), schema_provider)?;
-                    let schema = rewritten_plan.schema().clone();
-                    let remote_extension = RemoteTableExtension {
-                        input: rewritten_plan,
-                        name: name.to_owned(),
-                        schema,
-                        materialize: true,
-                    };
-                    // Return a TableFromQuery
-                    Ok(Some(Table::TableFromQuery {
-                        name: name.to_string(),
-                        logical_plan: LogicalPlan::Extension(Extension {
-                            node: Arc::new(remote_extension),
-                        }),
-                    }))
-                }
-                _ => Ok(None),
-            }
+            _ => Ok(None),
         }
     }
 
