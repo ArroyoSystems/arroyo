@@ -81,6 +81,10 @@ pub struct Pipeline {
     pub graph: PipelineGraph,
     pub preview: bool,
     pub env_vars: serde_json::Value,
+    /// Optional URL pointing to the state the pipeline was started from.
+    pub state_url: Option<String>,
+    /// User-defined key/value tags associated with the pipeline.
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

@@ -121,14 +121,14 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 ----------- pipelines -------------------
 
---: DbPipeline (state?, ttl_micros?)
+--: DbPipeline (state?, ttl_micros?, state_url?)
 
 --! create_pipeline(textual_repr?, state_url?)
 INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version, state_url, tags)
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -143,7 +143,7 @@ ORDER BY pipelines.created_at DESC
 LIMIT cast(:limit as integer);
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, env_vars, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id

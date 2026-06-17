@@ -512,6 +512,8 @@ impl TryInto<Pipeline> for DbPipeline {
             action_in_progress,
             preview: self.ttl_micros.is_some(),
             env_vars: self.env_vars,
+            state_url: self.state_url,
+            tags: serde_json::from_value(self.tags).map_err(log_and_map)?,
         })
     }
 }
