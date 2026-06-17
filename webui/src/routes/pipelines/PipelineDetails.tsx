@@ -194,6 +194,36 @@ export function PipelineDetails() {
             </Box>
           </Box>
         ) : null}
+        {job.env_vars && Object.keys(job.env_vars as Record<string, string>).length > 0 ? (
+          <Box className="field">
+            <Box className="fieldName">Env Vars</Box>
+            <Box className="fieldValue">
+              <Wrap spacing={1}>
+                {Object.entries(job.env_vars as Record<string, string>).map(([k, v]) => (
+                  <WrapItem key={k}>
+                    <Badge>
+                      {k}: {v}
+                    </Badge>
+                  </WrapItem>
+                ))}
+              </Wrap>
+            </Box>
+          </Box>
+        ) : null}
+        {job.scheduler_config && Object.keys(job.scheduler_config as object).length > 0 ? (
+          <Box className="field">
+            <Box className="fieldName">Scheduler Config</Box>
+            <Box className="fieldValue">
+              <SyntaxHighlighter
+                language="json"
+                style={vs2015}
+                customStyle={{ borderRadius: '5px' }}
+              >
+                {JSON.stringify(job.scheduler_config, null, 2)}
+              </SyntaxHighlighter>
+            </Box>
+          </Box>
+        ) : null}
         {operatorDetail}
       </Stack>
     </TabPanel>

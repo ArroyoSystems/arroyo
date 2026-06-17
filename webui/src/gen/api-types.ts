@@ -471,7 +471,7 @@ export interface components {
         Checkpoint: {
             backend: string;
             checkpoint_type: components["schemas"]["CheckpointType"];
-            /** Format: int32 */
+            /** Format: int64 */
             epoch: number;
             events: components["schemas"]["CheckpointEventSpan"][];
             /** Format: int64 */
@@ -688,6 +688,8 @@ export interface components {
         Job: {
             /** Format: int64 */
             created_at: number;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars: unknown;
             failure_reason?: components["schemas"]["FailureReason"] | null;
             /** Format: int64 */
             finish_time?: number | null;
@@ -818,8 +820,10 @@ export interface components {
             name: string;
             preview: boolean;
             query: string;
+            /** @description Optional URL pointing to the state the pipeline was started from. */
             state_url?: string | null;
             stop: components["schemas"]["StopType"];
+            /** @description User-defined key/value tags associated with the pipeline. */
             tags: {
                 [key: string]: string;
             };
