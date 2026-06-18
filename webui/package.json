@@ -76,6 +76,12 @@
     "postcss": "^8.5.3",
     "prettier": "^2.8.8",
     "typescript": "^5.8",
-    "vite": "^6.4.2"
+    "vite": "^6.4.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "^0.28.1",
+      "js-yaml": "^4.1.1"
+    }
   }
 }
