@@ -1,3 +1,4 @@
+use super::fresh_plan;
 use super::sync::streams::KeyedCloneableStreamFuture;
 use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
@@ -89,9 +90,10 @@ impl InstantJoin {
             let (right_sender, right_receiver) = unbounded_channel();
             self.left_receiver.write().unwrap().replace(left_receiver);
             self.right_receiver.write().unwrap().replace(right_receiver);
-            let new_exec = self
-                .join_exec
-                .execute(0, SessionContext::new().task_ctx())?;
+            // Rebuild the join into a fresh instance so its build-side `OnceAsync` memo
+            // starts empty for this execution; the channel-reader leaves are reused.
+            let new_exec =
+                fresh_plan(&self.join_exec)?.execute(0, SessionContext::new().task_ctx())?;
             let next_batch_future = NextBatchFuture::new(time, new_exec);
             self.futures.lock().await.push(next_batch_future.clone());
             let exec = InstantComputeHolder {

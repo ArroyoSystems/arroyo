@@ -45,6 +45,33 @@ mod updating_cache;
 pub mod watermark_generator;
 pub mod window_fn;
 
+/// Rebuild a physical plan into a fresh instance so it can be re-executed cleanly.
+///
+/// Arroyo re-executes the same held [`ExecutionPlan`] instance once per batch/window,
+/// which DataFusion's execution model does not expect. The join operators
+/// (`HashJoinExec`, `CrossJoinExec`, `NestedLoopJoinExec`) memoize their build (left)
+/// side in a `OnceAsync` that is populated on the first `execute()` and reused on every
+/// subsequent call. Re-executing the same instance with new input therefore joins
+/// against stale build-side data.
+///
+/// Reconstructing the plan via `with_new_children` produces operators with fresh
+/// `OnceAsync` state (a new `HashJoinExec` is built through `try_new`) — exactly what the
+/// removed `ExecutionPlan::reset` fork patch used to clear. Leaf nodes are reused as-is:
+/// arroyo's source readers hold the `RwLock`/channel input bindings and intentionally
+/// reject `with_new_children`, so cloning their `Arc` both preserves those bindings and
+/// avoids rebuilding state that never carries across executions.
+pub(crate) fn fresh_plan(plan: &Arc<dyn ExecutionPlan>) -> DFResult<Arc<dyn ExecutionPlan>> {
+    let children = plan.children();
+    if children.is_empty() {
+        return Ok(Arc::clone(plan));
+    }
+    let new_children = children
+        .into_iter()
+        .map(fresh_plan)
+        .collect::<DFResult<Vec<_>>>()?;
+    Arc::clone(plan).with_new_children(new_children)
+}
+
 pub struct ValueExecutionOperator {
     name: String,
     executor: StatelessPhysicalExecutor,

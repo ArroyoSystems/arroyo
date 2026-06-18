@@ -1,3 +1,4 @@
+use super::fresh_plan;
 use arrow::compute::concat_batches;
 use arrow_array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -117,8 +118,10 @@ impl JoinWithExpiration {
             self.right_passer.write().unwrap().replace(right);
             self.left_passer.write().unwrap().replace(left);
         }
-        let mut records = self
-            .join_execution_plan
+        // Rebuild the join into a fresh instance so its build-side `OnceAsync` memo starts
+        // empty for this pair; the RwLock-reader leaves (left/right passers) are reused.
+        let mut records = fresh_plan(&self.join_execution_plan)
+            .expect("rebuild join plan")
             .execute(0, SessionContext::new().task_ctx())
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
