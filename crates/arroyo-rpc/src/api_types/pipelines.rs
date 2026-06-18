@@ -80,7 +80,6 @@ pub struct Pipeline {
     pub action_in_progress: bool,
     pub graph: PipelineGraph,
     pub preview: bool,
-    pub env_vars: serde_json::Value,
     /// Optional URL pointing to the state the pipeline was started from.
     pub state_url: Option<String>,
     /// User-defined key/value tags associated with the pipeline.
@@ -148,6 +147,8 @@ pub struct Job {
     /// An empty object means "no overrides, use the controller's
     /// global scheduler config unchanged".
     pub scheduler_config: serde_json::Value,
+    /// Per-job environment variables forwarded to workers.
+    pub env_vars: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

@@ -35,6 +35,7 @@
 .pipelineInfo .fieldName,
 .pipelineInfo .fieldValue {
   display: inline-block;
+  vertical-align: middle;
 }
 
 .pipelineInfo .fieldName {

@@ -471,7 +471,7 @@ export interface components {
         Checkpoint: {
             backend: string;
             checkpoint_type: components["schemas"]["CheckpointType"];
-            /** Format: int32 */
+            /** Format: int64 */
             epoch: number;
             events: components["schemas"]["CheckpointEventSpan"][];
             /** Format: int64 */
@@ -688,6 +688,8 @@ export interface components {
         Job: {
             /** Format: int64 */
             created_at: number;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars: unknown;
             failure_reason?: components["schemas"]["FailureReason"] | null;
             /** Format: int64 */
             finish_time?: number | null;
@@ -697,6 +699,10 @@ export interface components {
             /** Format: int64 */
             run_id: number;
             running_desired: boolean;
+            /** @description Per-job scheduler configuration overlay (see `PipelinePost`).
+             *     An empty object means "no overrides, use the controller's
+             *     global scheduler config unchanged". */
+            scheduler_config: unknown;
             /** Format: int64 */
             start_time?: number | null;
             state: string;
@@ -818,8 +824,10 @@ export interface components {
             name: string;
             preview: boolean;
             query: string;
+            /** @description Optional URL pointing to the state the pipeline was started from. */
             state_url?: string | null;
             stop: components["schemas"]["StopType"];
+            /** @description User-defined key/value tags associated with the pipeline. */
             tags: {
                 [key: string]: string;
             };
@@ -860,10 +868,21 @@ export interface components {
         PipelinePost: {
             /** Format: int64 */
             checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             name: string;
             /** Format: int64 */
             parallelism: number;
             query: string;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             state_url?: string | null;
             tags?: {
                 [key: string]: string;
