@@ -62,7 +62,8 @@ async fn collect_history_and_clean_checkpoint_files<S>(
 where
     S: ProtocolStore + ?Sized,
 {
-    let mut history = Vec::new();
+    let mut head = true;
+    let mut history = vec![];
     let mut seen = HashSet::new();
     let mut next = Some(current);
 
@@ -71,9 +72,15 @@ where
         let Some(manifest): Option<CheckpointManifest> =
             read_protobuf(store, &checkpoint_ref).await?
         else {
-            // this was already deleted in a prior cleaning run
+            if head {
+                return Err(StoreError::ExpectedObjectMissing {
+                    path: checkpoint_ref,
+                });
+            }
             break;
         };
+
+        head = false;
 
         let owner = CheckpointOwner {
             generation: Generation(manifest.generation),
