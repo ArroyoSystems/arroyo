@@ -543,6 +543,10 @@ pub struct PipelineConfig {
     /// Batch linger time (how long to wait before flushing)
     pub source_batch_linger: HumanReadableDuration,
 
+    /// Maximum buffered bytes before flushing (None = disabled).
+    /// Currently measured as raw input bytes.
+    pub source_batch_max_bytes: Option<usize>,
+
     /// How often to flush aggregates
     pub update_aggregate_flush_interval: HumanReadableDuration,
 

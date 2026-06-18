@@ -36,6 +36,9 @@ pub enum FieldValueType<'a> {
 
 struct ContextBuffer {
     buffer: Vec<Box<dyn ArrayBuilder>>,
+    /// Accumulated raw input bytes since last flush.
+    /// Currently measured as pre-deserialization input size rather than Arrow buffer memory.
+    buffered_bytes: usize,
     created: Instant,
 }
 
@@ -49,6 +52,7 @@ impl ContextBuffer {
 
         Self {
             buffer,
+            buffered_bytes: 0,
             created: Instant::now(),
         }
     }
@@ -58,10 +62,11 @@ impl ContextBuffer {
     }
 
     pub fn should_flush(&self) -> bool {
-        should_flush(self.size(), self.created)
+        should_flush(self.size(), self.buffered_bytes, self.created)
     }
 
     pub fn finish(&mut self) -> Vec<ArrayRef> {
+        self.buffered_bytes = 0;
         self.buffer.iter_mut().map(|a| a.finish()).collect()
     }
 }
@@ -170,6 +175,9 @@ enum BufferDecoder {
     JsonDecoder {
         decoder: arrow::json::reader::Decoder,
         buffered_count: usize,
+        /// Accumulated raw input bytes since last flush.
+        /// Currently measured as pre-deserialization input size rather than Arrow buffer memory.
+        buffered_bytes: usize,
         buffered_since: Instant,
     },
 }
@@ -180,9 +188,10 @@ impl BufferDecoder {
             BufferDecoder::Buffer(b) => b.should_flush(),
             BufferDecoder::JsonDecoder {
                 buffered_count,
+                buffered_bytes,
                 buffered_since,
                 ..
-            } => should_flush(*buffered_count, *buffered_since),
+            } => should_flush(*buffered_count, *buffered_bytes, *buffered_since),
         }
     }
 
@@ -203,9 +212,11 @@ impl BufferDecoder {
                 decoder,
                 buffered_since,
                 buffered_count,
+                buffered_bytes,
             } => {
                 *buffered_since = Instant::now();
                 *buffered_count = 0;
+                *buffered_bytes = 0;
                 Some(match bad_data {
                     BadData::Fail { .. } => decoder
                         .flush()
@@ -305,6 +316,13 @@ impl BufferDecoder {
 
                 *buffered_count += 1;
             }
+        }
+    }
+
+    fn add_input_bytes(&mut self, n: usize) {
+        match self {
+            BufferDecoder::Buffer(b) => b.buffered_bytes += n,
+            BufferDecoder::JsonDecoder { buffered_bytes, .. } => *buffered_bytes += n,
         }
     }
 }
@@ -440,6 +458,7 @@ impl ArrowDeserializer {
                     .build_decoder()
                     .unwrap(),
                 buffered_count: 0,
+                buffered_bytes: 0,
                 buffered_since: Instant::now(),
             },
             _ => BufferDecoder::Buffer(ContextBuffer::new(schema_without_additional.clone())),
@@ -497,18 +516,26 @@ impl ArrowDeserializer {
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Vec<DataflowError> {
         let (count, errors) = match &*self.format {
-            Format::Avro(_) => self.deserialize_slice_avro(msg).await,
+            Format::Avro(_) => {
+                let (count, errors) = self.deserialize_slice_avro(msg).await;
+                if count > 0 {
+                    self.buffer_decoder.add_input_bytes(msg.len());
+                }
+                (count, errors)
+            }
             _ => {
                 let mut count = 0;
-                let errors = FramingIterator::new(self.framing.clone(), msg)
-                    .map(|t| self.deserialize_single(t))
-                    .filter_map(|t| {
-                        if t.is_ok() {
+                let mut errors = vec![];
+                for t in FramingIterator::new(self.framing.clone(), msg) {
+                    let len = t.len();
+                    match self.deserialize_single(t) {
+                        Ok(()) => {
                             count += 1;
+                            self.buffer_decoder.add_input_bytes(len);
                         }
-                        t.err()
-                    })
-                    .collect();
+                        Err(e) => errors.push(e),
+                    }
+                }
                 (count, errors)
             }
         };
