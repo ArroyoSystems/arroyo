@@ -20,6 +20,12 @@ import {
   Grid,
   Heading,
   Icon,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
   Popover,
   PopoverArrow,
   PopoverBody,
@@ -65,6 +71,20 @@ import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { useNavbar } from '../../App';
 
+function flattenConfig(value: unknown, prefix = ''): [string, string][] {
+  if (value === null || typeof value !== 'object') {
+    return [[prefix, String(value)]];
+  }
+  if (Array.isArray(value)) {
+    return [[prefix, JSON.stringify(value)]];
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    return prefix ? [[prefix, '{}']] : [];
+  }
+  return entries.flatMap(([key, v]) => flattenConfig(v, prefix ? `${prefix}.${key}` : key));
+}
+
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<number | undefined>(undefined);
   const {
@@ -76,6 +96,11 @@ export function PipelineDetails() {
     isOpen: restartWithoutStateModalIsOpen,
     onOpen: onRestartWithoutStateModalOpen,
     onClose: onRestartWithoutStateModalClose,
+  } = useDisclosure();
+  const {
+    isOpen: schedulerConfigModalIsOpen,
+    onOpen: onSchedulerConfigModalOpen,
+    onClose: onSchedulerConfigModalClose,
   } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -214,13 +239,9 @@ export function PipelineDetails() {
           <Box className="field">
             <Box className="fieldName">Scheduler Config</Box>
             <Box className="fieldValue">
-              <SyntaxHighlighter
-                language="json"
-                style={vs2015}
-                customStyle={{ borderRadius: '5px' }}
-              >
-                {JSON.stringify(job.scheduler_config, null, 2)}
-              </SyntaxHighlighter>
+              <Button size="sm" onClick={onSchedulerConfigModalOpen}>
+                View
+              </Button>
             </Box>
           </Box>
         ) : null}
@@ -429,6 +450,27 @@ export function PipelineDetails() {
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
+      <Modal
+        isOpen={schedulerConfigModalIsOpen}
+        onClose={onSchedulerConfigModalClose}
+        isCentered
+        size="xl"
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Scheduler Config</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <Stack spacing={1}>
+              {flattenConfig(job.scheduler_config).map(([k, v]) => (
+                <Text key={k} fontFamily="mono" fontSize="sm" wordBreak="break-all">
+                  {k}: {v}
+                </Text>
+              ))}
+            </Stack>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </>
   );
 }
