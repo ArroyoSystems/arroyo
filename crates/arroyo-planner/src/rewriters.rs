@@ -703,6 +703,36 @@ impl TreeNodeRewriter for TimeWindowNullCheckRemover {
 
         Ok(Transformed::no(node))
     }
+
+    fn f_up(&mut self, node: Self::Node) -> DFResult<Transformed<Self::Node>> {
+        // Collapse the trivial `expr AND true` / `true AND expr` left behind when an
+        // `IS NOT NULL` time-window check is rewritten to `true` in `f_down`. Beyond being a
+        // useless predicate, a literal-scalar RHS under `AND` triggers a row-leak bug in
+        // DataFusion's short-circuit `pre_selection_scatter`: when the left side is less than
+        // 20% selective, it returns the bare scalar instead of scattering it across the
+        // selection, so the entire batch passes the filter. Collapsing it is therefore also a
+        // correctness fix against upstream DataFusion.
+        if let Expr::BinaryExpr(BinaryExpr {
+            left,
+            op: logical_expr::Operator::And,
+            right,
+        }) = &node
+        {
+            if matches!(
+                right.as_ref(),
+                Expr::Literal(ScalarValue::Boolean(Some(true)), _)
+            ) {
+                return Ok(Transformed::yes(left.as_ref().clone()));
+            }
+            if matches!(
+                left.as_ref(),
+                Expr::Literal(ScalarValue::Boolean(Some(true)), _)
+            ) {
+                return Ok(Transformed::yes(right.as_ref().clone()));
+            }
+        }
+        Ok(Transformed::no(node))
+    }
 }
 
 pub struct RowTimeRewriter {}
