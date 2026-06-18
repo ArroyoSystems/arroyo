@@ -71,11 +71,7 @@ where
         let Some(manifest): Option<CheckpointManifest> =
             read_protobuf(store, &checkpoint_ref).await?
         else {
-            if history.is_empty() {
-                return Err(StoreError::ExistingObjectMissing {
-                    path: checkpoint_ref,
-                });
-            }
+            // this was already deleted in a prior cleaning run
             break;
         };
 
