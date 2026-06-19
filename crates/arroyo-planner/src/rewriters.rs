@@ -791,3 +791,65 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
         Ok(Transformed::no(node))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::prelude::{col, lit};
+
+    fn and(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryExpr(BinaryExpr::new(
+            Box::new(left),
+            logical_expr::Operator::And,
+            Box::new(right),
+        ))
+    }
+
+    /// `f_down` rewrites a time-window `IS NOT NULL` guard to the literal `true`, leaving a
+    /// trivial `predicate AND true` behind; `f_up` must collapse that back to `predicate`.
+    ///
+    /// `lit(true)` is the exact node `f_down` emits
+    /// (`Expr::Literal(ScalarValue::Boolean(Some(true)), None)`), so rewriting `predicate AND true`
+    /// reproduces the real post-`f_down` shape that reaches `f_up` in `plan::mod`'s `Filter` arm.
+    ///
+    /// Without the `f_up` collapse this fails: the predicate stays `a = 1 AND true` and
+    /// `transformed` is false. On vanilla DataFusion that residual `AND true` triggers the
+    /// `pre_selection_scatter` row-leak when the left side is < 20% selective.
+    #[test]
+    fn collapses_and_true() {
+        let predicate = col("a").eq(lit(1i64));
+
+        // `a = 1 AND true`  ->  `a = 1`
+        let rewritten = and(predicate.clone(), lit(true))
+            .rewrite(&mut TimeWindowNullCheckRemover {})
+            .unwrap();
+        assert!(rewritten.transformed, "expected `expr AND true` to be rewritten");
+        assert_eq!(
+            rewritten.data, predicate,
+            "`expr AND true` should collapse to `expr`"
+        );
+
+        // `true AND a = 1`  ->  `a = 1`  (the literal may sit on either side)
+        let rewritten = and(lit(true), predicate.clone())
+            .rewrite(&mut TimeWindowNullCheckRemover {})
+            .unwrap();
+        assert!(rewritten.transformed, "expected `true AND expr` to be rewritten");
+        assert_eq!(
+            rewritten.data, predicate,
+            "`true AND expr` should collapse to `expr`"
+        );
+    }
+
+    /// Guard: only literal `true` under `AND` is collapsed. A genuine two-sided conjunction must
+    /// be left untouched so we never drop a real predicate.
+    #[test]
+    fn preserves_real_conjunction() {
+        let conjunction = and(col("a").eq(lit(1i64)), col("b").eq(lit(2i64)));
+        let rewritten = conjunction
+            .clone()
+            .rewrite(&mut TimeWindowNullCheckRemover {})
+            .unwrap();
+        assert!(!rewritten.transformed);
+        assert_eq!(rewritten.data, conjunction);
+    }
+}
