@@ -39,6 +39,8 @@ pub enum StoreError {
     InvalidProtobuf { path: CheckpointRef, msg: String },
     #[error("conditional create for {path} reported an existing object, but it could not be read")]
     ExistingObjectMissing { path: CheckpointRef },
+    #[error("expected {path} to exist but it was missing")]
+    ExpectedObjectMissing { path: CheckpointRef },
     #[error("protocol error: {0}")]
     Protocol(#[from] ProtocolError),
 }
