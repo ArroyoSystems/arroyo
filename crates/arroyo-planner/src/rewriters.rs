@@ -823,7 +823,10 @@ mod tests {
         let rewritten = and(predicate.clone(), lit(true))
             .rewrite(&mut TimeWindowNullCheckRemover {})
             .unwrap();
-        assert!(rewritten.transformed, "expected `expr AND true` to be rewritten");
+        assert!(
+            rewritten.transformed,
+            "expected `expr AND true` to be rewritten"
+        );
         assert_eq!(
             rewritten.data, predicate,
             "`expr AND true` should collapse to `expr`"
@@ -833,7 +836,10 @@ mod tests {
         let rewritten = and(lit(true), predicate.clone())
             .rewrite(&mut TimeWindowNullCheckRemover {})
             .unwrap();
-        assert!(rewritten.transformed, "expected `true AND expr` to be rewritten");
+        assert!(
+            rewritten.transformed,
+            "expected `true AND expr` to be rewritten"
+        );
         assert_eq!(
             rewritten.data, predicate,
             "`true AND expr` should collapse to `expr`"
