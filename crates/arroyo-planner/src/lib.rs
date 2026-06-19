@@ -59,6 +59,8 @@ use std::fmt::{Debug, Formatter};
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
 
+use crate::ddl::ParsedCreateTable;
+use crate::dialect::ArroyoDialect;
 use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::extension::projection::ProjectionExtension;
 use crate::udafs::EmptyUdaf;
@@ -78,8 +80,6 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
 use datafusion::prelude::col;
-use crate::ddl::ParsedCreateTable;
-use crate::dialect::ArroyoDialect;
 use sqlparser::ast::{OneOrManyWithParens, Statement};
 use sqlparser::parser::{Parser, ParserError};
 use sqlparser::tokenizer::Token;
@@ -869,7 +869,10 @@ pub async fn parse_and_get_arrow_program(
                 if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
                     schema_provider.insert_table(table);
                 } else {
-                    inserts.push(Insert::try_from_statement(&statement, &mut schema_provider)?);
+                    inserts.push(Insert::try_from_statement(
+                        &statement,
+                        &mut schema_provider,
+                    )?);
                 }
             }
         }

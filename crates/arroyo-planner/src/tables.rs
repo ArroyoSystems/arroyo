@@ -1,3 +1,4 @@
+use crate::ddl::{ParsedColumn, ParsedCreateTable};
 use crate::extension::remote_table::RemoteTableExtension;
 use crate::types::convert_data_type;
 use crate::{
@@ -5,7 +6,6 @@ use crate::{
     external::{ProcessingMode, SqlSource},
     fields_with_qualifiers, multifield_partial_ord, parse_sql,
 };
-use crate::ddl::{ParsedColumn, ParsedCreateTable};
 use crate::{DEFAULT_IDLE_TIME, rewrite_plan};
 use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
@@ -52,10 +52,7 @@ use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::Query;
 use datafusion::{
     optimizer::{OptimizerContext, optimizer::Optimizer},
-    sql::{
-        planner::SqlToRel,
-        sqlparser::ast::Statement,
-    },
+    sql::{planner::SqlToRel, sqlparser::ast::Statement},
 };
 use sqlparser::ast;
 use std::sync::Arc;
@@ -816,11 +813,9 @@ impl Table {
                     None => None,
                 };
 
-                let watermark = watermark
-                    .as_ref()
-                    .map(|(column_name, watermark_expr)| {
-                        (column_name.to_string(), watermark_expr.clone())
-                    });
+                let watermark = watermark.as_ref().map(|(column_name, watermark_expr)| {
+                    (column_name.to_string(), watermark_expr.clone())
+                });
 
                 let table = ConnectorTable::from_options(
                     &name,

@@ -196,8 +196,7 @@ pub fn parse_create_table(parser: &mut Parser) -> Result<ParsedCreateTable, Pars
                 watermark = Some((column_name, watermark_expr));
             } else if parser.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
                 parser.expect_token(&Token::LParen)?;
-                primary_key_columns
-                    .extend(parser.parse_comma_separated(Parser::parse_identifier)?);
+                primary_key_columns.extend(parser.parse_comma_separated(Parser::parse_identifier)?);
                 parser.expect_token(&Token::RParen)?;
             } else {
                 columns.push(parse_column(parser)?);

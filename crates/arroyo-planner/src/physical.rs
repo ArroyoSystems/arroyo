@@ -555,7 +555,6 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
     fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
-
 }
 
 #[derive(Debug)]
@@ -630,7 +629,6 @@ impl ExecutionPlan for RecordBatchVecReader {
     fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -701,7 +699,6 @@ impl ExecutionPlan for ArroyoMemExec {
     fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
-
 }
 
 #[derive(Debug)]
@@ -817,7 +814,6 @@ impl ExecutionPlan for DebeziumUnrollingExec {
             self.primary_keys.clone(),
         )?))
     }
-
 }
 
 struct DebeziumUnrollingStream {
@@ -1067,7 +1063,6 @@ impl ExecutionPlan for ToDebeziumExec {
             struct_projection,
         }))
     }
-
 }
 
 struct ToDebeziumStream {
