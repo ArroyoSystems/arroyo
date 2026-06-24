@@ -99,6 +99,7 @@ pub struct StartPipelineReq {
     pub program: LogicalProgram,
     pub wasm_path: String,
     pub pipeline_id: PipelineId,
+    pub organization_id: String,
     pub job_id: JobId,
     pub hash: String,
     pub generation: u64,
