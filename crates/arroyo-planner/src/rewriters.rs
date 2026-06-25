@@ -791,3 +791,56 @@ impl TreeNodeRewriter for SinkInputRewriter<'_> {
         Ok(Transformed::no(node))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::prelude::{col, lit};
+
+    fn and(left: Expr, right: Expr) -> Expr {
+        Expr::BinaryExpr(BinaryExpr {
+            left: Box::new(left),
+            op: logical_expr::Operator::And,
+            right: Box::new(right),
+        })
+    }
+
+    fn collapse(expr: Expr) -> Expr {
+        expr.rewrite(&mut TimeWindowNullCheckRemover {})
+            .unwrap()
+            .data
+    }
+
+    #[test]
+    fn collapses_expr_and_true() {
+        let pred = col("a").gt(lit(1i64));
+        assert_eq!(collapse(and(pred.clone(), lit(true))), pred);
+    }
+
+    #[test]
+    fn collapses_true_and_expr() {
+        let pred = col("a").gt(lit(1i64));
+        assert_eq!(collapse(and(lit(true), pred.clone())), pred);
+    }
+
+    #[test]
+    fn collapses_nested_redundant_true() {
+        // `(a > 1 AND true) AND true` collapses all the way to `a > 1`.
+        let pred = col("a").gt(lit(1i64));
+        let expr = and(and(pred.clone(), lit(true)), lit(true));
+        assert_eq!(collapse(expr), pred);
+    }
+
+    #[test]
+    fn preserves_and_false() {
+        // Only literal `true` is redundant under AND; `false` changes the result and is kept.
+        let expr = and(col("a").gt(lit(1i64)), lit(false));
+        assert_eq!(collapse(expr.clone()), expr);
+    }
+
+    #[test]
+    fn preserves_genuine_conjunction() {
+        let expr = and(col("a").gt(lit(1i64)), col("b").lt(lit(5i64)));
+        assert_eq!(collapse(expr.clone()), expr);
+    }
+}

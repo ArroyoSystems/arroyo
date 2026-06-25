@@ -242,3 +242,253 @@ pub fn parse_create_table(parser: &mut Parser) -> Result<ParsedCreateTable, Pars
         partitions,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dialect::ArroyoDialect;
+
+    /// Parse a statement we expect `is_connector_table` to claim, asserting that routing first.
+    fn parse(sql: &str) -> ParsedCreateTable {
+        let dialect = ArroyoDialect {};
+        let mut parser = Parser::new(&dialect).try_with_sql(sql).unwrap();
+        assert!(
+            is_connector_table(&parser),
+            "expected a connector/memory CREATE TABLE for: {sql}"
+        );
+        parse_create_table(&mut parser).unwrap()
+    }
+
+    fn try_parse(sql: &str) -> Result<ParsedCreateTable, ParserError> {
+        let dialect = ArroyoDialect {};
+        let mut parser = Parser::new(&dialect).try_with_sql(sql).unwrap();
+        parse_create_table(&mut parser)
+    }
+
+    /// Whether `parse_program` would dispatch this statement to arroyo's DDL parser.
+    fn routes_to_ddl(sql: &str) -> bool {
+        let dialect = ArroyoDialect {};
+        let parser = Parser::new(&dialect).try_with_sql(sql).unwrap();
+        is_connector_table(&parser)
+    }
+
+    #[test]
+    fn routing_distinguishes_connector_tables_from_queries() {
+        // Connector/memory CREATE TABLE (no `AS <query>`) → parsed by arroyo.
+        assert!(routes_to_ddl("CREATE TABLE foo (x BIGINT)"));
+        assert!(routes_to_ddl(
+            "CREATE TABLE foo (x BIGINT) WITH ('connector' = 'kafka')"
+        ));
+        assert!(routes_to_ddl(
+            "CREATE TABLE impulse WITH (connector = 'impulse')"
+        ));
+        assert!(routes_to_ddl("CREATE OR REPLACE TABLE foo (x BIGINT)"));
+        assert!(routes_to_ddl("CREATE TEMPORARY TABLE foo (x BIGINT)"));
+        assert!(routes_to_ddl("CREATE TABLE IF NOT EXISTS foo (x BIGINT)"));
+
+        // Everything else → left to vanilla sqlparser + DataFusion.
+        assert!(!routes_to_ddl("CREATE TABLE foo AS SELECT 1"));
+        assert!(!routes_to_ddl(
+            "CREATE TABLE foo AS WITH t AS (SELECT 1) SELECT * FROM t"
+        ));
+        assert!(!routes_to_ddl("CREATE VIEW v AS SELECT 1"));
+        assert!(!routes_to_ddl("SELECT 1"));
+        assert!(!routes_to_ddl("INSERT INTO foo VALUES (1)"));
+    }
+
+    #[test]
+    fn generated_column_as_is_not_mistaken_for_ctas() {
+        // The `AS (expr)` of a generated column sits inside the column-list parens (depth > 0),
+        // so the depth-0 `AS` scan in `is_connector_table` must not treat it as CTAS.
+        assert!(routes_to_ddl(
+            "CREATE TABLE foo (x BIGINT, y BIGINT GENERATED ALWAYS AS (x + 1) STORED) \
+             WITH ('connector' = 'kafka')"
+        ));
+        assert!(routes_to_ddl(
+            "CREATE TABLE foo (x BIGINT, y BIGINT AS (x + 1))"
+        ));
+    }
+
+    #[test]
+    fn parses_columns_with_types_and_nullability() {
+        let t = parse("CREATE TABLE foo (a BIGINT, b TEXT NOT NULL, c INT NULL)");
+        assert_eq!(t.name.to_string(), "foo");
+        assert_eq!(t.columns.len(), 3);
+
+        assert_eq!(t.columns[0].name.value, "a");
+        assert_eq!(t.columns[0].data_type.to_string(), "BIGINT");
+        assert!(!t.columns[0].not_null, "columns are nullable by default");
+
+        assert_eq!(t.columns[1].name.value, "b");
+        assert_eq!(t.columns[1].data_type.to_string(), "TEXT");
+        assert!(t.columns[1].not_null);
+
+        assert_eq!(t.columns[2].name.value, "c");
+        assert!(!t.columns[2].not_null, "explicit NULL is still nullable");
+    }
+
+    #[test]
+    fn parses_primary_keys_inline_and_table_level() {
+        let inline = parse("CREATE TABLE foo (id BIGINT NOT NULL PRIMARY KEY, x INT)");
+        assert!(inline.columns[0].primary_key);
+        assert!(inline.columns[0].not_null);
+        assert!(!inline.columns[1].primary_key);
+        assert!(inline.primary_key_columns.is_empty());
+
+        let table_level = parse("CREATE TABLE foo (a INT, b INT, PRIMARY KEY (a, b))");
+        assert!(!table_level.columns[0].primary_key);
+        let pk: Vec<_> = table_level
+            .primary_key_columns
+            .iter()
+            .map(|i| i.value.clone())
+            .collect();
+        assert_eq!(pk, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn parses_watermark_with_and_without_expression() {
+        let with_expr = parse(
+            "CREATE TABLE foo (event_time TIMESTAMP, \
+             WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND)",
+        );
+        let (col, expr) = with_expr.watermark.expect("watermark present");
+        assert_eq!(col.value, "event_time");
+        let rendered = expr.expect("watermark expr present").to_string();
+        assert!(
+            rendered.contains("event_time") && rendered.contains("INTERVAL"),
+            "unexpected watermark expr: {rendered}"
+        );
+
+        let no_expr = parse("CREATE TABLE foo (event_time TIMESTAMP, WATERMARK FOR event_time)");
+        let (col, expr) = no_expr.watermark.expect("watermark present");
+        assert_eq!(col.value, "event_time");
+        assert!(expr.is_none());
+    }
+
+    #[test]
+    fn rejects_multiple_watermarks() {
+        let err = try_parse(
+            "CREATE TABLE foo (a TIMESTAMP, b TIMESTAMP, WATERMARK FOR a, WATERMARK FOR b)",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("only one WATERMARK"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn parses_metadata_from() {
+        let t = parse("CREATE TABLE foo (name TEXT, my_topic TEXT METADATA FROM 'topic')");
+        assert_eq!(t.columns[0].metadata_key, None);
+        assert_eq!(t.columns[1].metadata_key.as_deref(), Some("topic"));
+    }
+
+    #[test]
+    fn parses_generated_columns() {
+        // `GENERATED ALWAYS AS (expr) [STORED]`
+        let stored = parse(
+            "CREATE TABLE foo (date_string TEXT, \
+             ts TIMESTAMP GENERATED ALWAYS AS (CAST(date_string AS TIMESTAMP)) STORED)",
+        );
+        assert!(stored.columns[0].generated.is_none());
+        assert!(stored.columns[1].generated.is_some());
+
+        // shorthand `AS (expr)`
+        let shorthand = parse("CREATE TABLE foo (x BIGINT, y BIGINT AS (x + 1))");
+        assert_eq!(
+            shorthand.columns[1].generated.as_ref().unwrap().to_string(),
+            "x + 1"
+        );
+    }
+
+    #[test]
+    fn parses_with_options_including_quoted_and_dotted_keys() {
+        // Connectors like iceberg use single-quoted, dotted option keys (e.g. 'catalog.type').
+        // These can't be bare identifiers, so the WITH-option parser must accept quoted keys and
+        // expose them with the quotes stripped (ConnectorOptions keys on `Ident::value`).
+        let t = parse(
+            "CREATE TABLE foo (x BIGINT) WITH (\
+             connector = 'kafka', \
+             event_rate = 100, \
+             'catalog.type' = 'rest', \
+             'shuffle_by_partition.enabled' = true)",
+        );
+        let opts: Vec<(String, String)> = t
+            .with_options
+            .iter()
+            .map(|o| match o {
+                SqlOption::KeyValue { key, value } => (key.value.clone(), value.to_string()),
+                other => panic!("unexpected option form: {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            opts,
+            vec![
+                ("connector".to_string(), "'kafka'".to_string()),
+                ("event_rate".to_string(), "100".to_string()),
+                ("catalog.type".to_string(), "'rest'".to_string()),
+                (
+                    "shuffle_by_partition.enabled".to_string(),
+                    "true".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_partitioned_by_transforms() {
+        let t = parse(
+            "CREATE TABLE foo (id INT, b TEXT, ts TIMESTAMP) WITH (connector = 'iceberg') \
+             PARTITIONED BY (bucket(id, 4), truncate(b, 10), identity(ts))",
+        );
+        let parts = t.partitions.expect("partitions present");
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0].to_string(), "bucket(id, 4)");
+        assert_eq!(parts[2].to_string(), "identity(ts)");
+    }
+
+    #[test]
+    fn parses_temporary_and_if_not_exists() {
+        let temp = parse("CREATE TEMPORARY TABLE foo (x BIGINT)");
+        assert!(temp.temporary);
+        assert_eq!(temp.name.to_string(), "foo");
+
+        let if_not_exists = parse("CREATE TABLE IF NOT EXISTS bar (x BIGINT)");
+        assert!(!if_not_exists.temporary);
+        assert_eq!(if_not_exists.name.to_string(), "bar");
+    }
+
+    #[test]
+    fn parses_trailing_comma_in_column_list() {
+        let t = parse("CREATE TABLE foo (a INT, b INT,)");
+        assert_eq!(t.columns.len(), 2);
+    }
+
+    #[test]
+    fn parses_real_world_watermark_table() {
+        // Mirrors test/queries/watermarks.sql, including `timestamp` used as a column name
+        // (a non-reserved keyword) and a lowercase `watermark ... as` constraint.
+        let t = parse(
+            "CREATE TABLE orders (\
+               customer_id INT, \
+               order_id INT, \
+               date_string TEXT NOT NULL, \
+               timestamp TIMESTAMP GENERATED ALWAYS AS (CAST(date_string AS TIMESTAMP)), \
+               watermark FOR timestamp as CAST(date_string AS TIMESTAMP) - INTERVAL '5 seconds'\
+             ) WITH (\
+               connector = 'kafka', \
+               format = 'json', \
+               type = 'source', \
+               topic = 'order_topic'\
+             )",
+        );
+        assert_eq!(t.columns.len(), 4);
+        assert_eq!(t.columns[3].name.value, "timestamp");
+        assert!(t.columns[3].generated.is_some());
+        let (wm_col, wm_expr) = t.watermark.expect("watermark present");
+        assert_eq!(wm_col.value, "timestamp");
+        assert!(wm_expr.is_some());
+        assert_eq!(t.with_options.len(), 4);
+    }
+}
