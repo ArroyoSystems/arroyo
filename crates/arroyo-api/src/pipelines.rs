@@ -511,7 +511,8 @@ impl TryInto<Pipeline> for DbPipeline {
             action_text,
             action_in_progress,
             preview: self.ttl_micros.is_some(),
-            env_vars: self.env_vars,
+            state_url: self.state_url,
+            tags: serde_json::from_value(self.tags).map_err(log_and_map)?,
         })
     }
 }
@@ -536,6 +537,7 @@ impl From<DbPipelineJob> for Job {
             }),
             created_at: to_micros(val.created_at),
             scheduler_config: val.scheduler_config,
+            env_vars: val.env_vars,
         }
     }
 }

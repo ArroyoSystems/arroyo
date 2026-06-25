@@ -555,6 +555,7 @@ impl Scheduling {
                     program: ctx.program.clone(),
                     wasm_path: "".to_string(),
                     pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
+                    organization_id: ctx.config.organization_id.clone(),
                     job_id: JobId(ctx.config.id.clone()),
                     generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
