@@ -6,7 +6,7 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-controller
 spec:
-  replicas: 1
+  replicas: {{ .Values.controller.replicas }}
   selector:
     matchLabels:
       app: {{ include "arroyo.fullname" . }}-controller
@@ -17,6 +17,9 @@ spec:
       labels:
       {{- include "arroyo.labels" . | nindent 8 }}
         app: {{ include "arroyo.fullname" . }}-controller
+      {{- with .Values.controller.podLabels }}
+      {{- toYaml . | nindent 8 }}
+      {{- end }}
       annotations:
         {{- if .Values.prometheus.setAnnotations }}
         prometheus.io/scrape: "true"
@@ -49,53 +52,44 @@ spec:
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         command: [ "/app/arroyo", "--config-dir", "/config", "migrate", "--wait", "300" ]
+        {{- with .Values.controller.initContainers.migrate.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
-          - name: arroyo-config
-            mountPath: /root/.config/arroyo
+        - name: arroyo-config
+          mountPath: /root/.config/arroyo
           {{- if .Values.existingConfigMap }}
-          - name: arroyo-user-config
-            mountPath: /config
+        - name: arroyo-user-config
+          mountPath: /config
           {{- end }}
 
         env:
-        {{- if .Values.postgresql.deploy }}
-          - name: ARROYO__DATABASE__POSTGRES__PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: {{ include "arroyo.fullname" . }}-postgresql
-                key: password
-          {{- end }}
-
+        {{- include "arroyo.databasePasswordEnv" . | nindent 8 }}
         {{ if .Values.env }}
-        {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 10 }}
+        {{- include "tplvalues.render" (dict "value" .Values.env "context" $) | nindent 8 }}
         {{ end }}
       containers:
       - name: arroyo-controller
         securityContext:
-        {{- toYaml .Values.securityContext | nindent 12 }}
+        {{- toYaml .Values.securityContext | nindent 10 }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         imagePullPolicy: {{ .Values.imagePullPolicy }}
         command: ["/app/arroyo", "--config-dir", "/config", "cluster"]
 
         env:
-        {{- if .Values.postgresql.deploy }}
-        - name: ARROYO__DATABASE__POSTGRES__PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: {{ include "arroyo.fullname" . }}-postgresql
-              key: password
-          {{- end }}
+        {{- include "arroyo.databasePasswordEnv" . | nindent 8 }}
 
         - name: ARROYO__KUBERNETES_SCHEDULER__NAMESPACE
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-              
+
         - name: ARROYO__KUBERNETES_SCHEDULER__CONTROLLER__NAME
           valueFrom:
             fieldRef:
-              fieldPath: metadata.name              
-              
+              fieldPath: metadata.name
+
         - name: ARROYO__KUBERNETES_SCHEDULER__CONTROLLER__UID
           valueFrom:
             fieldRef:
@@ -116,12 +110,14 @@ spec:
           httpGet:
             path: /status
             port: admin
-          initialDelaySeconds: 5
+          initialDelaySeconds: {{ .Values.controller.probeInitialDelaySeconds }}
         readinessProbe:
           httpGet:
             path: /status
             port: admin
-          initialDelaySeconds: 5
+          initialDelaySeconds: {{ .Values.controller.probeInitialDelaySeconds }}
+        resources:
+          {{- toYaml .Values.controller.resources | nindent 10 }}
         volumeMounts:
         {{- if .Values.volumeMounts }}
         {{- include "tplvalues.render" (dict "value" .Values.volumeMounts "context" $) | nindent 8 }}
@@ -132,37 +128,15 @@ spec:
         - name: arroyo-user-config
           mountPath: /config
         {{- end }}
-      {{- with .Values.nodeSelector }}
+      {{- with .Values.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.affinity }}
+      {{- with .Values.controller.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with .Values.controller.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "arroyo.fullname" . }}
-spec:
-  selector:
-    app: {{ include "arroyo.fullname" . }}-controller
-  ports:
-    - name: grpc
-      protocol: TCP
-      port: {{ .Values.controller.service.grpcPort }}
-      targetPort: grpc
-    - name: admin
-      protocol: TCP
-      port: {{ .Values.controller.service.adminPort }}
-      targetPort: admin
-    - name: http
-      protocol: TCP
-      port: {{ .Values.controller.service.httpPort }}
-      targetPort: http

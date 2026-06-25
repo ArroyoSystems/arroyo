@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arroyo.fullname" . }}
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
+  {{- with .Values.controller.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.controller.service.type }}
+  {{- if eq .Values.controller.service.type "LoadBalancer" }}
+  {{- with .Values.controller.service.loadBalancerIP }}
+  loadBalancerIP: {{ . }}
+  {{- end }}
+  {{- with .Values.controller.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  selector:
+    app: {{ include "arroyo.fullname" . }}-controller
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: {{ .Values.controller.service.grpcPort }}
+      targetPort: grpc
+    - name: admin
+      protocol: TCP
+      port: {{ .Values.controller.service.adminPort }}
+      targetPort: admin
+    - name: http
+      protocol: TCP
+      port: {{ .Values.controller.service.httpPort }}
+      targetPort: http
