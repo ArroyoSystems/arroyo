@@ -167,7 +167,7 @@ impl IncrementalState {
                 )?;
                 let mut acc = expr.create_accumulator()?;
                 acc.update_batch(&input)?;
-                acc.evaluate_mut()
+                acc.evaluate()
             }
         }
     }
@@ -182,7 +182,23 @@ enum AccumulatorType {
 impl AccumulatorType {
     fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<FieldRef>> {
         Ok(match self {
-            AccumulatorType::Sliding => agg.sliding_state_fields()?,
+            AccumulatorType::Sliding => {
+                // Vanilla DataFusion has no `sliding_state_fields`; derive the sliding state schema
+                // from a fresh sliding accumulator's `state()` (the values we checkpoint), naming the
+                // fields consistently so the checkpoint schema round-trips on restore.
+                let mut acc = agg.create_sliding_accumulator()?;
+                acc.state()?
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        Arc::new(Field::new(
+                            format!("{}_state_{i}", agg.name()),
+                            v.data_type(),
+                            true,
+                        ))
+                    })
+                    .collect()
+            }
             // state for batch tables is handled separately
             AccumulatorType::Batch => vec![],
         })
