@@ -649,6 +649,11 @@ export interface components {
             type: "protobuf";
         })) | ({
             type: "Format";
+        } & (components["schemas"]["MsgPackFormat"] & {
+            /** @enum {string} */
+            type: "msgpack";
+        })) | ({
+            type: "Format";
         } & (components["schemas"]["ParquetFormat"] & {
             /** @enum {string} */
             type: "parquet";
@@ -765,6 +770,11 @@ export interface components {
         };
         /** @enum {string} */
         MetricName: "bytes_recv" | "bytes_sent" | "messages_recv" | "messages_sent" | "backpressure" | "tx_queue_size" | "tx_queue_rem";
+        MsgPackFormat: {
+            decimal_encoding?: components["schemas"]["DecimalEncoding"];
+            into_unstructured_json?: boolean;
+            timestamp_format?: components["schemas"]["TimestampFormat"];
+        };
         NewlineDelimitedFraming: {
             /** Format: int64 */
             max_line_length?: number | null;
@@ -819,6 +829,7 @@ export interface components {
             checkpoint_interval_micros: number;
             /** Format: int64 */
             created_at: number;
+            env_vars: unknown;
             graph: components["schemas"]["PipelineGraph"];
             id: string;
             name: string;
