@@ -815,6 +815,16 @@ pub async fn patch_pipeline(
         None
     };
 
+    let env_vars = pipeline_patch
+        .env_vars
+        .map(|e| serde_json::to_value(e).map_err(log_and_map))
+        .transpose()?;
+
+    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
+        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+        v => v,
+    });
+
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
@@ -822,6 +832,8 @@ pub async fn patch_pipeline(
         stop,
         &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
+        &env_vars,
+        &scheduler_config,
         &job_id,
         &auth_data.organization_id,
     )

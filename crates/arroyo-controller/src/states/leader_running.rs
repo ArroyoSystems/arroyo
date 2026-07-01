@@ -5,6 +5,7 @@ use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
+use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
@@ -107,6 +108,19 @@ impl State for LeaderRunning {
                                     *self,
                                     LeaderRestarting {
                                         mode: c.restart_mode,
+                                    },
+                                ));
+                            }
+
+                            // env_vars and scheduler_config are only applied when workers are
+                            // (re)scheduled, so a change to either while the job is running
+                            // requires a restart to take effect.
+                            if c.scheduler_config != ctx.config.scheduler_config
+                                || c.env_vars != ctx.config.env_vars {
+                                return Ok(Transition::next(
+                                    *self,
+                                    LeaderRestarting {
+                                        mode: RestartMode::safe,
                                     },
                                 ));
                             }
