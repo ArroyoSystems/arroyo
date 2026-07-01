@@ -815,6 +815,20 @@ pub async fn patch_pipeline(
         None
     };
 
+    // TODO: replace restart_nonce bump with a dedicated schedule_nonce column so that
+    // scheduling-time config changes (env_vars, scheduler_config) are not conflated with
+    // explicit user-requested restarts (restart_nonce carries ignore_state_before_epoch
+    // semantics). The SQL query bumps restart_nonce when either field is non-null.
+    let env_vars = pipeline_patch
+        .env_vars
+        .map(|e| serde_json::to_value(e).map_err(log_and_map))
+        .transpose()?;
+
+    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
+        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+        v => v,
+    });
+
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
@@ -822,6 +836,8 @@ pub async fn patch_pipeline(
         stop,
         &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
+        &env_vars,
+        &scheduler_config,
         &job_id,
         &auth_data.organization_id,
     )

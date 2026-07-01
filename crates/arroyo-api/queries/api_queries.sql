@@ -165,7 +165,7 @@ WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 ----------- jobs -----------------------
 
---! update_job(checkpoint_interval_micros?, stop?, parallelism_overrides?)
+--! update_job(checkpoint_interval_micros?, stop?, parallelism_overrides?, env_vars?, scheduler_config?)
 UPDATE job_configs
 SET
    updated_at = :updated_at,
@@ -173,7 +173,13 @@ SET
 
    stop = COALESCE(:stop, stop),
    checkpoint_interval_micros = COALESCE(:checkpoint_interval_micros, checkpoint_interval_micros),
-   parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides)
+   parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides),
+   env_vars = COALESCE(:env_vars, env_vars),
+   scheduler_config = COALESCE(:scheduler_config, scheduler_config),
+   restart_nonce = CASE WHEN :env_vars IS NOT NULL OR :scheduler_config IS NOT NULL
+                        THEN restart_nonce + 1
+                        ELSE restart_nonce
+                   END
 WHERE id = :job_id AND organization_id = :organization_id;
 
 --! restart_job(mode, ignore_state_before_epoch?)
