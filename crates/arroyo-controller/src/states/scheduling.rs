@@ -1,4 +1,4 @@
-use arroyo_rpc::grpc::rpc::{CheckpointManifest, StartExecutionReq, TaskAssignment};
+use arroyo_rpc::grpc::rpc::{CheckpointManifest, JobState, StartExecutionReq, TaskAssignment};
 use arroyo_rpc::identity::{WorkerClient, worker_client};
 use arroyo_types::{CLUSTER_ID_ENV, JobId, MachineId, WorkerId};
 use std::time::SystemTime;
@@ -890,6 +890,40 @@ impl State for Scheduling {
                     }
                 }
                 _ = tokio::time::sleep(timeout) => {
+                    // if we timeout in leader mode, it may mean that the job failed on startup
+                    // in which case, we need to collect the error to understand why (and handle
+                    // it appropriately)
+                    if let Some((id, addr)) = leader_info.clone()
+                        && let Ok(mut leader_manager) = LeaderManager::connect(
+                            JobId(ctx.config.id.clone()),
+                            ctx.status.generation,
+                            id,
+                            addr,
+                        ).await
+                            && let Ok(status) = leader_manager.poll_leader_status().await {
+                                match JobState::try_from(status.job_state) {
+                                    Ok(JobState::JobFailing | JobState::JobFailed) => {
+                                        let Some(failure) = status.job_failure else {
+                                            return Err(ctx.retryable(
+                                                self,
+                                                "leader reported failing status without failure payload",
+                                                anyhow!("missing job failure"),
+                                                10,
+                                            ));
+                                        };
+                                        return ctx.handle_job_failure(*self, failure).await;
+                                    }
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        warn!(
+                                            message = "leader returned invalid job state before task startup timeout",
+                                            error = format!("{:?}", e),
+                                            job_id = *ctx.config.id,
+                                        );
+                                    }
+                                }
+                            }
+
                     return Err(ctx.retryable(self,
                         "timed out while waiting for tasks to start",
                         anyhow!("timed out after {:?} while waiting for worker startup", *pipeline_config.task_startup_time), 3));
