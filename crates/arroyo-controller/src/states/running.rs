@@ -11,6 +11,7 @@ use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
 use crate::states::restarting::Restarting;
 use crate::states::stop_if_desired_running;
+use crate::types::public::RestartMode;
 use crate::{job_controller::ControllerProgress, states::StateError};
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
@@ -56,6 +57,16 @@ impl State for Running {
                             if c.restart_nonce != ctx.status.restart_nonce {
                                 return Ok(Transition::next(*self, Restarting {
                                     mode: c.restart_mode
+                                }));
+                            }
+
+                            // env_vars and scheduler_config are only applied when workers are
+                            // (re)scheduled, so a change to either while the job is running
+                            // requires a restart to take effect.
+                            if c.scheduler_config != ctx.config.scheduler_config
+                                || c.env_vars != ctx.config.env_vars {
+                                return Ok(Transition::next(*self, Restarting {
+                                    mode: RestartMode::safe
                                 }));
                             }
 
