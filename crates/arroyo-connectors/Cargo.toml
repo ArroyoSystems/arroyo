@@ -53,7 +53,7 @@ sha2 = "0.10"
 
 # Kafka
 aws-msk-iam-sasl-signer = "1.0.0"
-rdkafka = { version = "0.37", features = [
+rdkafka = { version = "0.39", features = [
     "cmake-build",
     "tracing",
     "sasl",

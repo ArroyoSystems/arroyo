@@ -8,7 +8,7 @@ ARG PROFILE=release
 ARG FEATURES=python
 
 RUN apt-get update && \
-    apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
+    apt-get -y install curl libcurl4-openssl-dev pkg-config unzip build-essential libssl-dev openssl \
     cmake clang wget postgresql postgresql-client supervisor sudo bash libsasl2-dev && \
     cargo install refinery_cli
 
@@ -101,7 +101,7 @@ RUN cp -r /python/bin/* /usr/local/bin/ && \
     cp -r /python/share/* /usr/local/share/ && \
     rm -rf /python && \
     ldconfig
-  
+
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
