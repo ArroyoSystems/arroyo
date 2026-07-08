@@ -114,15 +114,13 @@ impl Recovering {
             }
             Ok(JobState::JobFailing) => {
                 info!(job_id, "job is failing in recovering, shutting down");
-                let _ = retry!(
-                    leader_manager
-                        .stop_leader(JobStopMode::JobStopImmediate)
-                        .await,
-                    5,
-                    Duration::from_millis(200),
-                    Duration::from_secs(2),
-                    |e| warn!(job_id, err = ?e, "failed to stop failing job")
-                );
+                if let Err(e) = leader_manager
+                    .stop_leader(JobStopMode::JobStopImmediate)
+                    .await
+                {
+                    warn!(job_id, error =? e, "failed to stop leader");
+                    return;
+                }
                 JobState::JobFailed
             }
         };
