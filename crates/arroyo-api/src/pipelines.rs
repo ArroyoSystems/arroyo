@@ -46,8 +46,8 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found,
-    paginate_results, required_field, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, log_and_map,
+    not_found, paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
@@ -631,7 +631,7 @@ pub async fn create_pipeline(
 pub async fn put_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
@@ -761,7 +761,9 @@ pub async fn create_preview_pipeline(
 pub async fn patch_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
     WithRejection(Json(pipeline_patch), _): WithRejection<Json<PipelinePatch>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -862,7 +864,7 @@ pub async fn patch_pipeline(
 pub async fn restart_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -977,7 +979,9 @@ pub async fn get_pipelines(
 pub async fn get_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -1005,7 +1009,9 @@ pub async fn get_pipeline(
 pub async fn delete_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<(), ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -1058,7 +1064,9 @@ pub async fn delete_pipeline(
 pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<JobCollection>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
