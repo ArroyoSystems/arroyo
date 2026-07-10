@@ -80,7 +80,7 @@ macro_rules! register_log {
     }};
 }
 
-pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+pub fn init_logging_with_filter(name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
     init_event_logger(Arc::new(AnalyticsEventLogger::new()));
 
     if let Err(e) = LogTracer::init() {
@@ -137,6 +137,11 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
             }
             if config().logging.enable_file_name {
                 layer.with_file("filename");
+            }
+
+            layer.add_static_field("arroyo_service", serde_json::json!(name));
+            if let Ok(pipeline_id) = env::var(arroyo_types::PIPELINE_ID_ENV) {
+                layer.add_static_field("pipeline_id", serde_json::json!(pipeline_id));
             }
 
             // add static fields
