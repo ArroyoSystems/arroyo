@@ -56,6 +56,15 @@ pub struct PipelinePatch {
     pub parallelism: Option<u64>,
     pub checkpoint_interval_micros: Option<u64>,
     pub stop: Option<StopType>,
+    /// Per-job environment variables forwarded to workers.
+    pub env_vars: Option<HashMap<String, String>>,
+    /// Per-job scheduler configuration overlay. The shape mirrors the
+    /// controller's global scheduler config (e.g. the
+    /// `kubernetes-scheduler.*` block) and is merged on top of it at
+    /// scheduling time. An omitted field, `null`, or an empty object
+    /// all mean "use the controller's global scheduler config
+    /// unchanged".
+    pub scheduler_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -80,7 +89,10 @@ pub struct Pipeline {
     pub action_in_progress: bool,
     pub graph: PipelineGraph,
     pub preview: bool,
-    pub env_vars: serde_json::Value,
+    /// Optional URL pointing to the state the pipeline was started from.
+    pub state_url: Option<String>,
+    /// User-defined key/value tags associated with the pipeline.
+    pub tags: HashMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -130,6 +142,8 @@ pub struct FailureReason {
 #[serde(rename_all = "snake_case")]
 pub struct Job {
     pub id: String,
+    /// The `pub_id` of the pipeline this job belongs to.
+    pub pipeline_id: String,
     pub running_desired: bool,
     pub state: String,
     pub run_id: u64,
@@ -142,6 +156,8 @@ pub struct Job {
     /// An empty object means "no overrides, use the controller's
     /// global scheduler config unchanged".
     pub scheduler_config: serde_json::Value,
+    /// Per-job environment variables forwarded to workers.
+    pub env_vars: serde_json::Value,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

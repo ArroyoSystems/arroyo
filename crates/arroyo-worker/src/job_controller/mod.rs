@@ -28,7 +28,7 @@ pub use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent, WorkerContex
 pub mod job_metrics;
 
 pub const CHECKPOINTS_TO_KEEP: u64 = 10;
-pub const COMPACT_EVERY: u64 = 2;
+pub const COMPACT_EVERY: u64 = 10;
 
 #[derive(Debug, Clone)]
 pub struct StoredCheckpointMetadata {

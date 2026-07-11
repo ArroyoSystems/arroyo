@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import useLocalStorage from 'use-local-storage';
+import { useLocalStorage } from 'usehooks-ts';
 import { GlobalUdf, useGlobalUdfs } from './lib/data_fetching';
 import { generate_udf_id } from './lib/util';
 

@@ -10,5 +10,5 @@ tokio = { workspace = true }
 rand = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
-rdkafka = "0.37"
+rdkafka = "0.39"
 reqwest = { workspace = true }

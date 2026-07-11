@@ -28,8 +28,8 @@ const PREVIEW_TTL: Duration = Duration::from_secs(60);
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found, paginate_results,
-    validate_pagination_params,
+    BearerAuth, ErrorResp, PipelineJobCheckpointPath, PipelineJobPath, authenticate, bad_request,
+    log_and_map, not_found, paginate_results, validate_pagination_params,
 };
 use crate::types::public::LogLevel;
 use crate::{AuthData, queries::api_queries, to_micros, types::public};
@@ -276,7 +276,10 @@ pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option
 pub async fn get_job_errors(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+    Path(PipelineJobPath {
+        id: pipeline_pub_id,
+        job_id: job_pub_id,
+    }): Path<PipelineJobPath>,
     query_params: Query<PaginationQueryParams>,
 ) -> Result<Json<JobLogMessageCollection>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -345,7 +348,10 @@ impl From<DbLogMessage> for JobLogMessage {
 pub async fn get_job_checkpoints(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+    Path(PipelineJobPath {
+        id: pipeline_pub_id,
+        job_id: job_pub_id,
+    }): Path<PipelineJobPath>,
 ) -> Result<Json<CheckpointCollection>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -414,7 +420,11 @@ pub async fn get_job_checkpoints(
 pub async fn get_checkpoint_details(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path((pipeline_pub_id, job_pub_id, epoch)): Path<(String, String, u32)>,
+    Path(PipelineJobCheckpointPath {
+        id: pipeline_pub_id,
+        job_id: job_pub_id,
+        epoch,
+    }): Path<PipelineJobCheckpointPath>,
 ) -> Result<Json<OperatorCheckpointGroupCollection>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -496,7 +506,10 @@ pub async fn get_checkpoint_details(
 pub async fn get_job_output(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+    Path(PipelineJobPath {
+        id: pipeline_pub_id,
+        job_id: job_pub_id,
+    }): Path<PipelineJobPath>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;

@@ -779,20 +779,6 @@ async fn execute_state<'a>(
             message,
             source,
             domain,
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 1,
-            ..
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 0,
-            ..
         }) => {
             error!(
                 message = "fatal state error",
@@ -818,6 +804,29 @@ async fn execute_state<'a>(
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
             // Transition to Failing state for graceful shutdown before Failed
             let s: Box<dyn State> = Box::new(Failing {});
+            Some(s)
+        }
+        Err(StateError::RetryableError {
+            message,
+            source,
+            domain,
+            retries: 0 | 1,
+            ..
+        }) => {
+            error!(
+                message = "exhausted in-state retries, moving to recovering",
+                job_id = *ctx.config.id,
+                state = state_name,
+                error_message = message,
+                error = format!("{:?}", source)
+            );
+            ctx.status.restarts += 1;
+            ctx.retries_attempted = 0;
+            let s: Box<dyn State> = Box::new(Recovering {
+                source,
+                reason: message,
+                domain,
+            });
             Some(s)
         }
         Err(StateError::RetryableError {

@@ -58,13 +58,18 @@ impl Recovering {
     }
 
     pub async fn cleanup_leader(leader_manager: &mut LeaderManager, job_id: &str) {
-        let status = match leader_manager.poll_leader_status().await {
-            Ok(status) => status,
-            Err(e) => {
-                warn!(job_id, error =? e, "failed to get leader status while recovering");
-                return;
-            }
-        };
+        let status =
+            match timeout(Duration::from_secs(30), leader_manager.poll_leader_status()).await {
+                Ok(Ok(status)) => status,
+                Ok(Err(e)) => {
+                    warn!(job_id, error =? e, "failed to get leader status while recovering");
+                    return;
+                }
+                Err(e) => {
+                    warn!(job_id, error =? e, "timed out polling leader status while recovering");
+                    return;
+                }
+            };
 
         let expected_state = match JobState::try_from(status.job_state) {
             Ok(JobState::JobFailed) => {
@@ -84,17 +89,11 @@ impl Recovering {
             Ok(JobState::JobRunning) => {
                 // shutdown
                 info!(job_id, "job is still running in recovering, shutting down");
-                if retry!(
-                    leader_manager
-                        .stop_leader(JobStopMode::JobStopImmediate)
-                        .await,
-                    10,
-                    Duration::from_millis(200),
-                    Duration::from_secs(2),
-                    |e| warn!(job_id, err = ?e, "failed to stop job")
-                )
-                .is_err()
+                if let Err(e) = leader_manager
+                    .stop_leader(JobStopMode::JobStopImmediate)
+                    .await
                 {
+                    warn!(job_id, error =? e, "failed to stop leader");
                     return;
                 }
                 JobState::JobStopped
@@ -115,15 +114,13 @@ impl Recovering {
             }
             Ok(JobState::JobFailing) => {
                 info!(job_id, "job is failing in recovering, shutting down");
-                let _ = retry!(
-                    leader_manager
-                        .stop_leader(JobStopMode::JobStopImmediate)
-                        .await,
-                    5,
-                    Duration::from_millis(200),
-                    Duration::from_secs(2),
-                    |e| warn!(job_id, err = ?e, "failed to stop failing job")
-                );
+                if let Err(e) = leader_manager
+                    .stop_leader(JobStopMode::JobStopImmediate)
+                    .await
+                {
+                    warn!(job_id, error =? e, "failed to stop leader");
+                    return;
+                }
                 JobState::JobFailed
             }
         };

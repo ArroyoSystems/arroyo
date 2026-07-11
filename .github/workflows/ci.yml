@@ -19,7 +19,7 @@ jobs:
         run: |
           cd webui
           pnpm check
-          
+
   build-rust:
     runs-on: ubuntu-22.04-32
     env:
@@ -29,8 +29,8 @@ jobs:
         uses: actions/checkout@v3
       - uses: actions/setup-java@v3
         with:
-          distribution: 'temurin'
-          java-version: '11'
+          distribution: "temurin"
+          java-version: "11"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
@@ -50,14 +50,14 @@ jobs:
       - uses: actions/setup-python@v5
         name: Setup Python
         with:
-          python-version: '3.12'            
+          python-version: "3.12"
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9.0.6
           run_install: |
             - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]        
+              args: [--frozen-lockfile, --strict-peer-dependencies]
       - name: Install OpenAPI Generator
         run: |
           pnpm install @openapitools/openapi-generator-cli -g
@@ -78,7 +78,7 @@ jobs:
       - name: Install dependencies
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat
+          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev libcurl4-openssl-dev netcat
           wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
           unzip protoc*.zip
           sudo mv bin/protoc /usr/local/bin
@@ -162,7 +162,7 @@ jobs:
           run_integ controller-sqlite ARROYO__DATABASE__TYPE=sqlite
           run_integ leader-postgres ARROYO__DATABASE__TYPE=postgres ARROYO__JOB_CONTROLLER=worker
           run_integ leader-sqlite ARROYO__DATABASE__TYPE=sqlite ARROYO__JOB_CONTROLLER=worker
-          
+
   build-console:
     runs-on: ubuntu-latest
     steps:

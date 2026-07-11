@@ -502,97 +502,143 @@ impl WorkerState {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut control_rx = control_rx;
 
+        macro_rules! send_control_rpc {
+            ($rpc:literal, $client:ident.$method:ident, $req:ident, $($extra:tt)*) => {{
+                debug!(
+                    rpc = $rpc,
+                    encoded_size = $req.encoded_len(),
+                    $($extra)*
+                    "sending control message"
+                );
+                ($rpc, $client.$method(Request::new($req)).await.err())
+            }};
+        }
+
         loop {
             select! {
                 msg = control_rx.recv() => {
-                    let err = match msg {
+
+                    let (rpc_method, err): (&'static str, Option<Status>) = match msg {
                         Some(ControlResp::CheckpointEvent(c)) => {
-                            job_controller.task_checkpoint_event(Request::new(
-                                TaskCheckpointEventReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(c.time),
-                                    operator_id: c.operator_id,
-                                    subtask_idx: c.subtask_idx,
-                                    epoch: c.checkpoint_epoch,
-                                    event_type: c.event_type as i32,
-                                }
-                            )).await.err()
+                            let req = TaskCheckpointEventReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(c.time),
+                                operator_id: c.operator_id,
+                                subtask_idx: c.subtask_idx,
+                                epoch: c.checkpoint_epoch,
+                                event_type: c.event_type as i32,
+                            };
+                            send_control_rpc!(
+                                "task_checkpoint_event",
+                                job_controller.task_checkpoint_event,
+                                req,
+                                operator_id = %req.operator_id,
+                                subtask_idx = req.subtask_idx,
+                                epoch = req.epoch,
+                            )
                         }
                         Some(ControlResp::CheckpointCompleted(c)) => {
-                            job_controller.task_checkpoint_completed(Request::new(
-                                TaskCheckpointCompletedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: c.subtask_metadata.finish_time,
-                                    operator_id: c.operator_id,
-                                    epoch: c.checkpoint_epoch,
-                                    needs_commit: false,
-                                    metadata: Some(c.subtask_metadata),
-                                }
-                            )).await.err()
+                            let req = TaskCheckpointCompletedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: c.subtask_metadata.finish_time,
+                                operator_id: c.operator_id,
+                                epoch: c.checkpoint_epoch,
+                                needs_commit: false,
+                                metadata: Some(c.subtask_metadata),
+                            };
+                            send_control_rpc!(
+                                "task_checkpoint_completed",
+                                job_controller.task_checkpoint_completed,
+                                req,
+                                operator_id = %req.operator_id,
+                                epoch = req.epoch,
+                            )
                         }
                         Some(ControlResp::TaskFinished { task_id, subtask_idx }) => {
-                            info!(message = "Task finished", task_id, subtask_idx);
-                            job_controller.task_finished(Request::new(
-                                TaskFinishedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    task_id,
-                                    subtask_idx,
-                                }
-                            )).await.err()
+                            let req = TaskFinishedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                task_id,
+                                subtask_idx,
+                            };
+                            send_control_rpc!(
+                                "task_finished",
+                                job_controller.task_finished,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
                         }
                         Some(ControlResp::TaskFailed { task_id, subtask_idx, error }) => {
-                            job_controller.task_failed(Request::new(
-                                TaskFailedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    error: Some(rpc::TaskError {
-                                        task_id,
-                                        subtask_idx,
-                                        error: error.message,
-                                        error_domain: rpc::ErrorDomain::from(error.domain) as i32,
-                                        retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
-                                        operator_id: error.operator_id.unwrap_or_default(),
-                                        details: error.details.unwrap_or_default(),
-                                    }),
-                                }
-                            )).await.err()
-                        }
-                        Some(ControlResp::Error { task_id, operator_id, subtask_idx, message, details}) => {
-                            job_controller.nonfatal_error(Request::new(
-                                NonfatalErrorReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    error: Some(rpc::TaskError {
-                                        task_id,
-                                        operator_id,
-                                        subtask_idx,
-                                        error: message,
-                                        error_domain: rpc::ErrorDomain::External as i32,
-                                        retry_hint: rpc::RetryHint::NoRetry as i32,
-                                        details,
-                                    }),
-                                }
-                            )).await.err()
-                        }
-                        Some(ControlResp::TaskStarted {task_id, subtask_idx, start_time}) => {
-                            controller.task_started(Request::new(
-                                TaskStartedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(start_time),
+                            let req = TaskFailedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                error: Some(rpc::TaskError {
                                     task_id,
                                     subtask_idx,
-                                }
-                            )).await.err()
+                                    error: error.message,
+                                    error_domain: rpc::ErrorDomain::from(error.domain) as i32,
+                                    retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
+                                    operator_id: error.operator_id.unwrap_or_default(),
+                                    details: error.details.unwrap_or_default(),
+                                }),
+                            };
+                            send_control_rpc!(
+                                "task_failed",
+                                job_controller.task_failed,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
+                        }
+                        Some(ControlResp::Error { task_id, operator_id, subtask_idx, message, details}) => {
+                            let req = NonfatalErrorReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                error: Some(rpc::TaskError {
+                                    task_id,
+                                    operator_id,
+                                    subtask_idx,
+                                    error: message,
+                                    error_domain: rpc::ErrorDomain::External as i32,
+                                    retry_hint: rpc::RetryHint::NoRetry as i32,
+                                    details,
+                                }),
+                            };
+                            send_control_rpc!(
+                                "nonfatal_error",
+                                job_controller.nonfatal_error,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
+                        }
+                        Some(ControlResp::TaskStarted {task_id, subtask_idx, start_time}) => {
+                            let req = TaskStartedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(start_time),
+                                task_id,
+                                subtask_idx,
+                            };
+                            send_control_rpc!(
+                                "task_started",
+                                controller.task_started,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
                         }
                         None => {
                             // TODO: remove the control queue from the select at this point
                             tokio::time::sleep(Duration::from_millis(50)).await;
-                            None
+                            ("", None)
                         }
                     };
                     if let Some(err) = err {
-                        error!("encountered control message failure {}", err);
+                        error!(
+                            rpc = rpc_method,
+                            "encountered control message failure: {}", err
+                        );
                         cancel_token.cancel();
                     }
                 }

@@ -48,6 +48,7 @@ pub struct WorkerJobController {
     status: JobControllerStatus,
     model: RunningJobModel,
     cleanup_task: Option<JoinHandle<anyhow::Result<Epoch>>>,
+    cleanup_backoff: Option<SystemTime>,
     rx: Receiver<RunningMessage>,
     stopping: bool,
     failing: bool,
@@ -275,6 +276,7 @@ impl WorkerJobController {
             status,
             worker_context,
             cleanup_task: None,
+            cleanup_backoff: None,
             rx,
             stopping: false,
             failing: false,
@@ -607,8 +609,7 @@ impl WorkerJobController {
                         error = format!("{:?}", e)
                     );
 
-                    // wait a bit before trying again
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    self.cleanup_backoff = Some(SystemTime::now() + Duration::from_secs(10));
                 }
                 Err(e) => {
                     error!(
@@ -616,15 +617,9 @@ impl WorkerJobController {
                         job_id = *self.worker_context.job_id,
                         error = format!("{:?}", e)
                     );
-
-                    // wait a bit before trying again
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    self.cleanup_backoff = Some(SystemTime::now() + Duration::from_secs(10));
                 }
             }
-        }
-
-        if !self.stopping && self.cleanup_task.is_none() && self.model.checkpoint_state.is_none() {
-            self.cleanup_task = self.start_cleanup();
         }
 
         if self.stopping && !self.final_checkpoint_started && self.model.checkpoint_state.is_none()
@@ -646,6 +641,16 @@ impl WorkerJobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // do we need to start cleaning?
+        let now = SystemTime::now();
+        if !self.stopping
+            && self.cleanup_task.is_none()
+            && self.model.checkpoint_state.is_none()
+            && self.cleanup_backoff.unwrap_or(now) <= now
+        {
+            self.cleanup_task = self.start_cleanup();
         }
 
         // update metrics

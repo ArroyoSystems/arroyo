@@ -46,8 +46,8 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found,
-    paginate_results, required_field, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, log_and_map,
+    not_found, paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
@@ -511,7 +511,8 @@ impl TryInto<Pipeline> for DbPipeline {
             action_text,
             action_in_progress,
             preview: self.ttl_micros.is_some(),
-            env_vars: self.env_vars,
+            state_url: self.state_url,
+            tags: serde_json::from_value(self.tags).map_err(log_and_map)?,
         })
     }
 }
@@ -520,6 +521,7 @@ impl From<DbPipelineJob> for Job {
     fn from(val: DbPipelineJob) -> Self {
         Job {
             id: val.id,
+            pipeline_id: val.pipeline_id,
             running_desired: val.stop == StopMode::none,
             state: val.state.unwrap_or_else(|| "Created".to_string()),
             run_id: val.run_id.unwrap_or(0) as u64,
@@ -535,6 +537,7 @@ impl From<DbPipelineJob> for Job {
             }),
             created_at: to_micros(val.created_at),
             scheduler_config: val.scheduler_config,
+            env_vars: val.env_vars,
         }
     }
 }
@@ -628,7 +631,7 @@ pub async fn create_pipeline(
 pub async fn put_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
@@ -758,7 +761,9 @@ pub async fn create_preview_pipeline(
 pub async fn patch_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
     WithRejection(Json(pipeline_patch), _): WithRejection<Json<PipelinePatch>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -812,6 +817,16 @@ pub async fn patch_pipeline(
         None
     };
 
+    let env_vars = pipeline_patch
+        .env_vars
+        .map(|e| serde_json::to_value(e).map_err(log_and_map))
+        .transpose()?;
+
+    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
+        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+        v => v,
+    });
+
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
@@ -819,6 +834,8 @@ pub async fn patch_pipeline(
         stop,
         &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
+        &env_vars,
+        &scheduler_config,
         &job_id,
         &auth_data.organization_id,
     )
@@ -847,7 +864,7 @@ pub async fn patch_pipeline(
 pub async fn restart_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -962,7 +979,9 @@ pub async fn get_pipelines(
 pub async fn get_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -990,7 +1009,9 @@ pub async fn get_pipeline(
 pub async fn delete_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<(), ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -1043,7 +1064,9 @@ pub async fn delete_pipeline(
 pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<JobCollection>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
