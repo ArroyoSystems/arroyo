@@ -28,6 +28,8 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::Float16
         | arrow::datatypes::DataType::Float32
         | arrow::datatypes::DataType::Float64
+        | arrow::datatypes::DataType::Decimal32(_, _)
+        | arrow::datatypes::DataType::Decimal64(_, _)
         | arrow::datatypes::DataType::Decimal128(_, _) => {
             json! {{ "type": "number" }}
         }
@@ -139,7 +141,7 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         }
         Union(_, _) => todo!(),
         Dictionary(_, _) => todo!(),
-        Decimal128(_, scale) => {
+        Decimal32(_, scale) | Decimal64(_, scale) | Decimal128(_, scale) => {
             return json! {{
                 "type": "bytes",
                 "field": field.name().clone(),

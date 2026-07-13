@@ -20,13 +20,16 @@
 use arrow::array::{array::*, builder::*};
 use arrow::buffer::OffsetBuffer;
 use arrow::datatypes::DataType;
-use pyo3::{IntoPy, PyObject, PyResult, Python, exceptions::PyTypeError, types::PyAnyMethods};
+use pyo3::{
+    IntoPyObjectExt, Py, PyAny, PyResult, Python, exceptions::PyTypeError, ffi::c_str,
+    types::PyAnyMethods,
+};
 use std::sync::Arc;
 
 macro_rules! get_pyobject {
     ($array_type: ty, $py:expr, $array:expr, $i:expr) => {{
         let array = $array.as_any().downcast_ref::<$array_type>().unwrap();
-        array.value($i).into_py($py)
+        array.value($i).into_py_any($py)?
     }};
 }
 
@@ -71,7 +74,7 @@ macro_rules! build_array {
 #[allow(unused_macros)]
 macro_rules! build_json_array {
     ($py:expr, $pyobjects:expr) => {{
-        let json_dumps = $py.eval_bound("json.dumps", None, None)?;
+        let json_dumps = $py.eval(c_str!("json.dumps"), None, None)?;
         let mut builder = StringBuilder::with_capacity($pyobjects.len(), 1024);
         for pyobj in $pyobjects {
             if pyobj.is_none($py) {
@@ -89,7 +92,7 @@ pub struct Converter {}
 
 impl Converter {
     /// Get array element as a python object.
-    pub fn get_pyobject(py: Python<'_>, array: &dyn Array, i: usize) -> PyResult<PyObject> {
+    pub fn get_pyobject(py: Python<'_>, array: &dyn Array, i: usize) -> PyResult<Py<PyAny>> {
         if array.is_null(i) {
             return Ok(py.None());
         }
@@ -127,16 +130,16 @@ impl Converter {
                 for j in 0..list.len() {
                     values.push(Self::get_pyobject(py, list.as_ref(), j)?);
                 }
-                values.into_py(py)
+                values.into_py_any(py)?
             }
             DataType::Struct(fields) => {
                 let array = array.as_any().downcast_ref::<StructArray>().unwrap();
-                let object = py.eval_bound("Struct()", None, None)?;
+                let object = py.eval(c_str!("Struct()"), None, None)?;
                 for (j, field) in fields.iter().enumerate() {
                     let value = Self::get_pyobject(py, array.column(j).as_ref(), i)?;
                     object.setattr(field.name().as_str(), value)?;
                 }
-                object.into()
+                object.unbind()
             }
             other => {
                 return Err(PyTypeError::new_err(format!(
@@ -150,7 +153,7 @@ impl Converter {
     pub fn build_array(
         data_type: &DataType,
         py: Python<'_>,
-        values: &[PyObject],
+        values: &[Py<PyAny>],
     ) -> PyResult<ArrayRef> {
         match data_type {
             DataType::Null => build_array!(NullBuilder, py, values),
@@ -185,8 +188,8 @@ impl Converter {
                     if !val.is_none(py) {
                         let array = val.bind(py);
                         flatten_values.reserve(array.len()?);
-                        for elem in array.iter()? {
-                            flatten_values.push(elem?.into());
+                        for elem in array.try_iter()? {
+                            flatten_values.push(elem?.unbind());
                         }
                     }
                     offsets.push(flatten_values.len() as i32);
@@ -210,8 +213,8 @@ impl Converter {
                     if !val.is_none(py) {
                         let array = val.bind(py);
                         flatten_values.reserve(array.len()?);
-                        for elem in array.iter()? {
-                            flatten_values.push(elem?.into());
+                        for elem in array.try_iter()? {
+                            flatten_values.push(elem?.unbind());
                         }
                     }
                     offsets.push(flatten_values.len() as i64);

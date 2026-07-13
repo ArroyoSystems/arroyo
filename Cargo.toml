@@ -40,21 +40,21 @@ tower-http = {version = "0.6"}
 axum = { version = "0.7" }
 utoipa = { version = "4" }
 
-arrow = { version = "55.2.0" }
-arrow-ord = { version = "55.2.0" }
-arrow-array = { version = "55.2.0" }
-arrow-schema = { version = "55.2.0" }
-arrow-json = { version = "55.2.0" }
+arrow = { version = "57.0.0" }
+arrow-ord = { version = "57.0.0" }
+arrow-array = { version = "57.0.0" }
+arrow-schema = { version = "57.0.0" }
+arrow-json = { version = "57.0.0" }
 object_store = { version = "0.12.3" }
-parquet = { version = "55.2.0" }
+parquet = { version = "57.0.0" }
 ahash = { version = "=0.8.7" }
-datafusion = { version = "48.0.1" }
-datafusion-common = { version = "48.0.0" }
-datafusion-proto = { version = "48.0.0" }
-datafusion-functions = { version = "48.0.0", features = ["crypto_expressions"] }
-datafusion-functions-window = {version = "48.0.0"}
-datafusion-functions-json = { version = "0.48.0" }
-datafusion-expr = { version = "48.0.0" }
+datafusion = { version = "51.0.0" }
+datafusion-common = { version = "51.0.0" }
+datafusion-proto = { version = "51.0.0" }
+datafusion-functions = { version = "51.0.0", features = ["crypto_expressions"] }
+datafusion-functions-window = { version = "51.0.0" }
+datafusion-functions-json = { version = "0.51.0" }
+datafusion-expr = { version = "51.0.0" }
 deltalake = { version = "0.27.0" }
 delta_kernel = { version = "0.13.0" }
 cornucopia = { version = "0.9.0" }
@@ -62,9 +62,9 @@ cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.14"
 prost = { version = "0.13", features = ["no-recursion-limit"] }
 prost-reflect = "0.14.0"
-prost-build = {version = "0.13" }
+prost-build = { version = "0.13" }
 prost-types = "0.13"
-aws-config = "1.5.13"
+aws-config = "=1.5.13"
 reqwest = "0.12"
 rusqlite = "0.31"
 apache-avro = "0.18.0"
@@ -116,20 +116,8 @@ split-debuginfo = "unpacked"
 
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
-parquet = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '55.2.0/parquet'}
-arrow-json = {git = 'https://github.com/ArroyoSystems/arrow-rs', branch = '55.2.0/json'}
-datafusion = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-common = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-execution = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
-datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 
 sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.55.0/arroyo" }
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
-jiter = {git = "https://github.com/ArroyoSystems/jiter", branch = "disable_python" }

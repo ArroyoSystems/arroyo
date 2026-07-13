@@ -15,6 +15,7 @@ use dlopen2::wrapper::{Container, WrapperApi};
 use quote::{ToTokens, format_ident};
 use std::any::Any;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -219,6 +220,24 @@ impl SyncUdfDylib {
 impl Debug for SyncUdfDylib {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UdfDylib").finish()
+    }
+}
+
+impl PartialEq for SyncUdfDylib {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.signature == other.signature
+            && self.return_type == other.return_type
+    }
+}
+
+impl Eq for SyncUdfDylib {}
+
+impl Hash for SyncUdfDylib {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+        self.return_type.hash(state);
     }
 }
 

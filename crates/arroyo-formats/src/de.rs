@@ -3,7 +3,6 @@ use crate::proto::schema::get_pool;
 use crate::{proto, should_flush};
 use arrow::array::{Int32Builder, Int64Builder};
 use arrow::compute::kernels;
-use arrow::json::reader::{FailureKind, JsonType, ValidationError};
 use arrow_array::builder::{
     ArrayBuilder, BinaryBuilder, GenericByteBuilder, StringBuilder, TimestampNanosecondBuilder,
     UInt64Builder, make_builder,
@@ -117,54 +116,6 @@ impl<'a> Iterator for FramingIterator<'a> {
     }
 }
 
-fn failure_kind_to_str(kind: FailureKind) -> &'static str {
-    match kind {
-        FailureKind::MissingField => "missing_field",
-        FailureKind::NullValue => "null_value",
-        FailureKind::TypeMismatch => "type_mismatch",
-        FailureKind::ParseFailure => "parse_failure",
-    }
-}
-
-/// Format a validation error without exposing raw data values.
-fn format_validation_error(verr: &ValidationError) -> String {
-    let field = &verr.field_path;
-    let expected = &verr.expected_type;
-
-    match verr.failure_kind {
-        FailureKind::MissingField => {
-            format!("field '{field}': required field is missing (expected {expected})")
-        }
-        FailureKind::NullValue => {
-            format!("field '{field}': null value for non-nullable field (expected {expected})")
-        }
-        FailureKind::TypeMismatch | FailureKind::ParseFailure => {
-            let type_info = match (verr.actual_type, &verr.actual_value) {
-                (Some(actual_type), Some(val)) => match actual_type {
-                    JsonType::String => {
-                        let inner_len = val.len().saturating_sub(2);
-                        format!("got {actual_type} (length: {inner_len})")
-                    }
-                    JsonType::Number => {
-                        format!("got {actual_type} (length: {})", val.len())
-                    }
-                    _ => format!("got {actual_type}"),
-                },
-                (Some(actual_type), None) => format!("got {actual_type}"),
-                _ => "got incompatible type".to_string(),
-            };
-
-            let suffix = if matches!(verr.failure_kind, FailureKind::ParseFailure) {
-                " - parse failure"
-            } else {
-                ""
-            };
-
-            format!("field '{field}': expected {expected}, {type_info}{suffix}")
-        }
-    }
-}
-
 enum BufferDecoder {
     Buffer(ContextBuffer),
     JsonDecoder {
@@ -215,35 +166,20 @@ impl BufferDecoder {
                         .transpose()?
                         .map(|batch| (batch.columns().to_vec(), None)),
                     BadData::Drop { .. } => decoder
-                        .flush_with_bad_data()
+                        .flush()
                         .map_err(|e| {
                             SourceError::bad_data(format!(
-                                "Something went wrong decoding JSON: {e:?}"
+                                "JSON does not match schema: {e:?}"
                             ))
                         })
-                        .map(|opt| {
-                            opt.map(|(batch, mask, _invalid_records, validation_errors)| {
-                                // Report validation errors
-                                for verr in validation_errors {
-                                    log_event!(
-                                        "user_error",
-                                        {
-                                            "error_family": "deserialization",
-                                            "error_type": failure_kind_to_str(verr.failure_kind),
-                                            "details": format_validation_error(&verr),
-                                        }
-                                    );
-                                }
-                                (batch.columns().to_vec(), Some(mask))
-                            })
-                        })
+                        .map(|opt| opt.map(|batch| (batch.columns().to_vec(), None)))
                         .transpose()?,
                 })
             }
         }
     }
 
-    fn decode_json(&mut self, msg: &[u8]) -> DataflowResult<()> {
+    fn decode_json(&mut self, msg: &[u8], bad_data: &BadData) -> DataflowResult<()> {
         match self {
             BufferDecoder::Buffer(_) => {
                 unreachable!("Tried to decode JSON for non-JSON deserializer");
@@ -253,9 +189,24 @@ impl BufferDecoder {
                 buffered_count,
                 ..
             } => {
-                decoder
-                    .decode(msg)
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
+                if let Err(e) = decoder.decode(msg) {
+                    return match bad_data {
+                        BadData::Fail { .. } => {
+                            Err(SourceError::bad_data(format!("invalid JSON: {e:?}")).into())
+                        }
+                        BadData::Drop { .. } => {
+                            log_event!(
+                                "user_error",
+                                {
+                                    "error_family": "deserialization",
+                                    "error_type": "parse_failure",
+                                    "details": format!("invalid JSON: {e:?}"),
+                                }
+                            );
+                            Ok(())
+                        }
+                    };
+                }
 
                 *buffered_count += 1;
 
@@ -434,9 +385,7 @@ impl ArrowDeserializer {
                 ..
             }) => BufferDecoder::JsonDecoder {
                 decoder: arrow_json::reader::ReaderBuilder::new(schema_without_additional.clone())
-                    .with_limit_to_batch_size(false)
                     .with_strict_mode(false)
-                    .with_allow_bad_data(matches!(bad_data, BadData::Drop { .. }))
                     .build_decoder()
                     .unwrap(),
                 buffered_count: 0,
@@ -637,7 +586,7 @@ impl ArrowDeserializer {
                     msg
                 };
 
-                self.buffer_decoder.decode_json(msg)?;
+                self.buffer_decoder.decode_json(msg, &self.bad_data)?;
             }
             Format::Protobuf(proto) => {
                 let json = proto::de::deserialize_proto(&mut self.proto_pool, proto, msg)?;
@@ -646,7 +595,7 @@ impl ArrowDeserializer {
                     self.decode_into_json(json);
                 } else {
                     self.buffer_decoder
-                        .decode_json(json.to_string().as_bytes())
+                        .decode_json(json.to_string().as_bytes(), &self.bad_data)
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
                 }
             }
@@ -707,7 +656,7 @@ impl ArrowDeserializer {
                     let json = de::avro_to_json(value).to_string();
 
                     self.buffer_decoder
-                        .decode_json(json.as_bytes())
+                        .decode_json(json.as_bytes(), &self.bad_data)
                         .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
                 }
 

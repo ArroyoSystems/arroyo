@@ -15,6 +15,7 @@ bincode = { workspace = true, features = ["serde"]}
 rand = { workspace = true }
 anyhow = { workspace = true }
 prost = {workspace = true}
+prost14 = { package = "prost", version = "0.14" }
 serde_json = { workspace = true }
 strum = { workspace = true }
 datafusion-proto = { workspace = true }

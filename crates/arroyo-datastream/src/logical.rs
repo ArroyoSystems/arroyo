@@ -13,6 +13,7 @@ use petgraph::dot::Dot;
 use petgraph::graph::DiGraph;
 use petgraph::prelude::EdgeRef;
 use prost::Message;
+use prost14::Message as DataFusionProtoMessage;
 use rand::distr::Alphanumeric;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
