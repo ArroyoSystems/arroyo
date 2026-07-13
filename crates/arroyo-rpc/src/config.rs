@@ -356,6 +356,30 @@ pub struct ApiConfig {
 
     #[serde(default)]
     pub auth_mode: ApiAuthMode,
+
+    #[serde(default)]
+    pub cors: CorsConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CorsConfig {
+    #[serde(default)]
+    pub origin_policy: CorsOriginPolicy,
+
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+
+    #[serde(default)]
+    pub allow_credentials: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Copy, Clone, Default, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CorsOriginPolicy {
+    #[default]
+    Any,
+    AllowList,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
