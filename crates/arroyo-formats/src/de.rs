@@ -168,9 +168,7 @@ impl BufferDecoder {
                     BadData::Drop { .. } => decoder
                         .flush()
                         .map_err(|e| {
-                            SourceError::bad_data(format!(
-                                "JSON does not match schema: {e:?}"
-                            ))
+                            SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
                         })
                         .map(|opt| opt.map(|batch| (batch.columns().to_vec(), None)))
                         .transpose()?,
