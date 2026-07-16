@@ -1,0 +1,31 @@
+.gitlab-ci.yml
+  s_441e516a8219d8::t_f583d48f11a804 24-29
+  s_441e516a8219d8::t_1d96775ca7563b 11
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_441e516a8219d8::t_59b63f7646e9d7 444,561,682
+  s_441e516a8219d8::t_63d0693c1b4458 445-560,757
+  s_441e516a8219d8::t_b23009cc023c19 96,618-681,699,704,726-728,795
+  s_441e516a8219d8::t_4a9df2132c4168 194
+  s_441e516a8219d8::t_06b9fcf52201d0 562-616
+  s_441e516a8219d8::t_ca9913581708f5 683-685,753
+  s_441e516a8219d8::t_fb66bc90728ab3 617
+  s_441e516a8219d8::t_5d06dc67671a3b 129,155,195-443,724
+  s_441e516a8219d8::t_2d2c180aed63c1 191-193
+  s_441e516a8219d8::t_46130a3c63d212 1-95,97-128,130-154,156-190,686-698,700-703,705-723,725,729-752,754-756,758-794,796-797
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d1f6751cf9a4eff6b431ed633a386ad031362d38",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
