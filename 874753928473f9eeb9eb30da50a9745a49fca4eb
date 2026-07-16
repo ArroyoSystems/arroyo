@@ -1,0 +1,23 @@
+crates/arroyo-api/src/cf_endpoints.rs
+  s_7c14c0dd85ccf8::t_a4f63a8f25351e 16,56,91-95,222-224,514,516,532-535,569,669,705,1106,1110,1123,1133-1140,1164,1173-1237,1240-1243,1247
+crates/arroyo-planner/src/lib_cf.rs
+  s_7c14c0dd85ccf8::t_a4f63a8f25351e 4-10,14-17,19,130-245,552-859,861-862,864-866
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_7c14c0dd85ccf8::t_a4f63a8f25351e 151-156,178-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "874753928473f9eeb9eb30da50a9745a49fca4eb",
+  "prompts": {},
+  "sessions": {
+    "s_7c14c0dd85ccf8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099a3b2b5ffeQJYo8y3Ei9Jxox",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,59 @@
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_7c14c0dd85ccf8::t_3b9e7a26cb72dd 185
+  s_7c14c0dd85ccf8::t_06f34ede94d8ff 595,601
+  s_7c14c0dd85ccf8::t_46cb129ba03e14 656
+  s_7c14c0dd85ccf8::t_510f24fbc12606 899
+  s_7c14c0dd85ccf8::t_5c266941bf1ce1 875
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_70c55b5c0b8285::t_65b90ced221a8f 204
+  s_70c55b5c0b8285::t_271c4d592be69a 270
+  s_70c55b5c0b8285::t_34a33cc39b7806 300
+  s_441e516a8219d8::t_18325c5d9bac59 494
+  s_70c55b5c0b8285::t_a6c6afd681c11d 564-570
+  s_441e516a8219d8::t_cc059da9c6b071 474-476
+crates/arroyo-connectors/src/superbuffer/mod.rs
+  s_70c55b5c0b8285::t_6a90209a44f911 179
+  s_70c55b5c0b8285::t_a7513c3e06dcd6 174
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_70c55b5c0b8285::t_6eae9c57e255b6 526
+  s_70c55b5c0b8285::t_610ff989f4952f 465
+  s_70c55b5c0b8285::t_32cfb7b65acc83 498
+  s_70c55b5c0b8285::t_91eeea2cf763ee 474
+  s_70c55b5c0b8285::t_0d05119366f1ff 520
+  s_70c55b5c0b8285::t_7754dd8fbade54 508
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_441e516a8219d8::t_4cf0872db8b9de 3-4,6-7
+  s_441e516a8219d8::t_a0009ec8759d8f 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aa2e52b4a948c48ccfcaada563d46cd985a2c2ca",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_70c55b5c0b8285": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09517a546fferinEkfrC8CHed4",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_7c14c0dd85ccf8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099a3b2b5ffeQJYo8y3Ei9Jxox",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
