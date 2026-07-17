@@ -1,0 +1,29 @@
+crates/arroyo-udf/arroyo-udf-python/src/types.rs
+  s_9ae75f405cbe64::t_c140db3b88e3f4 10-12
+crates/arroyo-udf/arroyo-udf-python/src/threaded.rs
+  s_441e516a8219d8::t_567cb1a01ac117 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cfcab9c4e622d3c3a52ac52cb3f37552bcb160c0",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_9ae75f405cbe64": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08feadd80ffeZkj0ZjthKnCr38",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

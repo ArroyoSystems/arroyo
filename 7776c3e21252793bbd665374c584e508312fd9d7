@@ -1,0 +1,20 @@
+.gitlab-ci.yml
+  s_441e516a8219d8::t_1d96775ca7563b 11
+  s_441e516a8219d8::t_f583d48f11a804 24-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7776c3e21252793bbd665374c584e508312fd9d7",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
