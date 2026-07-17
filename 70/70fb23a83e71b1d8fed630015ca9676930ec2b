@@ -1,0 +1,64 @@
+k8s/arroyo-cloudflare/templates/trustedcertificatepuller.yaml
+  s_05cadbe07642e7::t_80865c42b55cad 10
+k8s/arroyo-cloudflare/templates/controller-shard-configmap.yaml
+  s_05cadbe07642e7::t_bb51bf4fbbc019 6
+k8s/arroyo-cloudflare/templates/_helpers.tpl
+  s_05cadbe07642e7::t_969d9c459ce0d8 1-4
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_05cadbe07642e7::t_a37e61b636ec92 3-4
+k8s/arroyo-cloudflare/templates/arroyo-api.yaml
+  s_05cadbe07642e7::t_a9b30de7cdd76d 5
+  s_05cadbe07642e7::t_0f6184845bae3b 101
+k8s/arroyo-cloudflare/templates/ingress-grpc.yaml
+  s_05cadbe07642e7::t_1fac987469d26d 6
+k8s/arroyo-cloudflare/templates/ingress-controller-per-pod.yaml
+  s_05cadbe07642e7::t_422c4e761b10a9 20
+  s_05cadbe07642e7::t_af5409e3d1bed8 40
+k8s/arroyo-cloudflare/templates/arroyo-serviceaccount.yaml
+  s_05cadbe07642e7::t_7c8de08acaf47f 5
+k8s/arroyo-cloudflare/overlays/production.yaml
+  s_05cadbe07642e7::t_1069cd5727e7dd 3-4
+k8s/arroyo-cloudflare/templates/api-configmap.yaml
+  s_05cadbe07642e7::t_175eb7bd608dfc 5
+k8s/arroyo-cloudflare/templates/configmap.yaml
+  s_05cadbe07642e7::t_4936bf99fbe573 5
+k8s/arroyo-cloudflare/templates/ingress-api.yaml
+  s_05cadbe07642e7::t_8f0376b6b65c14 7
+k8s/arroyo-cloudflare/values.yaml
+  s_05cadbe07642e7::t_1d8f6888eafd73 4-6
+k8s/arroyo-cloudflare/templates/arroyo-controller.yaml
+  s_05cadbe07642e7::t_52696fa90929e0 159
+  s_05cadbe07642e7::t_cde18eaa599d2b 192
+  s_05cadbe07642e7::t_d10af056ad7577 6
+k8s/arroyo-cloudflare/templates/networkpolicy.yaml
+  s_05cadbe07642e7::t_3641247d3faa0d 228
+  s_05cadbe07642e7::t_2b6385fecf979d 248
+  s_05cadbe07642e7::t_3ff63e8c27afb0 6
+  s_05cadbe07642e7::t_1f39a74a9b4a32 101
+  s_05cadbe07642e7::t_081609ccf44627 28
+  s_05cadbe07642e7::t_734289d6673e6b 164
+  s_05cadbe07642e7::t_01bd88bf10a0f1 55
+  s_05cadbe07642e7::t_e2c6c4e3f75db0 144
+  s_05cadbe07642e7::t_746c5983569b57 186
+  s_05cadbe07642e7::t_6701a2497c5e14 123
+  s_05cadbe07642e7::t_7820a7c7350cc2 78
+  s_05cadbe07642e7::t_ed5efb968c261a 206
+k8s/arroyo-cloudflare/templates/vaultsecret.yaml
+  s_05cadbe07642e7::t_018e592a3b09d8 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7070fb23a83e71b1d8fed630015ca9676930ec2b",
+  "prompts": {},
+  "sessions": {
+    "s_05cadbe07642e7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08ea56346ffexIV9nqiVfYwVuk",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
