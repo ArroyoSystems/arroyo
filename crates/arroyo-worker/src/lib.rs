@@ -44,7 +44,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
 use crate::job_controller::controller::WorkerJobController;
-use crate::utils::to_d2;
+use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
 use arroyo_rpc::config::config;
@@ -576,11 +576,14 @@ impl WorkerState {
                                 error: Some(rpc::TaskError {
                                     task_id,
                                     subtask_idx,
-                                    error: error.message,
+                                    error: maybe_truncate(error.message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::from(error.domain) as i32,
                                     retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
                                     operator_id: error.operator_id.unwrap_or_default(),
-                                    details: error.details.unwrap_or_default(),
+                                    details: maybe_truncate(
+                                        error.details.unwrap_or_default(),
+                                        MAX_TASK_ERROR_FIELD_BYTES
+                                    ),
                                 }),
                             };
                             send_control_rpc!(
@@ -599,10 +602,10 @@ impl WorkerState {
                                     task_id,
                                     operator_id,
                                     subtask_idx,
-                                    error: message,
+                                    error: maybe_truncate(message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::External as i32,
                                     retry_hint: rpc::RetryHint::NoRetry as i32,
-                                    details,
+                                    details: maybe_truncate(details, MAX_TASK_ERROR_FIELD_BYTES),
                                 }),
                             };
                             send_control_rpc!(
