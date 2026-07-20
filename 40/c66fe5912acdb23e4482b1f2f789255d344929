@@ -1,0 +1,48 @@
+k8s/arroyo-cloudflare/README.md
+  s_ce5301f3bfc7af::t_50e2f3909b0c77 88,91,94-97,104,107-112,114-117
+  s_e508f87415c713::t_fd119e78ff9809 99
+  s_ce5301f3bfc7af::t_37e94bc821affa 98,100-101,113
+  s_ce5301f3bfc7af::t_4b2dd00ee84e6a 90
+  s_e508f87415c713::t_b1a87c42b3ca53 89
+justfile
+  s_e508f87415c713::t_9ebf516f9c49ae 9-10,12-13
+  s_e508f87415c713::t_78d5f1c3ab9d1a 16
+  s_ce5301f3bfc7af::t_12dc87cc4f0a7f 20-22
+  s_ce5301f3bfc7af::t_7b48e0a7b04291 15,17-19,23-24,26-28,32-33,35-36
+  s_ce5301f3bfc7af::t_df2cd769e5f886 1-3,6-8,14
+  s_e508f87415c713::t_95630381f6f268 34,37
+  s_e508f87415c713::t_b74a46c36ef1e3 25
+  s_ce5301f3bfc7af::t_d074ad26cbef04 4-5
+  s_ce5301f3bfc7af::t_a79c87da7a23a7 29-31
+  s_ce5301f3bfc7af::t_24ad3f8efbdc37 11
+CF_README.md
+  s_ce5301f3bfc7af::t_a0db8e9e6f4115 32-37,39-40,44
+  s_ce5301f3bfc7af::t_3d139adccb7ffb 3-9,13-29,45-50
+  s_e508f87415c713::t_5fd60396cfbaad 30-31,38,41-43
+  s_ce5301f3bfc7af::t_e10480b0c99840 11
+  s_e508f87415c713::t_dc445e15d894f1 10,12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "40c66fe5912acdb23e4482b1f2f789255d344929",
+  "prompts": {},
+  "sessions": {
+    "s_ce5301f3bfc7af": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07f3efec1ffeMvpbdkbXCL0vye",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_e508f87415c713": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07eaabc4fffeAPdrd8C0Gh7RSd",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}
