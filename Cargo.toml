@@ -60,10 +60,10 @@ delta_kernel = { version = "0.19.0" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.14"
-prost = { version = "0.13", features = ["no-recursion-limit"] }
-prost-reflect = "0.14.0"
-prost-build = { version = "0.13" }
-prost-types = "0.13"
+prost = { version = "0.14", features = ["no-recursion-limit"] }
+prost-reflect = "0.16.0"
+prost-build = { version = "0.14" }
+prost-types = "0.14"
 aws-config = "=1.8.0"
 reqwest = "0.12"
 rusqlite = "0.31"

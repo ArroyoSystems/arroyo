@@ -126,7 +126,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -137,7 +137,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -533,7 +533,7 @@ dependencies = [
  "petgraph 0.8.3",
  "postgres",
  "postgres-types",
- "prost 0.13.5",
+ "prost 0.14.4",
  "refinery",
  "rusqlite",
  "rust-embed",
@@ -611,7 +611,7 @@ dependencies = [
  "num-bigint",
  "object_store",
  "parquet",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rabbitmq-stream-client",
  "rand 0.9.5",
  "rdkafka",
@@ -669,7 +669,7 @@ dependencies = [
  "postgres",
  "postgres-types",
  "prometheus",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rand 0.9.5",
  "refinery",
  "regex",
@@ -697,7 +697,6 @@ dependencies = [
  "datafusion-proto",
  "itertools 0.14.0",
  "petgraph 0.8.3",
- "prost 0.13.5",
  "prost 0.14.4",
  "rand 0.9.5",
  "serde",
@@ -721,8 +720,8 @@ dependencies = [
  "base64 0.22.1",
  "integer-encoding 4.1.0",
  "memchr",
- "prost 0.13.5",
- "prost-build",
+ "prost 0.14.4",
+ "prost-build 0.14.4",
  "prost-reflect",
  "regex",
  "schemars 0.8.22",
@@ -796,7 +795,7 @@ dependencies = [
  "datafusion",
  "dlopen2",
  "futures",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -829,7 +828,7 @@ dependencies = [
  "glob",
  "itertools 0.14.0",
  "petgraph 0.8.3",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rstest 0.25.0",
  "serde",
  "serde_json",
@@ -871,7 +870,7 @@ dependencies = [
  "nanoid",
  "object_store",
  "percent-encoding",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rand 0.9.5",
  "regex",
  "reqwest 0.12.28",
@@ -985,7 +984,7 @@ dependencies = [
  "once_cell",
  "parquet",
  "prometheus",
- "prost 0.13.5",
+ "prost 0.14.4",
  "serde",
  "serde_json",
  "tokio",
@@ -1001,7 +1000,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "futures",
- "prost 0.13.5",
+ "prost 0.14.4",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -1137,7 +1136,7 @@ dependencies = [
  "ordered-float 3.9.2",
  "petgraph 0.8.3",
  "prometheus",
- "prost 0.13.5",
+ "prost 0.14.4",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -4283,7 +4282,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4491,7 +4490,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5715,7 +5714,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -6065,7 +6064,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7006,7 +7005,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7385,7 +7384,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.42.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8104,7 +8103,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -8112,7 +8111,26 @@ dependencies = [
  "petgraph 0.7.1",
  "prettyplease",
  "prost 0.13.5",
- "prost-types",
+ "prost-types 0.13.5",
+ "regex",
+ "syn 2.0.118",
+ "tempfile",
+]
+
+[[package]]
+name = "prost-build"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
+dependencies = [
+ "heck 0.5.0",
+ "itertools 0.14.0",
+ "log",
+ "multimap",
+ "petgraph 0.8.3",
+ "prettyplease",
+ "prost 0.14.4",
+ "prost-types 0.14.4",
  "regex",
  "syn 2.0.118",
  "tempfile",
@@ -8146,13 +8164,12 @@ dependencies = [
 
 [[package]]
 name = "prost-reflect"
-version = "0.14.7"
+version = "0.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5edd582b62f5cde844716e66d92565d7faf7ab1445c8cebce6e00fba83ddb2"
+checksum = "01b80ea363c31af2de2b92e3c07ed1156628f7838c4afb4df75ee78a37fedbd1"
 dependencies = [
- "once_cell",
- "prost 0.13.5",
- "prost-types",
+ "prost 0.14.4",
+ "prost-types 0.14.4",
 ]
 
 [[package]]
@@ -8162,6 +8179,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
  "prost 0.13.5",
+]
+
+[[package]]
+name = "prost-types"
+version = "0.14.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
+dependencies = [
+ "prost 0.14.4",
 ]
 
 [[package]]
@@ -8382,7 +8408,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls 0.23.41",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -8420,9 +8446,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.4",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9213,7 +9239,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10002,7 +10028,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10089,7 +10115,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10296,7 +10322,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10825,8 +10851,8 @@ checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
 dependencies = [
  "prettyplease",
  "proc-macro2",
- "prost-build",
- "prost-types",
+ "prost-build 0.13.5",
+ "prost-types 0.13.5",
  "quote",
  "syn 2.0.118",
 ]
@@ -11682,7 +11708,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

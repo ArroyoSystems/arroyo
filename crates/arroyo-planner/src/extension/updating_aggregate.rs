@@ -163,6 +163,6 @@ impl ArroyoExtension for UpdatingAggregateExtension {
     }
 
     fn output_schema(&self) -> arroyo_rpc::df::ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema().as_ref().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema().as_arrow().clone())).unwrap()
     }
 }

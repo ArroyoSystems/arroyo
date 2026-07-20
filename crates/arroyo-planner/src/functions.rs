@@ -117,7 +117,7 @@ fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
 
 // Hash function that can take any number of arguments and produces a fast (non-cryptographic)
 // 128-bit hash from their string representations
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct MultiHashFunction {
     signature: Signature,
 }
