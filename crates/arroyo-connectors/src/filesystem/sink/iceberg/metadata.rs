@@ -174,7 +174,7 @@ pub fn build_datafile_from_meta(
         .content(DataContentType::Data)
         .partition(partition)
         .partition_spec_id(partition_spec_id)
-        .split_offsets(meta.split_offsets.clone())
+        .split_offsets(Some(meta.split_offsets.clone()))
         .column_sizes(column_sizes)
         .value_counts(value_counts)
         .null_value_counts(null_counts)

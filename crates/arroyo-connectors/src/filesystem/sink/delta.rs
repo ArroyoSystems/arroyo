@@ -9,9 +9,9 @@ use deltalake::aws::storage::S3StorageBackend;
 use deltalake::{
     DeltaTable, DeltaTableBuilder, StructType,
     kernel::{Action, Add},
+    logstore::PeekCommit,
     operations::create::CreateBuilder,
     protocol::SaveMode,
-    table::PeekCommit,
 };
 
 use deltalake::kernel::transaction::CommitBuilder;
@@ -87,7 +87,7 @@ pub(crate) async fn load_or_create_table(
         BackendConfig::Local(_) => (storage_provider.get_backing_store(), "/".to_string()),
     };
 
-    let mut delta = DeltaTableBuilder::from_uri(&url)
+    let mut delta = DeltaTableBuilder::from_url(&url)
         .with_storage_backend(backing_store, Url::parse(storage_provider.canonical_url())?)
         .build()?;
 
