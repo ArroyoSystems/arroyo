@@ -1,0 +1,23 @@
+k8s/arroyo-cloudflare/templates/api-alerts-configmap.yaml
+  s_912a7914c69813::t_8b9b194da58b42 1-51
+k8s/arroyo-cloudflare/values.yaml
+  s_912a7914c69813::t_335dc15a9a2c16 52-73
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_912a7914c69813::t_c055804ed804c0 176-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bf9586feeadd45baebf804a0264b381a5eb3722f",
+  "prompts": {},
+  "sessions": {
+    "s_912a7914c69813": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07ebbfc52ffelwCVw4G1znx3H1",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
