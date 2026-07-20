@@ -55,8 +55,8 @@ datafusion-functions = { version = "51.0.0", features = ["crypto_expressions"] }
 datafusion-functions-window = { version = "51.0.0" }
 datafusion-functions-json = { version = "0.51.0" }
 datafusion-expr = { version = "51.0.0" }
-deltalake = { version = "0.27.0" }
-delta_kernel = { version = "0.13.0" }
+deltalake = { version = "0.30.0" }
+delta_kernel = { version = "0.19.0" }
 cornucopia = { version = "0.9.0" }
 cornucopia_async = {version = "0.6.0"}
 deadpool-postgres = "0.14"
@@ -64,7 +64,7 @@ prost = { version = "0.13", features = ["no-recursion-limit"] }
 prost-reflect = "0.14.0"
 prost-build = { version = "0.13" }
 prost-types = "0.13"
-aws-config = "=1.5.13"
+aws-config = "=1.8.0"
 reqwest = "0.12"
 rusqlite = "0.31"
 apache-avro = "0.18.0"
