@@ -311,8 +311,8 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
             .map(|metadata| Self::checked_proto_decode(metadata.table_type(), metadata.data))
             .transpose()?;
         debug!(
-            "restoring from checkpoint message:\n{:#?}",
-            checkpoint_message
+            "restoring table from checkpoint: {}",
+            checkpoint_message.is_some()
         );
         T::from_config(
             config,
