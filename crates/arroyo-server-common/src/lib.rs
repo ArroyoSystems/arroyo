@@ -54,9 +54,10 @@ pub const VERSION: &str = "0.16.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> Option<WorkerGuard> {
+pub fn init_logging(name: &str, tags: &[(&str, &str)]) -> Option<WorkerGuard> {
     init_logging_with_filter(
         name,
+        tags,
         EnvFilter::builder()
             .with_default_directive(LevelFilter::INFO.into())
             .from_env_lossy(),
@@ -80,7 +81,11 @@ macro_rules! register_log {
     }};
 }
 
-pub fn init_logging_with_filter(name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+pub fn init_logging_with_filter(
+    name: &str,
+    tags: &[(&str, &str)],
+    filter: EnvFilter,
+) -> Option<WorkerGuard> {
     init_event_logger(Arc::new(AnalyticsEventLogger::new()));
 
     if let Err(e) = LogTracer::init() {
@@ -142,6 +147,10 @@ pub fn init_logging_with_filter(name: &str, filter: EnvFilter) -> Option<WorkerG
             layer.add_static_field("arroyo_service", serde_json::json!(name));
             if let Ok(pipeline_id) = env::var(arroyo_types::PIPELINE_ID_ENV) {
                 layer.add_static_field("pipeline_id", serde_json::json!(pipeline_id));
+            }
+
+            for (k, v) in tags {
+                layer.add_static_field(*k, json!(*v));
             }
 
             // add static fields
