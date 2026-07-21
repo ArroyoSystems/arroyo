@@ -138,7 +138,7 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
 
-    let mut app = rest::create_rest_app(database).layer(
+    let mut app = rest::create_rest_app(database)?.layer(
         CompressionLayer::new().zstd(true).compress_when(
             DefaultPredicate::new()
                 // compression doesn't work for server-sent events
