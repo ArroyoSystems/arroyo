@@ -41,7 +41,7 @@ use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::job_controller::controller::WorkerJobController;
 use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
@@ -1349,7 +1349,7 @@ impl JobControllerGrpc for LeaderServer {
 
         self.validate_req(req.worker_context.as_ref())?;
 
-        debug!(
+        trace!(
             worker_id =? self.state.worker_context.worker_id,
             ?req,
             "received heartbeat",
