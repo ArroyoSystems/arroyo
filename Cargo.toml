@@ -31,10 +31,12 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-tonic = { version = "0.13", features = ["zstd", "transport", "tls-ring", "tls-native-roots"] }
-tonic-build = { version = "0.13" }
-tonic-web = { version = "0.13" }
-tonic-reflection = { version = "0.13" }
+tonic = { version = "0.14", features = ["zstd", "transport", "tls-ring", "tls-native-roots"] }
+tonic-build = { version = "0.14" }
+tonic-prost = { version = "0.14" }
+tonic-prost-build = { version = "0.14" }
+tonic-web = { version = "0.14" }
+tonic-reflection = { version = "0.14" }
 tower = { version = "0.5" }
 tower-http = {version = "0.6"}
 axum = { version = "0.7" }

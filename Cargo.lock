@@ -530,7 +530,7 @@ dependencies = [
  "futures-util",
  "http 1.4.2",
  "mime_guess",
- "petgraph 0.8.3",
+ "petgraph",
  "postgres",
  "postgres-types",
  "prost 0.14.4",
@@ -665,7 +665,7 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "lazy_static",
- "petgraph 0.8.3",
+ "petgraph",
  "postgres",
  "postgres-types",
  "prometheus",
@@ -696,7 +696,7 @@ dependencies = [
  "bincode",
  "datafusion-proto",
  "itertools 0.14.0",
- "petgraph 0.8.3",
+ "petgraph",
  "prost 0.14.4",
  "rand 0.9.5",
  "serde",
@@ -721,7 +721,7 @@ dependencies = [
  "integer-encoding 4.1.0",
  "memchr",
  "prost 0.14.4",
- "prost-build 0.14.4",
+ "prost-build",
  "prost-reflect",
  "regex",
  "schemars 0.8.22",
@@ -827,7 +827,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools 0.14.0",
- "petgraph 0.8.3",
+ "petgraph",
  "prost 0.14.4",
  "rstest 0.25.0",
  "serde",
@@ -885,7 +885,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
  "tracing",
  "url",
  "utoipa",
@@ -932,7 +933,7 @@ dependencies = [
  "url",
  "uuid",
  "vergen",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -952,7 +953,7 @@ dependencies = [
  "arroyo-udf-plugin",
  "arroyo-worker",
  "datafusion",
- "petgraph 0.8.3",
+ "petgraph",
  "rstest 0.25.0",
  "serde",
  "serde_json",
@@ -1134,7 +1135,7 @@ dependencies = [
  "itertools 0.14.0",
  "mini-moka",
  "ordered-float 3.9.2",
- "petgraph 0.8.3",
+ "petgraph",
  "prometheus",
  "prost 0.14.4",
  "rand 0.9.5",
@@ -3745,7 +3746,7 @@ dependencies = [
  "itertools 0.14.0",
  "parking_lot 0.12.5",
  "paste",
- "petgraph 0.8.3",
+ "petgraph",
 ]
 
 [[package]]
@@ -5653,7 +5654,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tower-service",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -7594,16 +7595,6 @@ dependencies = [
 
 [[package]]
 name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset",
- "indexmap 2.14.0",
-]
-
-[[package]]
-name = "petgraph"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
@@ -8099,26 +8090,6 @@ dependencies = [
 
 [[package]]
 name = "prost-build"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
-dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
- "log",
- "multimap",
- "once_cell",
- "petgraph 0.7.1",
- "prettyplease",
- "prost 0.13.5",
- "prost-types 0.13.5",
- "regex",
- "syn 2.0.118",
- "tempfile",
-]
-
-[[package]]
-name = "prost-build"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
@@ -8127,10 +8098,12 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "multimap",
- "petgraph 0.8.3",
+ "petgraph",
  "prettyplease",
  "prost 0.14.4",
- "prost-types 0.14.4",
+ "prost-types",
+ "pulldown-cmark 0.13.4",
+ "pulldown-cmark-to-cmark",
  "regex",
  "syn 2.0.118",
  "tempfile",
@@ -8169,16 +8142,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01b80ea363c31af2de2b92e3c07ed1156628f7838c4afb4df75ee78a37fedbd1"
 dependencies = [
  "prost 0.14.4",
- "prost-types 0.14.4",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
-dependencies = [
- "prost 0.13.5",
+ "prost-types",
 ]
 
 [[package]]
@@ -8280,6 +8244,26 @@ dependencies = [
  "bitflags 2.13.0",
  "memchr",
  "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.13.0",
+ "memchr",
+ "unicase",
+]
+
+[[package]]
+name = "pulldown-cmark-to-cmark"
+version = "22.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50793def1b900256624a709439404384204a5dc3a6ec580281bfaac35e882e90"
+dependencies = [
+ "pulldown-cmark 0.13.4",
 ]
 
 [[package]]
@@ -8938,7 +8922,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams 0.4.2",
  "web-sys",
- "webpki-roots 1.0.8",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -9982,7 +9966,7 @@ dependencies = [
  "cargo_metadata 0.14.2",
  "error-chain",
  "glob",
- "pulldown-cmark",
+ "pulldown-cmark 0.9.6",
  "tempfile",
  "walkdir",
 ]
@@ -10812,9 +10796,9 @@ checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tonic"
-version = "0.13.1"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e581ba15a835f4d9ea06c55ab1bd4dce26fc53752c69a04aac00703bfb49ba9"
+checksum = "ac2a5518c70fa84342385732db33fb3f44bc4cc748936eb5833d2df34d6445ef"
 dependencies = [
  "async-trait",
  "axum 0.8.9",
@@ -10829,9 +10813,9 @@ dependencies = [
  "hyper-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.5",
  "rustls-native-certs 0.8.4",
- "socket2 0.5.10",
+ "socket2 0.6.4",
+ "sync_wrapper",
  "tokio",
  "tokio-rustls 0.26.4",
  "tokio-stream",
@@ -10839,22 +10823,47 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
- "webpki-roots 0.26.11",
+ "webpki-roots",
  "zstd",
 ]
 
 [[package]]
 name = "tonic-build"
-version = "0.13.1"
+version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
+checksum = "c68f61875ac5293cf72e6c8cf0158086428c82c37229e98c840878f1706b0322"
 dependencies = [
  "prettyplease",
  "proc-macro2",
- "prost-build 0.13.5",
- "prost-types 0.13.5",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "tonic-prost"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50849f68853be452acf590cde0b146665b8d507b3b8af17261df47e02c209ea0"
+dependencies = [
+ "bytes",
+ "prost 0.14.4",
+ "tonic",
+]
+
+[[package]]
+name = "tonic-prost-build"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "654e5643eff75d7f8c99197ce1440ed19a3474eada74c12bbac488b2cafdae27"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build",
+ "prost-types",
+ "quote",
+ "syn 2.0.118",
+ "tempfile",
+ "tonic-build",
 ]
 
 [[package]]
@@ -11641,15 +11650,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "0.26.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
-dependencies = [
- "webpki-roots 1.0.8",
 ]
 
 [[package]]
