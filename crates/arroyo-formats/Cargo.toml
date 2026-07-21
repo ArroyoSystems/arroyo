@@ -27,3 +27,4 @@ base64 = { workspace = true }
 uuid = { workspace = true }
 regex = { workspace = true }
 integer-encoding = "4.0.2"
+rmpv = { workspace = true }

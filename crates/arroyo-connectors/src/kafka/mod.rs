@@ -719,6 +719,32 @@ impl KafkaTester {
             Format::RawBytes(_) => {
                 // all bytes are valid
             }
+            Format::MsgPack(_) => {
+                let aschema: ArroyoSchema = schema.clone().into();
+                let mut deserializer = ArrowDeserializer::new(
+                    format.clone(),
+                    Arc::new(aschema),
+                    &schema.metadata_fields(),
+                    None,
+                    BadData::Fail {},
+                );
+
+                let mut error = deserializer
+                    .deserialize_slice(&msg, SystemTime::now(), None)
+                    .await
+                    .into_iter()
+                    .next();
+                if let Some(e) = deserializer.flush_buffer().1.pop() {
+                    error.replace(e);
+                }
+
+                if let Some(error) = error {
+                    bail!(
+                        "Failed to parse message according to the provided MsgPack schema: {}",
+                        error
+                    );
+                }
+            }
             Format::Protobuf(_) => {
                 let aschema: ArroyoSchema = schema.clone().into();
                 let mut deserializer = ArrowDeserializer::new(
