@@ -10,6 +10,7 @@ use datafusion::logical_expr::{Signature, TypeSignature, Volatility};
 use itertools::Itertools;
 use pyo3::prelude::*;
 use pyo3::types::{PyFunction, PyList, PyString, PyTuple};
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -64,6 +65,7 @@ impl ThreadedUdfInterpreter {
             signature: Arc::new(Signature {
                 type_signature,
                 volatility: Volatility::Volatile,
+                parameter_names: None,
             }),
             arg_types,
             return_type,
@@ -107,7 +109,8 @@ impl ThreadedUdfInterpreter {
     ) -> anyhow::Result<ArrayRef> {
         interpreter
             .with_gil(|py| {
-                let function = py.eval_bound(name, None, None).unwrap();
+                let function_name = CString::new(name.as_bytes()).unwrap();
+                let function = py.eval(function_name.as_c_str(), None, None).unwrap();
                 let function = function.downcast::<PyFunction>().unwrap();
 
                 let size = args.first().map(|e| e.len()).unwrap_or(0);
@@ -134,14 +137,14 @@ impl ThreadedUdfInterpreter {
                         {
                             Ok(py.None())
                         } else {
-                            let args = PyTuple::new_bound(py, args.drain(..));
+                            let args = PyTuple::new(py, args.drain(..))?;
 
                             function
                                 .call1(args)
                                 .map_err(|e| {
                                     anyhow!("failed while calling Python UDF '{}': {}", &name, e)
                                 })
-                                .map(|r| r.into())
+                                .map(|r| r.unbind())
                         }
                     })
                     .collect();
@@ -164,9 +167,13 @@ impl ThreadedUdfInterpreter {
         body: &str,
     ) -> anyhow::Result<(Arc<String>, Arc<Vec<NullableType>>, Arc<NullableType>)> {
         interpreter.with_gil(|py| {
-            let lib = PyModule::from_code_bound(py, UDF_PY_LIB, "arroyo_udf", "arroyo_udf")?;
+            let udf_lib = CString::new(UDF_PY_LIB).map_err(anyhow::Error::from)?;
+            let file_name = c"arroyo_udf";
+            let module_name = c"arroyo_udf";
+            let lib = PyModule::from_code(py, udf_lib.as_c_str(), file_name, module_name)?;
 
-            py.run_bound(body, None, None)?;
+            let body = CString::new(body).map_err(anyhow::Error::from)?;
+            py.run(body.as_c_str(), None, None)?;
 
             let udfs = lib.call_method0( "get_udfs")?;
             let udfs: &Bound<PyList> = udfs.downcast().unwrap();

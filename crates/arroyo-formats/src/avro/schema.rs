@@ -100,7 +100,9 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         }
         DataType::Union(_, _) => unimplemented!("unions are not supported"),
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
-        DataType::Decimal128(precision, scale) => {
+        DataType::Decimal32(precision, scale)
+        | DataType::Decimal64(precision, scale)
+        | DataType::Decimal128(precision, scale) => {
             return json!({
                 "type": "bytes",
                 "logicalType": "decimal",

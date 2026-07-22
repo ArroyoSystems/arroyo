@@ -53,6 +53,7 @@ use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
@@ -162,6 +163,21 @@ struct PlaceholderUdf {
     name: String,
     signature: Signature,
     return_type: Arc<dyn Fn(&[DataType]) -> Result<DataType> + Send + Sync + 'static>,
+}
+
+impl PartialEq for PlaceholderUdf {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.signature == other.signature
+    }
+}
+
+impl Eq for PlaceholderUdf {}
+
+impl Hash for PlaceholderUdf {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+    }
 }
 
 impl Debug for PlaceholderUdf {
@@ -477,6 +493,14 @@ impl ContextProvider for ArroyoSchemaProvider {
 impl FunctionRegistry for ArroyoSchemaProvider {
     fn udfs(&self) -> HashSet<String> {
         self.udf_defs.keys().map(|k| k.to_string()).collect()
+    }
+
+    fn udafs(&self) -> HashSet<String> {
+        self.aggregate_functions.keys().cloned().collect()
+    }
+
+    fn udwfs(&self) -> HashSet<String> {
+        self.window_functions.keys().cloned().collect()
     }
 
     fn udf(&self, name: &str) -> Result<Arc<ScalarUDF>> {

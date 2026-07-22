@@ -135,6 +135,9 @@ impl WatermarkNode {
         })
     }
     pub(crate) fn arroyo_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::new_unkeyed(Arc::new(self.schema.as_ref().into()), self.timestamp_index)
+        ArroyoSchema::new_unkeyed(
+            Arc::new(self.schema.as_arrow().clone()),
+            self.timestamp_index,
+        )
     }
 }

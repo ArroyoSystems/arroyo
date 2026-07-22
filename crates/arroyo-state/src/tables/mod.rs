@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{CheckpointFilePathLayout, Data, TaskInfo};
-use parquet::format::KeyValue;
+use parquet::file::metadata::KeyValue;
 use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -37,10 +37,10 @@ const VERSION_KEY: &str = "version";
 
 impl From<CheckpointParquetMetadata> for Option<Vec<KeyValue>> {
     fn from(value: CheckpointParquetMetadata) -> Self {
-        Some(vec![KeyValue::new(
-            VERSION_KEY.to_string(),
-            value.state_version.to_string(),
-        )])
+        Some(vec![KeyValue {
+            key: VERSION_KEY.to_string(),
+            value: Some(value.state_version.to_string()),
+        }])
     }
 }
 
@@ -311,8 +311,8 @@ impl<T: Table + Sized + 'static> ErasedTable for T {
             .map(|metadata| Self::checked_proto_decode(metadata.table_type(), metadata.data))
             .transpose()?;
         debug!(
-            "restoring from checkpoint message:\n{:#?}",
-            checkpoint_message
+            "restoring table from checkpoint: {}",
+            checkpoint_message.is_some()
         );
         T::from_config(
             config,

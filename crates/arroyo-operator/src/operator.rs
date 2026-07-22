@@ -1453,6 +1453,14 @@ impl FunctionRegistry for Registry {
         self.udfs.keys().cloned().collect()
     }
 
+    fn udafs(&self) -> HashSet<String> {
+        self.udafs.keys().cloned().collect()
+    }
+
+    fn udwfs(&self) -> HashSet<String> {
+        self.udwfs.keys().cloned().collect()
+    }
+
     fn udf(&self, name: &str) -> DFResult<Arc<ScalarUDF>> {
         self.udfs
             .get(name)

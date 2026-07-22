@@ -97,7 +97,7 @@ fn convert_simple_data_type(
             make_decimal_type(precision, scale)
         }
         SQLDataType::Bytea => Ok(DataType::Binary),
-        SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
+        SQLDataType::Interval { .. } => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
         SQLDataType::Struct(fields, _) => {
             let fields: Vec<_> = fields
                 .iter()
@@ -125,7 +125,7 @@ fn convert_simple_data_type(
 
 /// Returns a validated `DataType` for the specified precision and
 /// scale
-pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> Result<DataType> {
+pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<i64>) -> Result<DataType> {
     // postgres like behavior
     let (precision, scale) = match (precision, scale) {
         (Some(p), Some(s)) => (p as u8, s as i8),

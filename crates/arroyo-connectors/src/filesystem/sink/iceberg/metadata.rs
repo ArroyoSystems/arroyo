@@ -12,11 +12,8 @@ use iceberg::spec::{
 };
 use iceberg::transform::create_transform_function;
 use itertools::Itertools;
-use parquet::file::metadata::ParquetMetaDataReader;
+use parquet::file::metadata::ParquetMetaData;
 use parquet::file::statistics::Statistics;
-use parquet::format::FileMetaData;
-use parquet::thrift::TSerializable;
-use thrift::protocol::{TCompactOutputProtocol, TOutputProtocol};
 use tracing::warn;
 use uuid::Uuid;
 
@@ -45,20 +42,10 @@ pub struct IcebergFileMetadata {
 }
 
 impl IcebergFileMetadata {
-    pub fn from_parquet(meta: FileMetaData, iceberg_schema: &IcebergSchema) -> IcebergFileMetadata {
-        let mut buffer = Vec::new();
-        {
-            let mut protocol = TCompactOutputProtocol::new(&mut buffer);
-            meta.write_to_out_protocol(&mut protocol)
-                .expect("unable to write out parquet metadata");
-            protocol
-                .flush()
-                .expect("unable to flush parquet metadata to buffer");
-        }
-
-        let meta = ParquetMetaDataReader::decode_metadata(&buffer)
-            .expect("failed to decode parquet metadata");
-
+    pub fn from_parquet(
+        meta: ParquetMetaData,
+        iceberg_schema: &IcebergSchema,
+    ) -> IcebergFileMetadata {
         let index_by_parquet_path = {
             let mut visitor = IndexByParquetPathName::new();
             visit_schema(iceberg_schema, &mut visitor).expect("unable to traverse Iceberg schema");
@@ -187,7 +174,7 @@ pub fn build_datafile_from_meta(
         .content(DataContentType::Data)
         .partition(partition)
         .partition_spec_id(partition_spec_id)
-        .split_offsets(meta.split_offsets.clone())
+        .split_offsets(Some(meta.split_offsets.clone()))
         .column_sizes(column_sizes)
         .value_counts(value_counts)
         .null_value_counts(null_counts)

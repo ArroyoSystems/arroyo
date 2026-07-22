@@ -15,6 +15,7 @@ use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
 use std::any::Any;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
@@ -34,6 +35,21 @@ pub struct PythonUDF {
     pub signature: Arc<Signature>,
     pub arg_types: Arc<Vec<NullableType>>,
     pub return_type: Arc<NullableType>,
+}
+
+impl PartialEq for PythonUDF {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.definition == other.definition
+    }
+}
+
+impl Eq for PythonUDF {}
+
+impl Hash for PythonUDF {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.definition.hash(state);
+    }
 }
 
 impl ScalarUDFImpl for PythonUDF {

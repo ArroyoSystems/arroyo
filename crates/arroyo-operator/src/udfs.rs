@@ -69,7 +69,7 @@ impl Accumulator for ArroyoUdaf {
         Ok(())
     }
 
-    fn evaluate(&self) -> Result<ScalarValue> {
+    fn evaluate(&mut self) -> Result<ScalarValue> {
         if self.args[0].values.is_empty() {
             return Ok(scalar_none(&self.output_type));
         }
@@ -103,7 +103,7 @@ impl Accumulator for ArroyoUdaf {
         std::mem::size_of_val(self) + values
     }
 
-    fn state(&self) -> Result<Vec<ScalarValue>> {
+    fn state(&mut self) -> Result<Vec<ScalarValue>> {
         let states: Result<Vec<_>> = self
             .args
             .iter()
@@ -184,6 +184,8 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         DataType::Struct(_) => todo!(),
         DataType::Union(_, _) => todo!(),
         DataType::Dictionary(_, _) => todo!(),
+        DataType::Decimal32(precision, scale) => ScalarValue::Decimal32(None, *precision, *scale),
+        DataType::Decimal64(precision, scale) => ScalarValue::Decimal64(None, *precision, *scale),
         DataType::Decimal128(precision, scale) => ScalarValue::Decimal128(None, *precision, *scale),
         DataType::Decimal256(_, _) => todo!(),
         DataType::Map(_, _) => todo!(),

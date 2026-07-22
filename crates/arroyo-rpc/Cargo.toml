@@ -13,6 +13,7 @@ arrow-array = { workspace = true }
 arrow-ord = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 tonic = { workspace = true, features = ["tls-native-roots", "tls-webpki-roots"] }
+tonic-prost = { workspace = true }
 prost = {workspace = true}
 tokio = { workspace = true }
 futures = { workspace = true }
@@ -50,7 +51,7 @@ bincode = { workspace = true }
 bytes = { workspace = true }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 figment = {version = "0.10", features = ["test"]}

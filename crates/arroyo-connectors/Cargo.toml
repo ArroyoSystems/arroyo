@@ -93,11 +93,11 @@ aws-config = { workspace = true }
 parquet = { workspace = true, features = ["async"] }
 object_store = { workspace = true }
 deltalake = { workspace = true, features = ["s3", "gcs"] }
-delta_kernel = { workspace = true, features = ["arrow-55", "arrow-conversion"] }
+delta_kernel = { workspace = true, features = ["arrow-57", "arrow-conversion"] }
 async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
 flate2 = { workspace = true }
-iceberg = { version = "0.6.0" }
-iceberg-catalog-rest = "0.6.0"
+iceberg = { version = "0.8.0" }
+iceberg-catalog-rest = "0.8.0"
 apache-avro = {workspace = true}
 num-bigint = "0.4.6"
 rust_decimal = "1"

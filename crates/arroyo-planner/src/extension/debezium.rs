@@ -212,7 +212,7 @@ impl ArroyoExtension for DebeziumUnrollingExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_arrow().clone())).unwrap()
     }
 
     fn transparent(&self) -> bool {
@@ -295,7 +295,7 @@ impl ArroyoExtension for ToDebeziumExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_arrow().clone())).unwrap()
     }
 
     fn transparent(&self) -> bool {
