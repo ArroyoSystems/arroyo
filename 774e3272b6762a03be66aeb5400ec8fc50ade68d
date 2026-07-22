@@ -1,0 +1,35 @@
+justfile
+  s_ce5301f3bfc7af::t_24ad3f8efbdc37 9,11-16
+  s_ce5301f3bfc7af::t_df2cd769e5f886 1-3,6-8,17
+  s_ce5301f3bfc7af::t_7b48e0a7b04291 18,20-22,26-27,29-31,35-36,38-39
+  s_ce5301f3bfc7af::t_12dc87cc4f0a7f 19,23-25
+  s_ce5301f3bfc7af::t_20f7551f53d82a 37,40
+  s_ce5301f3bfc7af::t_d074ad26cbef04 4-5
+  s_ce5301f3bfc7af::t_a79c87da7a23a7 28,32-34
+  s_ce5301f3bfc7af::t_3c11a5c185ec7e 10
+k8s/arroyo-cloudflare/README.md
+  s_ce5301f3bfc7af::t_4b2dd00ee84e6a 89-90
+  s_ce5301f3bfc7af::t_50e2f3909b0c77 88,91,94-97,104,107-112,114-117
+  s_ce5301f3bfc7af::t_37e94bc821affa 98-101,113
+CF_README.md
+  s_ce5301f3bfc7af::t_a0d4fc5078b749 12
+  s_ce5301f3bfc7af::t_e10480b0c99840 10-11
+  s_ce5301f3bfc7af::t_3d139adccb7ffb 3-9,13-29,46-51
+  s_ce5301f3bfc7af::t_a0db8e9e6f4115 30-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "774e3272b6762a03be66aeb5400ec8fc50ade68d",
+  "prompts": {},
+  "sessions": {
+    "s_ce5301f3bfc7af": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07f3efec1ffeMvpbdkbXCL0vye",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
