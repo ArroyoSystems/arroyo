@@ -48,7 +48,7 @@ use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggreg
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{CreateTable, Query};
+use datafusion::sql::sqlparser::ast::{CreateTable, CreateTableOptions, Query};
 use datafusion::{
     optimizer::{OptimizerContext, optimizer::Optimizer},
     sql::{
@@ -773,7 +773,7 @@ impl Table {
         if let Statement::CreateTable(CreateTable {
             name,
             columns,
-            with_options,
+            table_options,
             query: None,
             temporary,
             constraints,
@@ -781,6 +781,11 @@ impl Table {
             ..
         }) = statement
         {
+            let with_options = match table_options {
+                CreateTableOptions::None => &[],
+                CreateTableOptions::With(options) => options.as_slice(),
+                options => return plan_err!("Unsupported create table options: {options}"),
+            };
             let name: String = name.to_string();
             let mut connector_opts = ConnectorOptions::new(with_options, arroyo_partitions)?;
 

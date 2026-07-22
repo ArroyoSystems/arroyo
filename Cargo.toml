@@ -71,7 +71,7 @@ reqwest = "0.12"
 rusqlite = "0.31"
 apache-avro = "0.18.0"
 k8s-openapi = "0.24.0"
-sqlparser = "0.55.0"
+sqlparser = "0.59.0"
 petgraph = "0.8"
 rand = "0.9"
 prometheus = "0.14.0"
@@ -119,7 +119,7 @@ split-debuginfo = "unpacked"
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 
-sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.55.0/arroyo" }
+sqlparser = { git = "https://github.com/wi11dey/sqlparser-rs", branch = "0.59.0/arroyo" }
 
 cornucopia_async = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }
 cornucopia = { git = "https://github.com/ArroyoSystems/cornucopia", branch = "sqlite" }

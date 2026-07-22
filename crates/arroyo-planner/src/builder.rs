@@ -160,8 +160,9 @@ impl<'a> Planner<'a> {
             .ok_or_else(|| DataFusionError::Plan("missing input".to_string()))?;
 
         // need to convert to ExecutionPlan to get the partial schema.
+        let task_ctx = self.session_state.task_ctx();
         let partial_aggregation_exec_plan =
-            partial_aggregation_plan.try_into_physical_plan(self.schema_provider, &codec)?;
+            partial_aggregation_plan.try_into_physical_plan(task_ctx.as_ref(), &codec)?;
 
         let partial_schema = partial_aggregation_exec_plan.schema();
         let final_input_table_provider =
