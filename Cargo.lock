@@ -126,7 +126,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -137,7 +137,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10012,7 +10012,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10055,7 +10055,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.59.0"
-source = "git+https://github.com/wi11dey/sqlparser-rs?branch=0.59.0%2Farroyo#d61170dda9d0c0fd3200a6d65558fec036fd5422"
+source = "git+https://github.com/wi11dey/sqlparser-rs?branch=0.59.0%2Farroyo#b5129dddedf2e467bd95c6fa6914748ebf792c85"
 dependencies = [
  "log",
  "recursive",
@@ -10065,7 +10065,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.3.0"
-source = "git+https://github.com/wi11dey/sqlparser-rs?branch=0.59.0%2Farroyo#d61170dda9d0c0fd3200a6d65558fec036fd5422"
+source = "git+https://github.com/wi11dey/sqlparser-rs?branch=0.59.0%2Farroyo#b5129dddedf2e467bd95c6fa6914748ebf792c85"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10088,7 +10088,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
