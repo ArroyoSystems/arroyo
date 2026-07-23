@@ -467,10 +467,6 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         Ok(Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
-
     fn properties(&self) -> &PlanProperties {
         &self.properties
     }
@@ -559,10 +555,6 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
     fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -637,10 +629,6 @@ impl ExecutionPlan for RecordBatchVecReader {
     fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -710,10 +698,6 @@ impl ExecutionPlan for ArroyoMemExec {
 
     fn statistics(&self) -> Result<datafusion::common::Statistics> {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
-    }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
     }
 }
 
@@ -829,10 +813,6 @@ impl ExecutionPlan for DebeziumUnrollingExec {
             self.schema.clone(),
             self.primary_keys.clone(),
         )?))
-    }
-
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
     }
 }
 
@@ -1082,10 +1062,6 @@ impl ExecutionPlan for ToDebeziumExec {
             timestamp_index,
             struct_projection,
         }))
-    }
-
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
     }
 }
 
