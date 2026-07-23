@@ -2,14 +2,16 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: {{ include "arroyo.fullname" . }}-config
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
 data:
   config.yaml: |-
     checkpoint-url: "{{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}"
     controller-endpoint: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
-    
+
     logging:
       format: "json"
-    
+
     controller:
       rpc-port: {{ .Values.controller.service.grpcPort }}
       scheduler: "kubernetes"
@@ -19,7 +21,7 @@ data:
 
     api:
       http-port: {{ .Values.controller.service.httpPort }}
-    
+
     compiler:
       rpc-port: {{ .Values.controller.service.compilerPort }}
       artifact-url: {{ required "A valid .Values.artifactUrl entry required!" .Values.artifactUrl }}
@@ -28,7 +30,7 @@ data:
       type: "postgres"
       postgres:
     {{- if .Values.postgresql.deploy }}
-        host: "{{- include "arroyo.fullname" . }}-postgresql.{{- default .Release.Namespace }}.svc.{{ .Values.clusterDomain }}"
+        host: "{{ include "arroyo.fullname" . }}-postgresql.{{ .Release.Namespace }}.svc.{{ .Values.clusterDomain }}"
         port: {{ default "5432" .Values.postgresql.auth.port }}
         database-name: "arroyo"
         user: "arroyo"
@@ -37,7 +39,9 @@ data:
         port: {{ .Values.postgresql.externalDatabase.port }}
         database-name: "{{ .Values.postgresql.externalDatabase.name }}"
         user: "{{ .Values.postgresql.externalDatabase.user }}"
+    {{- if not .Values.postgresql.externalDatabase.existingSecret }}
         password: "{{ .Values.postgresql.externalDatabase.password }}"
+    {{- end }}
     {{- end }}
 
     kubernetes-scheduler:
@@ -53,18 +57,18 @@ data:
           prometheus.io/scrape: "true"
           prometheus.io/path: /metrics
           prometheus.io/port: "6901"
-          {{- end }}    
+          {{- end }}
           {{- with .Values.podAnnotations }}
           {{- toYaml . | nindent 10 }}
-          {{- end }}    
+          {{- end }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
         image-pull-policy: "{{ .Values.imagePullPolicy }}"
         {{- with .Values.imagePullSecrets }}
         image-pull-secrets:
         {{- toYaml . | nindent 10 }}
-        {{- end }} 
+        {{- end }}
         resources: {{ .Values.worker.resources | toYaml | nindent 10 }}
-        service-account-name: {{ .Values.serviceAccount.name | quote }}
+        service-account-name: {{ include "arroyo.serviceAccountName" . | quote }}
         {{- with .Values.worker.nodeSelector }}
         node-selector:
           {{- toYaml . | nindent 10 }}
