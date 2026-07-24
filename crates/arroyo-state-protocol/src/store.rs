@@ -266,11 +266,16 @@ pub(crate) mod tests {
     pub(crate) struct MemoryProtocolStore {
         objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
         deleted_objects: Arc<Mutex<Vec<String>>>,
+        deleted_directories: Arc<Mutex<Vec<String>>>,
     }
 
     impl MemoryProtocolStore {
         pub(crate) fn deleted_objects(&self) -> Vec<String> {
             self.deleted_objects.lock().unwrap().clone()
+        }
+
+        pub(crate) fn deleted_directories(&self) -> Vec<String> {
+            self.deleted_directories.lock().unwrap().clone()
         }
     }
 
@@ -311,6 +316,11 @@ pub(crate) mod tests {
             Ok(())
         }
 
-        async fn delete_directory(&self, _path: &str) {}
+        async fn delete_directory(&self, path: &str) {
+            self.deleted_directories
+                .lock()
+                .unwrap()
+                .push(path.to_string());
+        }
     }
 }
