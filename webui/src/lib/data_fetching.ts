@@ -524,7 +524,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
       params: { path: { id: pipelineId } },
       body: { ignore_state: ignoreState ?? false },
     });
-    await mutate();
+    await Promise.all([mutate(), globalMutate(pipelineJobsKey(pipelineId))]);
   };
 
   const deletePipeline = async () => {

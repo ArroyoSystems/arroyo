@@ -52,7 +52,7 @@ use crate::rest_utils::{
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
@@ -868,6 +868,17 @@ pub async fn restart_pipeline(
     WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
+
+    if req.ignore_state.unwrap_or(false)
+        && matches!(config().job_controller, JobControllerMode::Worker)
+    {
+        jobs::replace_job_without_state(&state.database, &id, &auth_data).await?;
+
+        let db = state.database.client().await?;
+        let pipeline = query_pipeline_by_pub_id(&id, &db, &auth_data).await?;
+        return Ok(Json(pipeline));
+    }
+
     let db = state.database.client().await?;
 
     let job_id = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)

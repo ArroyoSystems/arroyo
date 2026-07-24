@@ -472,7 +472,6 @@ async fn get_and_register_checkpoint_info_leader<'a>(
             job_id: JobId(ctx.config.id.clone()),
             generation: Generation(ctx.status.generation),
             updated_at: SystemTime::now(),
-            ignore_state,
         },
         true,
     )
