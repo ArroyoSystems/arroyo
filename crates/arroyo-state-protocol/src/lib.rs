@@ -461,6 +461,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(1),
                 updated_at: from_micros(123),
+                ignore_state: false,
             },
             false,
         )
@@ -516,6 +517,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(2),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
@@ -536,6 +538,62 @@ mod tests {
                 recovery: GenerationRecovery::Ready {
                     checkpoint_ref: checkpoint_ref.clone()
                 }
+            }
+        );
+
+        let written_manifest: GenerationManifest =
+            read_json(&store, &paths.generation_manifest(Generation(2)))
+                .await
+                .unwrap()
+                .expect("new generation manifest should be written");
+        assert_eq!(written_manifest, expected_manifest);
+    }
+
+    #[tokio::test]
+    async fn initialize_generation_can_ignore_previous_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(2)).await;
+
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint = checkpoint_for_generation(Generation(1), 1, None, false);
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        let previous_manifest =
+            generation_manifest_for_generation(Generation(1), None, Some(checkpoint_ref));
+        put_json(
+            &store,
+            &paths.generation_manifest(Generation(1)),
+            &previous_manifest,
+        )
+        .await
+        .unwrap();
+
+        let initialization = initialize_generation(
+            &store,
+            InitializeGenerationRequest {
+                pipeline_id: PipelineId::new("P"),
+                job_id: JobId::new("J"),
+                generation: Generation(2),
+                updated_at: from_micros(456),
+                ignore_state: true,
+            },
+            false,
+        )
+        .await
+        .unwrap();
+
+        let expected_manifest = GenerationManifest::new(
+            PipelineId::new("P"),
+            JobId::new("J"),
+            Generation(2),
+            None,
+            456,
+        );
+        assert_eq!(
+            initialization,
+            GenerationInitialization::Initialized {
+                generation_manifest: expected_manifest.clone(),
+                recovery: GenerationRecovery::NoCheckpoint,
             }
         );
 
@@ -573,6 +631,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(2),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
@@ -621,6 +680,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(3),
                 updated_at: from_micros(789),
+                ignore_state: false,
             },
             false,
         )
@@ -668,6 +728,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(2),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
@@ -724,6 +785,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(3),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
@@ -789,6 +851,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(3),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
@@ -826,6 +889,7 @@ mod tests {
                 job_id: JobId::new("J"),
                 generation: Generation(2),
                 updated_at: from_micros(456),
+                ignore_state: false,
             },
             false,
         )
