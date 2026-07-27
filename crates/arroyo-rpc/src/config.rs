@@ -524,6 +524,9 @@ pub struct AdminConfig {
 
     #[serde(default)]
     pub auth_mode: ApiAuthMode,
+
+    #[serde(default)]
+    pub allow_unauthenticated_metrics: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -1095,6 +1098,11 @@ mod tests {
             jail.set_env("ARROYO__ADMIN__HTTP_PORT", 9111);
             let config: Config = load_config(&[]).extract().unwrap();
             assert_eq!(config.admin.http_port, 9111);
+            assert!(!config.admin.allow_unauthenticated_metrics);
+
+            jail.set_env("ARROYO__ADMIN__ALLOW_UNAUTHENTICATED_METRICS", true);
+            let config: Config = load_config(&[]).extract().unwrap();
+            assert!(config.admin.allow_unauthenticated_metrics);
 
             Ok(())
         });

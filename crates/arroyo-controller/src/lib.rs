@@ -28,6 +28,8 @@ use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
 use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use cornucopia_async::DatabaseSource;
+use lazy_static::lazy_static;
+use prometheus::{IntGaugeVec, register_int_gauge_vec};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -51,6 +53,43 @@ pub mod schedulers;
 mod states;
 
 const TTL_PIPELINE_CLEANUP_TIME: Duration = Duration::from_secs(60 * 60);
+
+lazy_static! {
+    static ref JOBS_BY_STATE: IntGaugeVec = register_int_gauge_vec!(
+        "arroyo_controller_jobs",
+        "Current number of jobs by controller state",
+        &["state"]
+    )
+    .unwrap();
+}
+
+fn metric_job_state<'a>(state: Option<&'a str>, failure_domain: Option<&str>) -> &'a str {
+    let state = state.unwrap_or("Created");
+    if state == "Failed" && failure_domain == Some("user") {
+        "UserFailed"
+    } else {
+        state
+    }
+}
+
+fn job_state_counts<'a>(
+    jobs: impl Iterator<Item = (Option<&'a str>, Option<&'a str>)>,
+) -> HashMap<&'a str, i64> {
+    let mut counts = HashMap::new();
+    for (state, failure_domain) in jobs {
+        *counts
+            .entry(metric_job_state(state, failure_domain))
+            .or_default() += 1;
+    }
+    counts
+}
+
+fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
+    JOBS_BY_STATE.reset();
+    for (state, count) in counts {
+        JOBS_BY_STATE.with_label_values(&[state]).set(*count);
+    }
+}
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
@@ -645,6 +684,12 @@ impl ControllerServer {
             while !token.is_cancelled() {
                 let client = db.client().await?;
                 let res = queries::controller_queries::fetch_all_jobs(&client).await?;
+                let state_counts = job_state_counts(
+                    res.iter()
+                        .map(|p| (p.state.as_deref(), p.failure_domain.as_deref())),
+                );
+                update_job_state_metrics(&state_counts);
+
                 for p in res {
                     let id = Arc::new(p.id);
                     let config = JobConfig {
@@ -797,5 +842,41 @@ impl ControllerServer {
         }
 
         Ok(local_addr.port())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prometheus::core::Collector;
+
+    use super::*;
+
+    #[test]
+    fn metric_job_states_preserve_raw_states() {
+        for state in ["Created", "Running", "Finished", "Unexpected"] {
+            assert_eq!(metric_job_state(Some(state), None), state);
+        }
+        assert_eq!(metric_job_state(None, None), "Created");
+
+        assert_eq!(metric_job_state(Some("Failed"), Some("user")), "UserFailed");
+        assert_eq!(metric_job_state(Some("Failed"), Some("internal")), "Failed");
+    }
+
+    #[test]
+    fn job_state_metrics_clear_absent_states() {
+        let counts = job_state_counts(
+            [
+                (Some("Running"), None),
+                (Some("Running"), None),
+                (Some("Failed"), Some("user")),
+            ]
+            .into_iter(),
+        );
+        update_job_state_metrics(&counts);
+        assert_eq!(JOBS_BY_STATE.with_label_values(&["Running"]).get(), 2);
+        assert_eq!(JOBS_BY_STATE.with_label_values(&["UserFailed"]).get(), 1);
+
+        update_job_state_metrics(&HashMap::new());
+        assert!(JOBS_BY_STATE.collect()[0].get_metric().is_empty());
     }
 }
