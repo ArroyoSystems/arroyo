@@ -444,6 +444,19 @@ async fn get_and_register_checkpoint_info_leader<'a>(
         storage_url: ctx.pipeline_info.state_url.clone(),
     };
     let storage_provider = get_storage_provider(&storage_role).await?;
+    let ignore_state = ctx
+        .config
+        .ignore_state_before_epoch
+        .and_then(|generation| generation.try_into().ok())
+        == Some(ctx.status.generation);
+
+    if ignore_state {
+        info!(
+            message = "starting leader generation without state",
+            job_id = *ctx.config.id,
+            generation = ctx.status.generation,
+        );
+    }
 
     let new_gen = initialize_generation(
         storage_provider.as_ref(),
@@ -452,6 +465,7 @@ async fn get_and_register_checkpoint_info_leader<'a>(
             job_id: JobId(ctx.config.id.clone()),
             generation: Generation(ctx.status.generation),
             updated_at: SystemTime::now(),
+            ignore_state,
         },
         true,
     )
@@ -717,21 +731,25 @@ impl State for Scheduling {
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
         let program = api::ArrowProgram::from(ctx.program.clone());
 
-        // Use ignore_state_before_epoch as default so new checkpoints exceed the threshold
-        let default_epoch = ctx
-            .config
-            .ignore_state_before_epoch
-            .filter(|&t| t > 0)
-            .map(|t| {
-                let epoch = (t - 1) as u64;
-                info!(
-                    message = "starting from ignore_state_before_epoch threshold",
-                    job_id = *ctx.config.id,
-                    default_epoch = epoch,
-                );
-                epoch
-            })
-            .unwrap_or(0);
+        // In controller mode this is an epoch threshold. Leader mode uses the same field as a
+        // generation number, so it must not affect the checkpoint epoch.
+        let default_epoch = if leader_mode {
+            0
+        } else {
+            ctx.config
+                .ignore_state_before_epoch
+                .filter(|&t| t > 0)
+                .map(|t| {
+                    let epoch = (t - 1) as u64;
+                    info!(
+                        message = "starting from ignore_state_before_epoch threshold",
+                        job_id = *ctx.config.id,
+                        default_epoch = epoch,
+                    );
+                    epoch
+                })
+                .unwrap_or(0)
+        };
 
         let start_epoch = checkpoint_info
             .as_ref()
