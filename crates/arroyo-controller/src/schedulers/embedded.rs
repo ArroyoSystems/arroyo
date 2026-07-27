@@ -50,6 +50,8 @@ impl Scheduler for EmbeddedScheduler {
         let guard = shutdown.guard("embedded-worker");
 
         let job_id = req.job_id.clone();
+        let pipeline_id = req.pipeline_id.clone();
+        let log_job_id = job_id.clone();
         let generation = req.generation;
         let worker_id = WorkerId(self.worker_counter.fetch_add(1, Ordering::SeqCst));
         let handle = tokio::task::spawn(async move {
@@ -61,19 +63,38 @@ impl Scheduler for EmbeddedScheduler {
                 req.generation,
                 guard,
             );
+            let worker_job_id = log_job_id.clone();
+            let worker_pipeline_id = pipeline_id.clone();
 
             match tokio::task::spawn(async move {
                 if let Err(e) = server.start_async().await {
-                    error!("Failed to start worker {:?}: {:?}", worker_id, e);
+                    error!(
+                        job_id = *worker_job_id,
+                        pipeline_id = *worker_pipeline_id,
+                        "Failed to start worker {:?}: {:?}",
+                        worker_id,
+                        e
+                    );
                 }
             })
             .await
             {
                 Ok(_) => {
-                    info!("Worker {:?} finished", worker_id);
+                    info!(
+                        job_id = *log_job_id,
+                        pipeline_id = *pipeline_id,
+                        "Worker {:?} finished",
+                        worker_id
+                    );
                 }
                 Err(err) => {
-                    error!("Worker {:?} panicked: {:?}", worker_id, err);
+                    error!(
+                        job_id = *log_job_id,
+                        pipeline_id = *pipeline_id,
+                        "Worker {:?} panicked: {:?}",
+                        worker_id,
+                        err
+                    );
                 }
             }
         });

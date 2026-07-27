@@ -137,7 +137,12 @@ impl State for LeaderRunning {
 
                         }
                         Some(msg) => {
-                            warn!(job_id = *ctx.config.id, msg =? msg, "unexpected job message in leader mode");
+                            warn!(
+                                job_id = *ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                                msg =? msg,
+                                "unexpected job message in leader mode"
+                            );
                         }
                         None => {
                             panic!("job queue shut down");
@@ -149,8 +154,12 @@ impl State for LeaderRunning {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
                         if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(message = "Failed to update status", error = format!("{:?}", e),
-                                job_id = *ctx.config.id);
+                            error!(
+                                message = "Failed to update status",
+                                error = format!("{:?}", e),
+                                job_id = *ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             ctx.status.restarts = restarts;
                         }
                     }
@@ -220,7 +229,12 @@ impl State for LeaderRunning {
                             }
                         }
                         Err(err) => {
-                            warn!(message = "error while polling leader status", error = format!("{:?}", err), job_id = *ctx.config.id);
+                            warn!(
+                                message = "error while polling leader status",
+                                error = format!("{:?}", err),
+                                job_id = *ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }

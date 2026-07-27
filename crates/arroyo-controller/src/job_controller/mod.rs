@@ -183,7 +183,8 @@ impl JobController {
                     info!(
                         message = "setting new min epoch",
                         min_epoch = *min_epoch,
-                        job_id = *self.config.id
+                        job_id = *self.config.id,
+                        pipeline_id = *self.model.pipeline_id
                     );
                     self.model.min_epoch = min_epoch;
                 }
@@ -191,6 +192,7 @@ impl JobController {
                     error!(
                         message = "cleanup failed",
                         job_id = *self.config.id,
+                        pipeline_id = *self.model.pipeline_id,
                         error = format!("{:?}", e)
                     );
 
@@ -201,6 +203,7 @@ impl JobController {
                     error!(
                         message = "cleanup panicked",
                         job_id = *self.config.id,
+                        pipeline_id = *self.model.pipeline_id,
                         error = format!("{:?}", e)
                     );
 
@@ -311,7 +314,8 @@ impl JobController {
                 JobMessage::ConfigUpdate(c) if c.stop_mode == SqlStopMode::immediate => {
                     info!(
                         message = "stopping job immediately",
-                        job_id = *self.config.id
+                        job_id = *self.config.id,
+                        pipeline_id = *self.model.pipeline_id
                     );
                     self.stop_job(StopMode::Immediate).await?;
                 }
@@ -329,12 +333,14 @@ impl JobController {
     fn start_cleanup(&mut self, new_min: Epoch) -> JoinHandle<anyhow::Result<Epoch>> {
         let min_epoch = Epoch((*self.model.min_epoch).max(1));
         let job_id = self.config.id.clone();
+        let pipeline_id = self.model.pipeline_id.clone();
         let store = self.checkpoint_store.clone();
         let storage_role = self.model.storage_role.clone();
 
         info!(
             message = "Starting cleaning",
             job_id = *job_id,
+            pipeline_id = *pipeline_id,
             min_epoch = *min_epoch,
             new_min = *new_min
         );
@@ -371,6 +377,7 @@ impl JobController {
             info!(
                 message = "Finished cleaning",
                 job_id = *job_id,
+                pipeline_id = *pipeline_id,
                 min_epoch = *min_epoch,
                 new_min = *new_min,
                 duration = start.elapsed().as_secs_f32()

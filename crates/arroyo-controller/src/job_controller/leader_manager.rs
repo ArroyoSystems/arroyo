@@ -12,7 +12,7 @@ use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{JobState, JobStatusReq, JobStopMode, StopJobReq};
 use arroyo_rpc::identity::InjectWorkerId;
 use arroyo_rpc::{job_status_client, retry};
-use arroyo_types::{JobId, WorkerId};
+use arroyo_types::{JobId, PipelineId, WorkerId};
 use std::time::{Duration, Instant};
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
@@ -21,6 +21,7 @@ use tracing::{info, warn};
 pub struct LeaderManager {
     leader_client: JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>,
     pub job_id: JobId,
+    pub pipeline_id: PipelineId,
     pub generation: u64,
     pub last_heartbeat: Instant,
 }
@@ -28,6 +29,7 @@ pub struct LeaderManager {
 impl LeaderManager {
     pub async fn connect(
         job_id: JobId,
+        pipeline_id: PipelineId,
         generation: u64,
         worker_id: WorkerId,
         address: String,
@@ -43,11 +45,17 @@ impl LeaderManager {
             5,
             Duration::from_millis(100),
             Duration::from_secs(2),
-            |e| warn!(job_id = *job_id.0, message = "failed to connect to worker leader", error = ?e)
+            |e| warn!(
+                job_id = *job_id.0,
+                pipeline_id = *pipeline_id.0,
+                message = "failed to connect to worker leader",
+                error = ?e
+            )
         )?;
 
         Ok(Self {
             job_id,
+            pipeline_id,
             generation,
             leader_client,
             last_heartbeat: Instant::now(),
@@ -56,15 +64,23 @@ impl LeaderManager {
 
     pub async fn poll_leader_status(&mut self) -> anyhow::Result<rpc::JobStatus> {
         let response = retry!(
-            self.leader_client.get_job_status(JobStatusReq {
-                  job_id: self.job_id.to_string(),
-                   generation: self.generation,
-                }).await,
-                5,
-                Duration::from_millis(100),
-                Duration::from_secs(2),
-                |e| warn!(job_id = *self.job_id.0, message = "failed to poll for job status", error = ?e)
-        )?.into_inner();
+            self.leader_client
+                .get_job_status(JobStatusReq {
+                    job_id: self.job_id.to_string(),
+                    generation: self.generation,
+                })
+                .await,
+            5,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            |e| warn!(
+                job_id = *self.job_id.0,
+                pipeline_id = *self.pipeline_id.0,
+                message = "failed to poll for job status",
+                error = ?e
+            )
+        )?
+        .into_inner();
 
         if response.job_id != *self.job_id.0 {
             bail!(
@@ -95,6 +111,7 @@ impl LeaderManager {
         info!(
             message = "sending stop request to leader",
             job_id = *self.job_id.0,
+            pipeline_id = *self.pipeline_id.0,
             stop_mode = ?stop_mode,
         );
 
@@ -190,7 +207,12 @@ where
                         }
                     }
                     Some(msg) => {
-                        warn!(job_id = *ctx.config.id, ?msg, "unexpected job message in leader leader mode");
+                        warn!(
+                            job_id = *ctx.config.id,
+                            pipeline_id = *ctx.pipeline_info.pipeline_id,
+                            ?msg,
+                            "unexpected job message in leader leader mode"
+                        );
                     }
                     None => {
                         panic!("job queue shut down");

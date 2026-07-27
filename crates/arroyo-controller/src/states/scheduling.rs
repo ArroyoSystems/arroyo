@@ -117,11 +117,13 @@ async fn handle_worker_connect<'a>(
             ..
         } => {
             let job_id = ctx.config.id.clone();
+            let pipeline_id = ctx.pipeline_info.pipeline_id.clone();
 
             if ctx.status.generation != run_id {
                 info!(
                     message = "worker connect from wrong run; ignoring",
                     job_id = *job_id,
+                    pipeline_id = *pipeline_id,
                     worker_id = worker_id.0,
                     machine_id = *machine_id.0,
                 );
@@ -146,6 +148,7 @@ async fn handle_worker_connect<'a>(
                 info!(
                     message = "connecting to worker",
                     job_id = *job_id,
+                    pipeline_id = *pipeline_id,
                     worker_id = worker_id.0,
                     machine_id = *machine_id.0,
                     rpc_address
@@ -175,6 +178,7 @@ async fn handle_worker_connect<'a>(
                             error!(
                                 message = "Failed to connect to worker",
                                 job_id = *job_id,
+                                pipeline_id = *pipeline_id,
                                 worker_id = worker_id.0,
                                 machine_id = *machine_id.0,
                                 error = format!("{:?}", e),
@@ -250,6 +254,7 @@ async fn get_checkpoint_info_legacy<'a>(
                 info!(
                     message = "restoring checkpoint",
                     job_id = *ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id,
                     epoch = r.epoch,
                     min_epoch = r.min_epoch
                 );
@@ -264,6 +269,7 @@ async fn get_checkpoint_info_legacy<'a>(
                 info!(
                     message = "skipping checkpoint due to ignore_state_before_epoch threshold",
                     job_id = *ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id,
                     checkpoint_epoch = r.epoch,
                     threshold = ctx.config.ignore_state_before_epoch.unwrap()
                 );
@@ -544,6 +550,7 @@ impl Scheduling {
             .inspect(|_| {
                 warn!(
                     job_id = *ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id,
                     key = "ARROYO__CHECKPOINT_URL",
                     "job env_vars contained a reserved infrastructure key; \
                      user-supplied value has been overridden by the controller"
@@ -556,6 +563,7 @@ impl Scheduling {
             .inspect(|_| {
                 warn!(
                     job_id = *ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id,
                     key = CLUSTER_ID_ENV,
                     "job env_vars contained a reserved infrastructure key; \
                      user-supplied value has been overridden by the controller"
@@ -586,6 +594,7 @@ impl Scheduling {
                     warn!(
                         message = "not enough slots for job",
                         job_id = *ctx.config.id,
+                        pipeline_id = *ctx.pipeline_info.pipeline_id,
                         slots_for_job = slots_needed,
                         slots_needed = s
                     );
@@ -646,6 +655,7 @@ impl State for Scheduling {
             warn!(
                 message = "failed to clean cluster prior to scheduling",
                 job_id = *ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 error = format!("{:?}", e)
             )
         }
@@ -744,6 +754,7 @@ impl State for Scheduling {
                     info!(
                         message = "starting from ignore_state_before_epoch threshold",
                         job_id = *ctx.config.id,
+                        pipeline_id = *ctx.pipeline_info.pipeline_id,
                         default_epoch = epoch,
                     );
                     epoch
@@ -775,6 +786,7 @@ impl State for Scheduling {
             .map(|(id, mut c)| {
                 let assignments = assignments.clone();
                 let job_id = ctx.config.id.clone();
+                let pipeline_id = ctx.pipeline_info.pipeline_id.clone();
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
@@ -786,6 +798,7 @@ impl State for Scheduling {
                     info!(
                         message = "starting execution on worker",
                         job_id = *job_id,
+                        pipeline_id = *pipeline_id,
                         worker_id = id.0,
                         machine_id = *machine_id.0,
                     );
@@ -809,6 +822,7 @@ impl State for Scheduling {
                             debug!(
                                 message = "worker entered initialization phase",
                                 job_id = *job_id,
+                                pipeline_id = *pipeline_id,
                                 worker_id = id.0,
                                 machine_id = *machine_id.0,
                             );
@@ -818,6 +832,7 @@ impl State for Scheduling {
                             error!(
                                 message = "failed to start execution on worker",
                                 job_id = *job_id,
+                                pipeline_id = *pipeline_id,
                                 worker_id = id.0,
                                 machine_id = *machine_id.0,
                                 error = format!("{:?}", e),
@@ -868,6 +883,7 @@ impl State for Scheduling {
                                     info!(
                                         message = "worker initialization completed successfully",
                                         job_id = *ctx.config.id,
+                                        pipeline_id = *ctx.pipeline_info.pipeline_id,
                                         worker_id = worker_id.0,
                                         machine_id = *worker.machine_id.0,
                                     );
@@ -877,6 +893,7 @@ impl State for Scheduling {
                                     error!(
                                         message = "worker initialization failed",
                                         job_id = *ctx.config.id,
+                                        pipeline_id = *ctx.pipeline_info.pipeline_id,
                                         worker_id = worker_id.0,
                                         machine_id = *worker.machine_id.0,
                                         error = error
@@ -914,6 +931,7 @@ impl State for Scheduling {
                     if let Some((id, addr)) = leader_info.clone()
                         && let Ok(mut leader_manager) = LeaderManager::connect(
                             JobId(ctx.config.id.clone()),
+                            ctx.pipeline_info.pipeline_id.clone(),
                             ctx.status.generation,
                             id,
                             addr,
@@ -937,6 +955,7 @@ impl State for Scheduling {
                                             message = "leader returned invalid job state before task startup timeout",
                                             error = format!("{:?}", e),
                                             job_id = *ctx.config.id,
+                                            pipeline_id = *ctx.pipeline_info.pipeline_id,
                                         );
                                     }
                                 }
@@ -989,7 +1008,11 @@ impl State for Scheduling {
                     metrics,
                 );
                 if needs_commit {
-                    info!("restored checkpoint was in committing phase, sending commits");
+                    info!(
+                        job_id = *ctx.config.id,
+                        pipeline_id = *ctx.pipeline_info.pipeline_id,
+                        "restored checkpoint was in committing phase, sending commits"
+                    );
                     controller
                         .send_commit_messages()
                         .await
@@ -1004,6 +1027,7 @@ impl State for Scheduling {
 
                 let leader_manager = match LeaderManager::connect(
                     JobId(ctx.config.id.clone()),
+                    ctx.pipeline_info.pipeline_id.clone(),
                     ctx.status.generation,
                     id,
                     addr.clone(),
