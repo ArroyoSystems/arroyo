@@ -253,6 +253,7 @@ impl Scheduler for KubernetesScheduler {
 
         info!(
             job_id = *req.job_id,
+            pipeline_id = *req.pipeline_id,
             message = "starting workers on k8s",
             replicas = pods.len(),
             task_slots = req.slots
@@ -261,6 +262,7 @@ impl Scheduler for KubernetesScheduler {
         for pod in pods {
             info!(
                 job_id = *req.job_id,
+                pipeline_id = *req.pipeline_id,
                 message = "starting worker",
                 pod = pod.metadata.name
             );

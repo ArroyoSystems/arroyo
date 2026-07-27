@@ -195,16 +195,18 @@ impl ControllerGrpc for ControllerServer {
         &self,
         request: Request<RegisterWorkerReq>,
     ) -> Result<Response<RegisterWorkerResp>, Status> {
-        info!(
-            "Worker registered: {:?} -- {:?}",
-            request.get_ref(),
-            request.remote_addr()
-        );
-
+        let remote_addr = request.remote_addr();
         let req = request.into_inner();
         let worker = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        info!(
+            job_id = worker.job_id,
+            pipeline_id = worker.pipeline_id,
+            "Worker registered: {:?} -- {:?}",
+            worker,
+            remote_addr
+        );
 
         self.send_to_job_queue(
             &worker.job_id,
@@ -227,11 +229,17 @@ impl ControllerGrpc for ControllerServer {
         request: Request<TaskStartedReq>,
     ) -> Result<Response<TaskStartedResp>, Status> {
         let req = request.into_inner();
-        info!("task started: {:?}", req);
-
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        info!(
+            job_id = ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            worker_id = ctx.worker_id,
+            task_id = req.task_id,
+            subtask_idx = req.subtask_idx,
+            "task started"
+        );
 
         self.send_to_job_queue(
             &ctx.job_id,
@@ -356,8 +364,12 @@ impl ControllerGrpc for ControllerServer {
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
+            job_id = ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
             "Worker {} initialization completed: success={}, error={:?}",
-            ctx.worker_id, req.success, req.error_message
+            ctx.worker_id,
+            req.success,
+            req.error_message
         );
 
         self.send_to_job_queue(
@@ -382,8 +394,17 @@ impl JobControllerGrpc for ControllerServer {
     ) -> Result<Response<TaskCheckpointEventResp>, Status> {
         let req = request.into_inner();
 
-        debug!("received task checkpoint event {:?}", req);
-        let job_id = job_id_from_context(&req.worker_context)?;
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        debug!(
+            job_id = ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            "received task checkpoint event {:?}",
+            req
+        );
+        let job_id = ctx.job_id.clone();
 
         self.send_to_job_queue(
             &job_id,
@@ -400,8 +421,17 @@ impl JobControllerGrpc for ControllerServer {
     ) -> Result<Response<TaskCheckpointCompletedResp>, Status> {
         let req = request.into_inner();
 
-        debug!("received task checkpoint completed {:?}", req);
-        let job_id = job_id_from_context(&req.worker_context)?;
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        debug!(
+            job_id = ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            "received task checkpoint completed {:?}",
+            req
+        );
+        let job_id = ctx.job_id.clone();
 
         self.send_to_job_queue(
             &job_id,
@@ -500,6 +530,7 @@ impl JobControllerGrpc for ControllerServer {
 
         info!(
             job_id = ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
             operator_id = err.operator_id,
             message = "operator error",
             error_message = err.error,
