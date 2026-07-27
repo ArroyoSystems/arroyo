@@ -42,6 +42,11 @@ pub enum ProtocolError {
         generation: Generation,
         epoch: Epoch,
     },
+    #[error("checkpoint GC minimum epoch {new_min_epoch} is newer than head epoch {head_epoch}")]
+    CheckpointGcMinEpochBeyondHead {
+        head_epoch: Epoch,
+        new_min_epoch: Epoch,
+    },
 }
 
 /// Monotonic identifier for a worker cluster generation of a job.
