@@ -2,9 +2,6 @@ checkpoint-url = "/tmp/arroyo/checkpoints"
 default-checkpoint-interval = "10s"
 job-controller = "controller"
 
-[grpc]
-connect-timeout = "10s"
-
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"
