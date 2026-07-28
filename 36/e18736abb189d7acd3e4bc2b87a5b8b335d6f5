@@ -1,0 +1,19 @@
+crates/arroyo-controller/src/job_controller/leader_manager.rs
+  s_65e281a2d3fccb::t_76b82aca8eaaf6 21-22,40-47,49-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "36e18736abb189d7acd3e4bc2b87a5b8b335d6f5",
+  "prompts": {},
+  "sessions": {
+    "s_65e281a2d3fccb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_055a91ddfffeP9laA5q2se1VDu",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
