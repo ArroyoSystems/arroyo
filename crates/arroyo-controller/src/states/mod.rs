@@ -1207,6 +1207,10 @@ impl StateMachine {
         }
     }
 
+    pub(crate) fn sender(&self) -> Option<Sender<JobMessage>> {
+        self.tx.clone()
+    }
+
     pub fn done(&self) -> bool {
         if let Some(tx) = &self.tx {
             tx.is_closed()
