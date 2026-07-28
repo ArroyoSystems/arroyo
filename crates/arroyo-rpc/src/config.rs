@@ -193,6 +193,9 @@ fn load_config(paths: &[PathBuf]) -> Figment {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
+    /// gRPC client configuration
+    pub grpc: GrpcConfig,
+
     /// API service configuration
     pub api: ApiConfig,
 
@@ -273,6 +276,13 @@ pub struct Config {
     /// Telemetry config
     #[serde(default)]
     pub disable_telemetry: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GrpcConfig {
+    /// Maximum time to establish a gRPC connection
+    pub connect_timeout: HumanReadableDuration,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -1047,6 +1057,7 @@ impl TlsConfig {
 #[cfg(test)]
 mod tests {
     use crate::config::{Config, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config};
+    use std::time::Duration;
     use url::Url;
 
     #[test]
@@ -1071,6 +1082,30 @@ mod tests {
             let result: Result<SchemaName, _> = serde_json::from_value(serde_json::json!(name));
             assert!(result.is_err(), "expected {name:?} to be rejected");
         }
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn grpc_connect_timeout_defaults_to_ten_seconds() {
+        figment::Jail::expect_with(|_| {
+            let config: Config = load_config(&[]).extract().unwrap();
+
+            assert_eq!(*config.grpc.connect_timeout, Duration::from_secs(10));
+            Ok(())
+        });
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)]
+    fn grpc_connect_timeout_can_be_overridden_with_environment() {
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("ARROYO__GRPC__CONNECT_TIMEOUT", "3s");
+
+            let config: Config = load_config(&[]).extract().unwrap();
+
+            assert_eq!(*config.grpc.connect_timeout, Duration::from_secs(3));
+            Ok(())
+        });
     }
 
     #[test]

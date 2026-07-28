@@ -1004,7 +1004,7 @@ pub async fn grpc_channel_builder(
     target_tls: &Option<TlsConfig>,
 ) -> Result<Endpoint> {
     let config = config();
-    if let Some(target_tls) = config.get_tls_config(target_tls) {
+    let endpoint = if let Some(target_tls) = config.get_tls_config(target_tls) {
         let mut endpoint = Url::parse(&endpoint)?;
         endpoint
             .set_scheme("https")
@@ -1031,11 +1031,13 @@ pub async fn grpc_channel_builder(
             config_builder = config_builder.identity(Identity::from_pem(our_tls.cert, our_tls.key));
         }
 
-        Ok(b.tls_config(config_builder).context("configuring TLS")?)
+        b.tls_config(config_builder).context("configuring TLS")?
     } else {
         debug!("connecting to grpc endpoint {endpoint}");
-        Ok(Channel::from_shared(endpoint.to_string())?)
-    }
+        Channel::from_shared(endpoint.to_string())?
+    };
+
+    Ok(endpoint.connect_timeout(*config.grpc.connect_timeout))
 }
 
 /// Connect to a gRPC service with optional TLS

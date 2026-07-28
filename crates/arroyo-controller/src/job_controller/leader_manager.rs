@@ -18,8 +18,6 @@ use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
-const LEADER_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-
 pub struct LeaderManager {
     leader_client: JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>,
     pub job_id: JobId,
@@ -37,23 +35,13 @@ impl LeaderManager {
         address: String,
     ) -> anyhow::Result<Self> {
         let leader_client = retry!(
-            match tokio::time::timeout(
-                LEADER_CONNECT_TIMEOUT,
-                job_status_client(
-                    "controller",
-                    &config().worker.tls,
-                    worker_id,
-                    address.clone(),
-                ),
+            job_status_client(
+                "controller",
+                &config().worker.tls,
+                worker_id,
+                address.clone()
             )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(anyhow!(
-                    "timed out connecting to worker leader after {:?}",
-                    LEADER_CONNECT_TIMEOUT
-                )),
-            },
+            .await,
             5,
             Duration::from_millis(100),
             Duration::from_secs(2),
