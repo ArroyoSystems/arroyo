@@ -401,6 +401,10 @@ pub struct ControllerConfig {
     /// Poll interval for leader status
     pub leader_poll_interval: HumanReadableDuration,
 
+    /// Timeout for connecting to gRPC services
+    #[serde(default)]
+    pub connect_timeout: Option<HumanReadableDuration>,
+
     /// Metric system configurations
     pub metrics: MetricsConfig,
 }

@@ -317,6 +317,7 @@ pub(crate) async fn connect_to_worker(id: WorkerId, addr: String) -> anyhow::Res
             addr.clone(),
             &config().worker.tls,
             &config().worker.tls,
+            None,
         )
         .await?
         .timeout(Duration::from_secs(15))

@@ -927,7 +927,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeli
 
 #[allow(clippy::too_many_arguments)]
 async fn run_to_completion(
-    config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
+    job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
     mut program: LogicalProgram,
     mut status: JobStatus,
@@ -937,7 +937,7 @@ async fn run_to_completion(
     scheduler: Arc<dyn Scheduler>,
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
-    let job_config = config.read().unwrap().0.clone();
+    let job_config = job_config_and_status.read().unwrap().0.clone();
 
     let leader_manager = if let Some(ctx) = &status.state_context.leader {
         LeaderManager::connect(
@@ -946,6 +946,7 @@ async fn run_to_completion(
             ctx.generation,
             ctx.worker_id,
             ctx.rpc_address.clone(),
+            config().controller.connect_timeout.as_deref().copied(),
         )
         .await
         .map(Some)
@@ -977,7 +978,7 @@ async fn run_to_completion(
     };
 
     loop {
-        config.write().unwrap().1 = AppliedStatus::Applied;
+        job_config_and_status.write().unwrap().1 = AppliedStatus::Applied;
         match execute_state(state, ctx).await {
             (Some(new_state), new_ctx) => {
                 state = new_state;
@@ -986,7 +987,7 @@ async fn run_to_completion(
             (None, _) => break,
         }
 
-        ctx.config = config.read().unwrap().0.clone();
+        ctx.config = job_config_and_status.read().unwrap().0.clone();
     }
 }
 

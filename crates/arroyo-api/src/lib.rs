@@ -124,12 +124,13 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
     let config = config();
     let endpoint = config.compiler_endpoint();
 
-    let channel = arroyo_rpc::connect_grpc("api", endpoint, &config.api.tls, &config.compiler.tls)
-        .await
-        .map_err(|e| {
-            error!("Failed to connect to compiler service: {}", e);
-            service_unavailable("compiler-service")
-        })?;
+    let channel =
+        arroyo_rpc::connect_grpc("api", endpoint, &config.api.tls, &config.compiler.tls, None)
+            .await
+            .map_err(|e| {
+                error!("Failed to connect to compiler service: {}", e);
+                service_unavailable("compiler-service")
+            })?;
 
     Ok(CompilerGrpcClient::new(channel))
 }
