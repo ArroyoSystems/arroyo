@@ -69,7 +69,7 @@ impl Scheduler for EmbeddedScheduler {
             match tokio::task::spawn(async move {
                 if let Err(e) = server.start_async().await {
                     error!(
-                        job_id = *worker_job_id,
+                        job_id = %worker_job_id,
                         pipeline_id = *worker_pipeline_id,
                         "Failed to start worker {:?}: {:?}",
                         worker_id,
@@ -81,7 +81,7 @@ impl Scheduler for EmbeddedScheduler {
             {
                 Ok(_) => {
                     info!(
-                        job_id = *log_job_id,
+                        job_id = %log_job_id,
                         pipeline_id = *pipeline_id,
                         "Worker {:?} finished",
                         worker_id
@@ -89,7 +89,7 @@ impl Scheduler for EmbeddedScheduler {
                 }
                 Err(err) => {
                     error!(
-                        job_id = *log_job_id,
+                        job_id = %log_job_id,
                         pipeline_id = *pipeline_id,
                         "Worker {:?} panicked: {:?}",
                         worker_id,

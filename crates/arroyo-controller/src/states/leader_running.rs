@@ -138,7 +138,7 @@ impl State for LeaderRunning {
                         }
                         Some(msg) => {
                             warn!(
-                                job_id = *ctx.config.id,
+                                job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                                 msg =? msg,
                                 "unexpected job message in leader mode"
@@ -157,7 +157,7 @@ impl State for LeaderRunning {
                             error!(
                                 message = "Failed to update status",
                                 error = format!("{:?}", e),
-                                job_id = *ctx.config.id,
+                                job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id
                             );
                             ctx.status.restarts = restarts;
@@ -232,7 +232,7 @@ impl State for LeaderRunning {
                             warn!(
                                 message = "error while polling leader status",
                                 error = format!("{:?}", err),
-                                job_id = *ctx.config.id,
+                                job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id
                             );
                             tokio::time::sleep(Duration::from_secs(2)).await;

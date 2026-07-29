@@ -117,7 +117,7 @@ async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
         warn!(
             message = "Failed to clean up cluster",
             error = format!("{:?}", e),
-            job_id = *ctx.config.id,
+            job_id = %ctx.config.id,
             pipeline_id = *ctx.pipeline_info.pipeline_id
         );
     }
@@ -553,7 +553,7 @@ impl JobContext<'_> {
             JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat { .. })
         ) {
             warn!(
-                job_id = *self.config.id,
+                job_id = %self.config.id,
                 pipeline_id = *self.pipeline_info.pipeline_id,
                 "unhandled job message {:?}",
                 msg
@@ -584,7 +584,7 @@ impl JobContext<'_> {
         event: TaskFailedEvent,
     ) -> Result<Transition, StateError> {
         error!(
-            job_id = self.config.id.as_str(),
+            job_id = %self.config.id.as_str(),
             pipeline_id = *self.pipeline_info.pipeline_id,
             task_id = event.task_id,
             operator_subtask = event.subtask_idx,
@@ -611,7 +611,7 @@ impl JobContext<'_> {
         .await
         {
             warn!(
-                job_id = *self.config.id,
+                job_id = %self.config.id,
                 pipeline_id = *self.pipeline_info.pipeline_id,
                 "Failed to log task failure to database: {:?}",
                 db_err
@@ -650,7 +650,7 @@ impl JobContext<'_> {
         let reason = failure.message.clone();
 
         error!(
-            job_id = self.config.id.as_str(),
+            job_id = %self.config.id.as_str(),
             pipeline_id = *self.pipeline_info.pipeline_id,
             task_id = format!("{:?}", failure.task_id),
             operator_subtask = subtask_index,
@@ -680,7 +680,7 @@ impl JobContext<'_> {
             .await
             {
                 warn!(
-                    job_id = *self.config.id,
+                    job_id = %self.config.id,
                     pipeline_id = *self.pipeline_info.pipeline_id,
                     "Failed to log job failure to database: {:?}",
                     db_err
@@ -759,7 +759,7 @@ async fn execute_state<'a>(
 
     debug!(
         message = "executing state",
-        job_id = *ctx.config.id,
+        job_id = %ctx.config.id,
         pipeline_id = *ctx.pipeline_info.pipeline_id,
         state = state_name,
         config = format!("{:?}", ctx.config)
@@ -769,7 +769,7 @@ async fn execute_state<'a>(
         Ok(Transition::Advance(s)) => {
             info!(
                 message = "state transition",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                 from = state_name,
                 to = s.state.name(),
@@ -802,7 +802,7 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "fatal state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
@@ -836,7 +836,7 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "exhausted in-state retries, moving to recovering",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
@@ -860,7 +860,7 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "retryable state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
@@ -917,7 +917,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeli
         ));
 
     debug!(
-        job_id,
+        %job_id,
         pipeline_id,
         "waiting {}ms to retry",
         backoff.as_millis()
@@ -950,7 +950,7 @@ async fn run_to_completion(
         .await
         .map(Some)
         .unwrap_or_else(|e| {
-            warn!(job_id = *job_config.id,
+            warn!(job_id = %job_config.id,
                     pipeline_id = *pipeline_info.pipeline_id,
                     leader_ctx =? ctx,
                     error =? e,
@@ -1065,7 +1065,7 @@ impl StateMachine {
                 Ok(p) => Some((p, info)),
                 Err(e) => {
                     warn!(
-                        job_id,
+                        %job_id,
                         pipeline_id = *info.pipeline_id,
                         "Failed to start job: {}",
                         e
@@ -1139,7 +1139,7 @@ impl StateMachine {
                             let id = { config.read().unwrap().0.id.clone() };
                             info!(
                                 message = "starting state machine",
-                                job_id = *id,
+                                job_id = %id,
                                 pipeline_id = *pipeline_id
                             );
                             run_to_completion(
@@ -1156,7 +1156,7 @@ impl StateMachine {
                             .await;
                             info!(
                                 message = "finished state machine",
-                                job_id = *id,
+                                job_id = %id,
                                 pipeline_id = *pipeline_id
                             );
                             Ok(())
@@ -1167,7 +1167,7 @@ impl StateMachine {
                     }
                     Err(e) => {
                         // something went wrong, we'll retry on the next go around
-                        warn!(job_id = *status.id, "Failed to start job: {:?}", e);
+                        warn!(job_id = %status.id, "Failed to start job: {:?}", e);
                     }
                 }
             }

@@ -18,7 +18,7 @@ impl State for Failing {
             warn!(
                 message = "failed to gracefully tear down cluster during failure",
                 error = format!("{:?}", e),
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
                 pipeline_id = *ctx.pipeline_info.pipeline_id
             );
         }

@@ -46,7 +46,7 @@ impl LeaderManager {
             Duration::from_millis(100),
             Duration::from_secs(2),
             |e| warn!(
-                job_id = *job_id.0,
+                job_id = %job_id,
                 pipeline_id = *pipeline_id.0,
                 message = "failed to connect to worker leader",
                 error = ?e
@@ -74,7 +74,7 @@ impl LeaderManager {
             Duration::from_millis(100),
             Duration::from_secs(2),
             |e| warn!(
-                job_id = *self.job_id.0,
+                job_id = %self.job_id,
                 pipeline_id = *self.pipeline_id.0,
                 message = "failed to poll for job status",
                 error = ?e
@@ -110,7 +110,7 @@ impl LeaderManager {
     pub async fn stop_leader(&mut self, stop_mode: JobStopMode) -> anyhow::Result<()> {
         info!(
             message = "sending stop request to leader",
-            job_id = *self.job_id.0,
+            job_id = %self.job_id,
             pipeline_id = *self.pipeline_id.0,
             stop_mode = ?stop_mode,
         );
@@ -208,7 +208,7 @@ where
                     }
                     Some(msg) => {
                         warn!(
-                            job_id = *ctx.config.id,
+                            job_id = %ctx.config.id,
                             pipeline_id = *ctx.pipeline_info.pipeline_id,
                             ?msg,
                             "unexpected job message in leader leader mode"

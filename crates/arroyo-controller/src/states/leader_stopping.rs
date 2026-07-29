@@ -49,7 +49,7 @@ impl State for LeaderStopping {
 
                 info!(
                     msg = "waiting for workers to terminate",
-                    job_id = *ctx.config.id,
+                    job_id = %ctx.config.id,
                     pipeline_id = *ctx.pipeline_info.pipeline_id
                 );
                 // TODO: we should watch the config queue and move immediately to force stop if requested
@@ -64,7 +64,7 @@ impl State for LeaderStopping {
                     Ok(Err(e)) => {
                         error!(
                             msg = "encountered error while waiting for job to stop gracefully; will try force-stopping",
-                            job_id = *ctx.config.id,
+                            job_id = %ctx.config.id,
                             pipeline_id = *ctx.pipeline_info.pipeline_id,
                             error = e.to_string(),
                         );
@@ -79,7 +79,7 @@ impl State for LeaderStopping {
                     Err(_e) => {
                         error!(
                             msg = "timed out waiting for job to stop",
-                            job_id = *ctx.config.id,
+                            job_id = %ctx.config.id,
                             pipeline_id = *ctx.pipeline_info.pipeline_id,
                         );
 

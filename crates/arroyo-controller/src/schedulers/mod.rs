@@ -233,7 +233,7 @@ impl Scheduler for ProcessScheduler {
                             info!(
                                 message = "Killing child",
                                 worker_id,
-                                job_id = *job_id,
+                                job_id = %job_id,
                                 pipeline_id = *pipeline_id
                             );
                             if let Err(e) = child.kill().await {
@@ -331,7 +331,7 @@ impl Scheduler for ProcessScheduler {
                         warn!(
                             message = "process scheduler worker exited without completion signal",
                             worker_id = worker_id.0,
-                            job_id = *job_id,
+                            job_id = %job_id,
                             pipeline_id = *pipeline_id,
                         );
                     }
@@ -627,7 +627,7 @@ impl NodeScheduler {
             warn!(
                 message = "node not found for stop worker",
                 node_id = *worker.node_id.0,
-                job_id = *worker.job_id,
+                job_id = %worker.job_id,
                 pipeline_id = *worker.pipeline_id
             );
             return Ok(Some(worker_id));
@@ -639,7 +639,7 @@ impl NodeScheduler {
 
         info!(
             message = "stopping worker",
-            job_id = *worker.job_id,
+            job_id = %worker.job_id,
             pipeline_id = *worker.pipeline_id,
             node_id = *worker.node_id.0,
             node_addr = node.addr,
@@ -648,7 +648,7 @@ impl NodeScheduler {
 
         let Ok(mut client) = Self::client(&node).await else {
             warn!(
-                job_id = *worker.job_id,
+                job_id = %worker.job_id,
                 pipeline_id = *worker.pipeline_id,
                 "Failed to connect to worker to stop; this likely means it is dead"
             );
@@ -664,7 +664,7 @@ impl NodeScheduler {
             .await
         else {
             warn!(
-                job_id = *worker.job_id,
+                job_id = %worker.job_id,
                 pipeline_id = *worker.pipeline_id,
                 "Failed to connect to worker to stop; this likely means it is dead"
             );
@@ -732,14 +732,14 @@ impl Scheduler for NodeScheduler {
             node.release_slots(worker_id, req.slots as usize);
         } else {
             warn!(
-                job_id,
+                %job_id,
                 pipeline_id, "Got worker finished message for unknown node {}", machine_id
             );
         }
 
         if state.workers.remove(&worker_id).is_none() {
             warn!(
-                job_id,
+                %job_id,
                 pipeline_id, "Got worker finished message for unknown worker {}", worker_id.0
             );
         }
@@ -803,7 +803,7 @@ impl Scheduler for NodeScheduler {
 
             let slots_for_this_one = node.free_slots.min(to_schedule);
             info!(
-                job_id = *start_pipeline_req.job_id,
+                job_id = %start_pipeline_req.job_id,
                 pipeline_id = *start_pipeline_req.pipeline_id,
                 "Scheduling {} slots on node {}",
                 slots_for_this_one,

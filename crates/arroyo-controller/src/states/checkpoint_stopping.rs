@@ -28,7 +28,7 @@ impl State for CheckpointStopping {
             match job_controller.checkpoint_finished().await {
                 Ok(done) => {
                     debug!(
-                        job_id = *job_id,
+                        job_id = %job_id,
                         pipeline_id = *pipeline_id,
                         "checked checkpoint, got {}, job_controller.finished(): {}, final_checkpoint_started: {}",
                         done,
