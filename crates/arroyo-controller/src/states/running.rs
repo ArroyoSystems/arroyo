@@ -105,7 +105,7 @@ impl State for Running {
                             error!(
                                 message = "Failed to update status",
                                 error = format!("{:?}", e),
-                                job_id = *ctx.config.id,
+                                job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id
                             );
                             ctx.status.restarts = restarts;
@@ -140,7 +140,7 @@ impl State for Running {
                             error!(
                                 message = "error while running",
                                 error = format!("{:?}", err),
-                                job_id = *ctx.config.id,
+                                job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id
                             );
                             log_event!("running_error", {

@@ -240,7 +240,7 @@ impl ControllerGrpc for ControllerServer {
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
-            job_id = worker.job_id,
+            job_id = %worker.job_id,
             pipeline_id = worker.pipeline_id,
             "Worker registered: {:?} -- {:?}",
             worker,
@@ -272,7 +272,7 @@ impl ControllerGrpc for ControllerServer {
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
             pipeline_id = ctx.pipeline_id,
             worker_id = ctx.worker_id,
             task_id = req.task_id,
@@ -403,7 +403,7 @@ impl ControllerGrpc for ControllerServer {
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
             pipeline_id = ctx.pipeline_id,
             "Worker {} initialization completed: success={}, error={:?}",
             ctx.worker_id,
@@ -438,7 +438,7 @@ impl JobControllerGrpc for ControllerServer {
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         debug!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
             pipeline_id = ctx.pipeline_id,
             "received task checkpoint event {:?}",
             req
@@ -465,7 +465,7 @@ impl JobControllerGrpc for ControllerServer {
             .as_ref()
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         debug!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
             pipeline_id = ctx.pipeline_id,
             "received task checkpoint completed {:?}",
             req
@@ -568,7 +568,7 @@ impl JobControllerGrpc for ControllerServer {
             .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing error"))?;
 
         info!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
             pipeline_id = ctx.pipeline_id,
             operator_id = err.operator_id,
             message = "operator error",
@@ -662,7 +662,7 @@ impl ControllerServer {
                 Ok(())
             }
         } else {
-            warn!(message = "Received message for unknown job id", job_id);
+            warn!(message = "Received message for unknown job id", %job_id);
             Err(Status::failed_precondition(format!(
                 "No job with id {job_id}"
             )))
@@ -722,7 +722,7 @@ impl ControllerServer {
 
                     let state_context: StateContext =
                         serde_json::from_value(p.state_context.clone()).unwrap_or_else(|e| {
-                            warn!(job_id = *id, original =? p.state_context, error =? e,
+                            warn!(job_id = %id, original =? p.state_context, error =? e,
                                 "failed to deserialize state context");
                             StateContext {
                                 version: 1,
