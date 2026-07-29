@@ -2,9 +2,10 @@ use crate::MetadataField;
 use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
 use ahash::HashSet;
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
+use datafusion::common::DFSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
@@ -420,6 +421,33 @@ impl TryFrom<Field> for SourceField {
     }
 }
 
+fn validate_unique_field_names(fields: &[SourceField], path: &str) -> anyhow::Result<()> {
+    let arrow_fields = fields
+        .iter()
+        .cloned()
+        .map(Field::from)
+        .collect::<Vec<_>>()
+        .into();
+    DFSchema::from_unqualified_fields(arrow_fields, HashMap::new())
+        .map_err(|e| anyhow!("invalid field names in {path}: {e}"))?;
+
+    for field in fields {
+        validate_unique_nested_field_names(&field.field_type, &format!("{path}.{}", field.name))?;
+    }
+
+    Ok(())
+}
+
+fn validate_unique_nested_field_names(field_type: &FieldType, path: &str) -> anyhow::Result<()> {
+    match field_type {
+        FieldType::Struct(StructField { fields }) => validate_unique_field_names(fields, path),
+        FieldType::List(ListField { items }) => {
+            validate_unique_nested_field_names(&items.field_type, &format!("{path}[]"))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SchemaDefinition {
@@ -478,6 +506,8 @@ impl ConnectionSchema {
     }
 
     pub fn validate(self) -> anyhow::Result<Self> {
+        validate_unique_field_names(&self.fields, "schema")?;
+
         let non_metadata_fields: Vec<_> = self
             .fields
             .iter()
@@ -633,6 +663,50 @@ mod tests {
 
     fn af(name: &str, dt: DataType, nullable: bool) -> ArrowField {
         ArrowField::new(name, dt, nullable)
+    }
+
+    fn source_field(name: &str, field_type: FieldType) -> SourceField {
+        SourceField {
+            name: name.to_string(),
+            field_type,
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        }
+    }
+
+    #[test]
+    fn connection_schema_rejects_duplicate_field_names_in_list_structs() {
+        let schema = ConnectionSchema {
+            format: None,
+            bad_data: None,
+            framing: None,
+            fields: vec![source_field(
+                "events",
+                FieldType::List(ListField {
+                    items: Box::new(ListFieldItem {
+                        name: "item".to_string(),
+                        field_type: FieldType::Struct(StructField {
+                            fields: vec![
+                                source_field("id", FieldType::Int64),
+                                source_field("id", FieldType::String),
+                            ],
+                        }),
+                        required: false,
+                        sql_name: None,
+                    }),
+                }),
+            )],
+            definition: None,
+            inferred: None,
+            primary_keys: HashSet::default(),
+        };
+
+        let err = schema.validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid field names in schema.events[]: Schema error: Schema contains duplicate unqualified field name id"
+        );
     }
 
     #[test]
