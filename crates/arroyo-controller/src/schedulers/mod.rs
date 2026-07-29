@@ -605,6 +605,7 @@ impl NodeScheduler {
             format!("http://{}", node.addr),
             &config().controller.tls,
             &config().node.tls,
+            None,
         )
         .await?;
         Ok(NodeGrpcClient::new(channel))

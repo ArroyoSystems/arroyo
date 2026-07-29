@@ -59,6 +59,7 @@ async fn fetch_from_leader<
         &config().api.tls,
         leader_context.worker_id,
         leader_context.rpc_address,
+        None,
     )
     .await
     .map_err(|_| ErrorResp {
