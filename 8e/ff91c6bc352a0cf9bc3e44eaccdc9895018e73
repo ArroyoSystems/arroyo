@@ -1,0 +1,57 @@
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_1537a68366fd8e::t_970ea890b10fb8 171
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_1537a68366fd8e::t_2822fa41a72a72 413,421
+  s_1537a68366fd8e::t_7c6e38b1e92c48 412,420
+  s_1537a68366fd8e::t_f45b9ae7f8334e 180-182
+  s_1537a68366fd8e::t_7f1836a8985ae3 921,926-927
+  s_1537a68366fd8e::t_9b14588e2052f3 411,464,519
+  s_1537a68366fd8e::t_adc3e9309bf9a0 587
+  s_1537a68366fd8e::t_32ca5248e166e5 906-911
+  s_1537a68366fd8e::t_5061543e9d581b 584-586
+  s_1537a68366fd8e::t_a32ec2c95c4c35 14
+  s_1537a68366fd8e::t_54099d2d385ffe 179,415,423,446,448,670,692,913
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_1537a68366fd8e::t_9c9a12332d6321 126-129
+  s_1537a68366fd8e::t_3b78a042fbf472 130-132,143,146
+  s_1537a68366fd8e::t_ff11a18fd9857b 491
+  s_1537a68366fd8e::t_194835941d29fe 356
+  s_1537a68366fd8e::t_d7947e9bf10700 492-493
+  s_1537a68366fd8e::t_33635de436d20b 505,519
+  s_1537a68366fd8e::t_cbaa22a2a63f80 90
+  s_1537a68366fd8e::t_48ab5f62cc25f0 114
+  s_1537a68366fd8e::t_215aeabfa37ba9 187-188
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_1537a68366fd8e::t_c7f9938c99e338 222
+  s_1537a68366fd8e::t_e68b89638304ce 38,429-433,442-443,451,462-467,470-480,482,498-507,509,512,523,533
+  s_1537a68366fd8e::t_e5f7d14910df45 226
+  s_1537a68366fd8e::t_6525c65ec9fe64 33
+  s_1537a68366fd8e::t_84226ec020b875 227,235,250
+  s_1537a68366fd8e::t_688c95b5f05301 218
+  s_1537a68366fd8e::t_8f928b82f109f6 219,223-224
+  s_1537a68366fd8e::t_f5297c40a46a06 100
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_1537a68366fd8e::t_cb4e03fd35ec03 1-5,12-13,17-36,39-49,53-55,61-66,70,77-90,92-132,134-150,152-167,169-171,174
+  s_1537a68366fd8e::t_2aa87ad0c61dd4 172
+  s_1537a68366fd8e::t_3d9cca4002d7f7 37-38
+  s_1537a68366fd8e::t_5d96c55a3570a5 91
+  s_1537a68366fd8e::t_3ed3529cf9dbad 14
+  s_1537a68366fd8e::t_09b0a987600c21 133
+  s_1537a68366fd8e::t_7cd4de662358e1 168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8eff91c6bc352a0cf9bc3e44eaccdc9895018e73",
+  "prompts": {},
+  "sessions": {
+    "s_1537a68366fd8e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05bd0a4d7ffeWSymqsrXwsdwAQ",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
