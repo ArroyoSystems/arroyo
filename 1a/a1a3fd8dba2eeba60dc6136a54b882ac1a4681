@@ -18,6 +18,7 @@ crates/arroyo-connectors/src/superbuffer/source/state.rs
   s_1537a68366fd8e::t_48ab5f62cc25f0 114
   s_1537a68366fd8e::t_3b78a042fbf472 130-132,143,146
   s_1537a68366fd8e::t_d7947e9bf10700 492-493
+  s_1537a68366fd8e::t_33635de436d20b 505,519
 crates/arroyo-connectors/src/superbuffer/source/mod.rs
   s_1537a68366fd8e::t_6525c65ec9fe64 33,38
   s_1537a68366fd8e::t_8f928b82f109f6 219,223-224
@@ -37,6 +38,8 @@ crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
   s_1537a68366fd8e::t_3d9cca4002d7f7 37-38
   s_1537a68366fd8e::t_cb4e03fd35ec03 1-5,12-13,17-36,39-49,53-55,61-66,70,77-90,92-132,134-150,152-167,169-171,174
   s_1537a68366fd8e::t_2aa87ad0c61dd4 172
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_1537a68366fd8e::t_970ea890b10fb8 171
 ---
 {
   "schema_version": "authorship/3.0.0",
