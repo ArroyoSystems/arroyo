@@ -160,6 +160,7 @@ async fn handle_worker_connect<'a>(
                         rpc_address.clone(),
                         &config().controller.tls,
                         &config().worker.tls,
+                        None,
                     )
                     .await
                     .unwrap()
@@ -935,6 +936,7 @@ impl State for Scheduling {
                             ctx.status.generation,
                             id,
                             addr,
+                            config().controller.connect_timeout.as_deref().copied(),
                         ).await
                             && let Ok(status) = leader_manager.poll_leader_status().await {
                                 match JobState::try_from(status.job_state) {
@@ -1031,6 +1033,7 @@ impl State for Scheduling {
                     ctx.status.generation,
                     id,
                     addr.clone(),
+                    config().controller.connect_timeout.as_deref().copied(),
                 )
                 .await
                 {

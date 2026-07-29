@@ -33,13 +33,15 @@ impl LeaderManager {
         generation: u64,
         worker_id: WorkerId,
         address: String,
+        connect_timeout: Option<Duration>,
     ) -> anyhow::Result<Self> {
         let leader_client = retry!(
             job_status_client(
                 "controller",
                 &config().worker.tls,
                 worker_id,
-                address.clone()
+                address.clone(),
+                connect_timeout,
             )
             .await,
             5,
