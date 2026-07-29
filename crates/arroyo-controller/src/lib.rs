@@ -651,22 +651,28 @@ impl ControllerServer {
     }
 
     async fn send_to_job_queue(&self, job_id: &str, msg: JobMessage) -> Result<(), Status> {
-        let mut jobs = self.job_state.lock().await;
+        // Keep per-job backpressure from holding the global job map lock.
+        let tx = {
+            let jobs = self.job_state.lock().await;
+            let Some(sm) = jobs.get(job_id) else {
+                warn!(message = "Received message for unknown job id", %job_id);
+                return Err(Status::failed_precondition(format!(
+                    "No job with id {job_id}"
+                )));
+            };
 
-        if let Some(sm) = jobs.get_mut(job_id) {
-            if let Err(e) = sm.send(msg).await {
-                Err(Status::failed_precondition(format!(
-                    "Cannot handle message for {job_id}: {e}"
-                )))
-            } else {
-                Ok(())
-            }
-        } else {
-            warn!(message = "Received message for unknown job id", %job_id);
-            Err(Status::failed_precondition(format!(
-                "No job with id {job_id}"
-            )))
-        }
+            sm.sender().ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "Cannot handle message for {job_id}: State machine is inactive"
+                ))
+            })?
+        };
+
+        tx.send(msg).await.map_err(|_| {
+            Status::failed_precondition(format!(
+                "Cannot handle message for {job_id}: State machine is inactive"
+            ))
+        })
     }
 
     fn start_updater(&self, guard: ShutdownGuard) {
