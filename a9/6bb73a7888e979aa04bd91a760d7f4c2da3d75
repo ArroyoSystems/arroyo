@@ -1,0 +1,40 @@
+crates/arroyo-controller/src/states/scheduling.rs
+  s_7c63ec9a9ce5e7::t_4e99a101b9c515 163
+  s_7c63ec9a9ce5e7::t_3f788496764daa 939,1036
+crates/arroyo-worker/src/job_controller/mod.rs
+  s_7c63ec9a9ce5e7::t_4e99a101b9c515 320
+crates/arroyo-controller/src/schedulers/mod.rs
+  s_7c63ec9a9ce5e7::t_46f66ad8d1e44a 608
+crates/arroyo-controller/src/job_controller/leader_manager.rs
+  s_7c63ec9a9ce5e7::t_46f66ad8d1e44a 36,43-44
+crates/arroyo-rpc/src/lib.rs
+  s_7c63ec9a9ce5e7::t_4e99a101b9c515 1005,1008,1035,1038-1045,1056-1061
+  s_7c63ec9a9ce5e7::t_5529c76776e5c7 1067
+  s_7c63ec9a9ce5e7::t_46f66ad8d1e44a 1054,1090,1101,1104-1111
+crates/arroyo-api/src/lib.rs
+  s_7c63ec9a9ce5e7::t_5529c76776e5c7 127-133
+crates/arroyo-controller/src/states/mod.rs
+  s_7c63ec9a9ce5e7::t_fd2fb5fb7ef758 949
+  s_7c63ec9a9ce5e7::t_1bc73652265053 930,940
+  s_7c63ec9a9ce5e7::t_9f524ac904925b 981,990
+crates/arroyo-rpc/src/config.rs
+  s_7c63ec9a9ce5e7::t_46f66ad8d1e44a 404-407
+crates/arroyo-api/src/jobs.rs
+  s_7c63ec9a9ce5e7::t_46f66ad8d1e44a 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a96bb73a7888e979aa04bd91a760d7f4c2da3d75",
+  "prompts": {},
+  "sessions": {
+    "s_7c63ec9a9ce5e7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_050f09af4ffeA1Wotr6cmle4Zj",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
