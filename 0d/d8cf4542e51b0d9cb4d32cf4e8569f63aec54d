@@ -38,6 +38,7 @@ crates/arroyo-connectors/src/superbuffer/source/mod.rs
   s_1537a68366fd8e::t_916b7b9d1b8a88 379
   s_1537a68366fd8e::t_f28e786492effc 355
   s_1537a68366fd8e::t_882933da0fbee1 297
+  s_1537a68366fd8e::t_e467852a2a190a 29
 crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
   s_1537a68366fd8e::t_5d96c55a3570a5 97
   s_1537a68366fd8e::t_09b0a987600c21 139
@@ -46,6 +47,11 @@ crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
   s_1537a68366fd8e::t_3d9cca4002d7f7 43-44
   s_1537a68366fd8e::t_cb4e03fd35ec03 1-5,16-17,23-42,45-55,59-61,67-72,76,83-96,98-138,140-156,158-173,175-177,180
   s_1537a68366fd8e::t_2aa87ad0c61dd4 178
+  s_1537a68366fd8e::t_ca198d4f56bfc8 263
+  s_1537a68366fd8e::t_3fa3f55d0e28a5 274
+  s_1537a68366fd8e::t_d49863e2d61495 218
+  s_1537a68366fd8e::t_985b729528ac32 200
+  s_1537a68366fd8e::t_faa74a27963c9e 280
 crates/arroyo-connectors/src/superbuffer/source/metrics.rs
   s_1537a68366fd8e::t_1283dde837a2b8 6-8,23,25-26,33-48,63-71,88-96,100-101,104-106,152,157-176,195-196,200-204,209-210
   s_1537a68366fd8e::t_adf107f19165fb 6-8,23,33-37,39-41,43-48,63-71,88-96,100-101,104-106,152,157-176,195-196,200
