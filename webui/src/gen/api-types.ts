@@ -861,13 +861,31 @@ export interface components {
         PipelinePatch: {
             /** Format: int64 */
             checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             /** Format: int64 */
             parallelism?: number | null;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
             /** Format: int64 */
             checkpoint_interval_micros?: number | null;
+            /**
+             * Format: int64
+             * @description Optional creation timestamp, in microseconds since the Unix epoch,
+             *     applied to both the pipeline and its initial job. If omitted, the
+             *     database's current time is used.
+             */
+            created_at?: number | null;
             /** @description Per-job environment variables forwarded to workers. */
             env_vars?: {
                 [key: string]: string;

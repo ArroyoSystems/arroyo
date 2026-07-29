@@ -39,6 +39,10 @@ pub struct PipelinePost {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Optional creation timestamp, in microseconds since the Unix epoch,
+    /// applied to both the pipeline and its initial job. If omitted, the
+    /// database's current time is used.
+    pub created_at: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

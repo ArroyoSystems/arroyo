@@ -51,7 +51,7 @@ use crate::rest_utils::{
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
-use crate::{connection_tables, to_micros};
+use crate::{connection_tables, from_micros, to_micros};
 use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
@@ -307,6 +307,7 @@ pub(crate) async fn create_pipeline_int(
     tags: HashMap<String, String>,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    created_at: Option<OffsetDateTime>,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -413,6 +414,7 @@ pub(crate) async fn create_pipeline_int(
         &2,
         &state_url,
         &tags_json,
+        &created_at,
     )
     .await?;
 
@@ -445,6 +447,7 @@ pub(crate) async fn create_pipeline_int(
         db,
         env_vars,
         scheduler_config,
+        created_at,
     )
     .await?;
 
@@ -652,6 +655,8 @@ async fn create_pipeline_inner(
 
     let udfs = pipeline_post.udfs.unwrap_or_default();
 
+    let created_at = pipeline_post.created_at.map(from_micros).transpose()?;
+
     let compiled = compile_sql(
         pipeline_post.query.clone(),
         &udfs,
@@ -681,6 +686,7 @@ async fn create_pipeline_inner(
             None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
             Some(v) => v,
         },
+        created_at,
     )
     .await?;
 
@@ -736,6 +742,7 @@ pub async fn create_preview_pipeline(
         HashMap::default(),
         HashMap::default(),
         serde_json::Value::Object(Default::default()),
+        None,
     )
     .await?;
 

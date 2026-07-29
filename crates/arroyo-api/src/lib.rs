@@ -38,7 +38,7 @@ use crate::pipelines::{
     __path_restart_pipeline, __path_validate_query,
 };
 use crate::rest::__path_ping;
-use crate::rest_utils::{ErrorResp, service_unavailable};
+use crate::rest_utils::{ErrorResp, bad_request, service_unavailable};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
 use arroyo_rpc::config::{ApiAuthMode, config};
@@ -117,6 +117,11 @@ pub struct AuthData {
 
 pub(crate) fn to_micros(dt: OffsetDateTime) -> u64 {
     (dt.unix_timestamp_nanos() / 1_000) as u64
+}
+
+pub(crate) fn from_micros(micros: u64) -> Result<OffsetDateTime, ErrorResp> {
+    OffsetDateTime::from_unix_timestamp_nanos((micros as i128) * 1_000)
+        .map_err(|_| bad_request(format!("timestamp out of range: {micros}")))
 }
 
 pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp> {

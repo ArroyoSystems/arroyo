@@ -18,6 +18,7 @@ use futures_util::stream::Stream;
 use std::convert::Infallible;
 use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
+use time::OffsetDateTime;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Code, Request};
@@ -123,6 +124,7 @@ pub(crate) async fn create_job(
     db: &DatabaseSource,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    created_at: Option<OffsetDateTime>,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -180,6 +182,7 @@ pub(crate) async fn create_job(
         }),
         &env_vars_json,
         &scheduler_config,
+        &created_at,
     )
     .await?;
 

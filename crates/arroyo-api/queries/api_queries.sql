@@ -123,9 +123,9 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --: DbPipeline (state?, ttl_micros?, state_url?)
 
---! create_pipeline(textual_repr?, state_url?)
-INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version, state_url, tags)
-VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
+--! create_pipeline(textual_repr?, state_url?, created_at?)
+INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_repr, udfs, program, proto_version, state_url, tags, created_at)
+VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags, COALESCE(:created_at, CURRENT_TIMESTAMP));
 
 --! get_pipelines : DbPipeline
 SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
@@ -189,10 +189,10 @@ SET
    ignore_state_before_epoch = :ignore_state_before_epoch
 WHERE id = :job_id AND organization_id = :organization_id;
 
---! create_job(ttl_micros?)
+--! create_job(ttl_micros?, created_at?)
 INSERT INTO job_configs
-(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars, scheduler_config)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars, :scheduler_config);
+(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars, scheduler_config, created_at)
+VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars, :scheduler_config, COALESCE(:created_at, CURRENT_TIMESTAMP));
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
