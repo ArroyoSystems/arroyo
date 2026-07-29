@@ -11,6 +11,7 @@ crates/arroyo-connectors/src/superbuffer/source/metrics.rs
   s_1537a68366fd8e::t_58b003fd5129f6 25,38,42
   s_1537a68366fd8e::t_8c2b4d77e4246b 26
   s_1537a68366fd8e::t_8a83b0fa9ba9ce 201-203
+  s_1537a68366fd8e::t_ae236df2a1a4ec 107
 crates/arroyo-connectors/src/superbuffer/source/mod.rs
   s_1537a68366fd8e::t_1283dde837a2b8 106,111,296,354,378,444,462,507,520,526
   s_1537a68366fd8e::t_6017e098affc7d 111
