@@ -1,0 +1,22 @@
+.gitlab-ci.yml
+  s_5574fbfe532631::t_53d506647e45f4 60-66
+docker/Dockerfile.cloudflare
+  s_5574fbfe532631::t_ab8a87ee1f0b22 53-57
+  s_5574fbfe532631::t_55aa0134f624ef 8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ab533ff067f904eb050902dfc361d1b952059d68",
+  "prompts": {},
+  "sessions": {
+    "s_5574fbfe532631": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04ceb8de3ffeANuiuMAyQ475WJ",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,22 @@
+docker/Dockerfile.cloudflare
+  s_5574fbfe532631::t_e8bdd5e0035209 53-55
+  s_5574fbfe532631::t_fe5011387c9869 8
+.gitlab-ci.yml
+  s_5574fbfe532631::t_43484484043f23 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "498ccd63698075bbf3a14885f85e620e82acdc50",
+  "prompts": {},
+  "sessions": {
+    "s_5574fbfe532631": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04ceb8de3ffeANuiuMAyQ475WJ",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
