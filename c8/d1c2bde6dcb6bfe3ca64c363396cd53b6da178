@@ -1,0 +1,32 @@
+.cargo/config.toml
+  s_2a4c882f845bdd::t_fe6414263478cd 1-2
+.gitlab-ci.yml
+  s_2a4c882f845bdd::t_40752e3b284c54 87-88,91
+  s_2a4c882f845bdd::t_469118b16c57bd 24-32
+  s_2a4c882f845bdd::t_ac30061c737d15 131
+  s_2a4c882f845bdd::t_c3b641dd600531 72-82
+  s_2a4c882f845bdd::t_5299e0a9a3f35d 49-51
+  s_2a4c882f845bdd::t_a1dd1bf372f4da 108-109
+docker/Dockerfile.cloudflare
+  s_2a4c882f845bdd::t_7b36d21cf1d0d7 54-56,59
+  s_2a4c882f845bdd::t_d1154f8c4c9fb1 37-39
+  s_2a4c882f845bdd::t_2f94ce514686d9 9-13
+docker/cf-cargo-configure.sh
+  s_2a4c882f845bdd::t_f21a3d2d9e754b 1-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c8d1c2bde6dcb6bfe3ca64c363396cd53b6da178",
+  "prompts": {},
+  "sessions": {
+    "s_2a4c882f845bdd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04bc624cfffefYbB6VOXbyvw9L",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
