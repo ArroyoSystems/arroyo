@@ -1,0 +1,142 @@
+justfile
+  s_9750491ee7fd74::t_f8c0c2c425babb 11
+  s_9750491ee7fd74::t_08c2d974d6ba5f 38-41,43-44
+  s_9750491ee7fd74::t_179018fe7b568a 4-5,20,23-25,29
+  s_6bae47f80d4cab::t_36877c156af499 6-9,14-19,21,26-28,30-31,34,37,42,45-77
+k8s/cf-cdk8s/src/validation.ts
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 139,154
+  s_6bae47f80d4cab::t_8b0f6809faa07c 1-138,140-153,155-176
+k8s/cf-cdk8s/.gitignore
+  s_7df7b8df381b62::t_fe372aa092a186 3
+  s_7df7b8df381b62::t_07b1b31d87bdea 1-2
+  s_7df7b8df381b62::t_b54423a73ef9e0 4-5
+.gitlab-ci.yml
+  s_9750491ee7fd74::t_f8c0c2c425babb 78-86,88-92
+  s_6bae47f80d4cab::t_36877c156af499 87
+k8s/cf-cdk8s/.oxfmtrc.json
+  s_6bae47f80d4cab::t_ad8d82b5af8f89 1-10
+k8s/arroyo-cloudflare/NETWORKING.md
+  s_6bae47f80d4cab::t_c1928d6ee86e28 3-6
+  s_9750491ee7fd74::t_c93c4e630fb46f 16,246,277,284,306-307
+  s_9750491ee7fd74::t_4d25211e64896c 298,311-313,324,326-328,330-331,415
+  s_9750491ee7fd74::t_6cfeb79c51b774 234,304-305,318-320,352,357
+k8s/cf-cdk8s/main.ts
+  s_6bae47f80d4cab::t_65245a229331e0 5-12
+  s_9750491ee7fd74::t_fe4323eb149751 1-4,13-17
+  s_9750491ee7fd74::t_8bb9669e3e5f5d 18
+CF_README.md
+  s_9750491ee7fd74::t_3a4dcdc9157bcc 5-6,15,20,42-43
+  s_6bae47f80d4cab::t_c1928d6ee86e28 13,24-25,29,38-40,50-51,53-55
+  s_9750491ee7fd74::t_f8c0c2c425babb 10
+  s_9750491ee7fd74::t_08c2d974d6ba5f 33-37
+  s_9750491ee7fd74::t_4d25211e64896c 41
+k8s/arroyo-cloudflare/README.md
+  s_9750491ee7fd74::t_6cfeb79c51b774 96-115
+  s_9750491ee7fd74::t_c93c4e630fb46f 56-57,323
+  s_9750491ee7fd74::t_f8c0c2c425babb 66,69-75,77-78,84,90,119-120,123-124,131-132,137,146,150-152,157
+  s_6bae47f80d4cab::t_c1928d6ee86e28 1-4
+  s_9750491ee7fd74::t_4693cdb2dd39fa 116
+k8s/cf-cdk8s/package.json
+  s_6bae47f80d4cab::t_65245a229331e0 11-13,16-19
+  s_9750491ee7fd74::t_f8c0c2c425babb 37
+  s_9750491ee7fd74::t_1679d9413e02b4 10
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 24,29,35,38-39
+  s_7df7b8df381b62::t_fe372aa092a186 6-7,14-15,40
+  s_6bae47f80d4cab::t_dd55fc78527e65 20-21
+  s_9750491ee7fd74::t_0e3bf2251f9a5f 31
+  s_7df7b8df381b62::t_e18bfec6f79b0b 3-5
+  s_6bae47f80d4cab::t_c072183ab66337 22-23
+  s_6bae47f80d4cab::t_bce6b8eb2bb940 25-28
+k8s/cf-cdk8s/src/workloads.ts
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 362
+  s_6bae47f80d4cab::t_4aba53fd95a40a 1-361,363-413
+k8s/cf-cdk8s/src/arroyo-chart.test.ts
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 40,92,111-114,136-139,154,161-165,194
+  s_6bae47f80d4cab::t_79da45ec89a946 1-39,41-91,93-110,115-135,140-153,155-160,166-177,179-193,195
+  s_6bae47f80d4cab::t_e6d67802ab3efa 178
+k8s/cf-cdk8s/src/arroyo-chart.ts
+  s_9750491ee7fd74::t_3f3df3b5cc3553 3-4,24-25,27
+  s_6bae47f80d4cab::t_b1b83a1566f5b2 1-2,5-23,26,38-51,53,55,57,59-77,79-82,84-85,87,89-107,110-113,115-116,118-124,126-127,135,138-145,147-153,155,158-162
+  s_9750491ee7fd74::t_fe4323eb149751 28-37,54,56,58,78,83,86,88,108-109,114,117,125,128-133,154,156-157,163
+  s_9750491ee7fd74::t_a83f326440b369 52,134,136-137,146
+k8s/cf-cdk8s/.oxlintrc.json
+  s_6bae47f80d4cab::t_a0da10a50c3cc1 1-3,5-6
+  s_6bae47f80d4cab::t_d6698c5f3f306f 4
+k8s/cf-cdk8s/src/networking.ts
+  s_6bae47f80d4cab::t_5d19c81df52f80 1-370
+k8s/cf-cdk8s/src/metadata.ts
+  s_6bae47f80d4cab::t_8b0f6809faa07c 1-38
+k8s/cf-cdk8s/src/environments.ts
+  s_9750491ee7fd74::t_fe4323eb149751 1-3,20-27,34-38,43-48,67,73,90-93,105-110,112,119-129,134-139,141-144,156-161,163,170-180,185-190,192-193
+  s_9750491ee7fd74::t_a83f326440b369 5,7-14,28-33,50-59,95-96,99-101,103,113-118,146-147,150-152,154,164-169,202-205
+  s_9750491ee7fd74::t_f8c0c2c425babb 4
+  s_6bae47f80d4cab::t_38209027c24a40 15-19,39-42,49,60-66,68-72,74-89,94,97-98,102,104,111,130-133,140,145,148-149,153,155,162,181-184,191,194-201
+  s_9750491ee7fd74::t_08c2d974d6ba5f 6
+k8s/cf-cdk8s/src/controller-config.ts
+  s_9750491ee7fd74::t_bfaa09971e468f 6
+  s_9750491ee7fd74::t_1679d9413e02b4 1,3-5,7-10,12-23,27-45,47-54,76
+  s_6bae47f80d4cab::t_4822832787610f 2,11,24-26,46,55-65,67-70,75
+  s_6bae47f80d4cab::t_a0da10a50c3cc1 66,74
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 71-73
+crates/arroyo-rpc/Cargo.toml
+  s_6bae47f80d4cab::t_fc29df6a375ec9 51
+k8s/cf-cdk8s/README.md
+  s_9750491ee7fd74::t_179018fe7b568a 1-4,9,12,14,57-58,62-64,67,71,74,84-88
+  s_9750491ee7fd74::t_1dc3e1e79bfd86 5-8
+  s_6bae47f80d4cab::t_c1928d6ee86e28 10-11,13,15-24,34-56,59-61,65-66,68-70,72-73,75-83,90-92,94-96,100-106,109-110
+  s_9750491ee7fd74::t_08c2d974d6ba5f 89,93,97-99,107
+  s_9750491ee7fd74::t_4d25211e64896c 108
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 25-33
+k8s/cf-cdk8s/cdk8s.yaml
+  s_6bae47f80d4cab::t_2f9aeb5cf392f3 2
+  s_6bae47f80d4cab::t_a95cc2d335e828 1
+k8s/arroyo-cloudflare/values.yaml
+  s_9750491ee7fd74::t_bba21610cbb820 79,82,85-86,91-93
+k8s/cf-cdk8s/src/runtime-config.ts
+  s_6bae47f80d4cab::t_8b0f6809faa07c 1-214
+k8s/cf-cdk8s/tsconfig.json
+  s_9750491ee7fd74::t_c0f5b3a27e6e23 25
+  s_6bae47f80d4cab::t_65245a229331e0 5
+  s_9750491ee7fd74::t_fe4323eb149751 8,10-11
+  s_7df7b8df381b62::t_fe372aa092a186 4,12
+  s_6bae47f80d4cab::t_a0da10a50c3cc1 9,24
+  s_7df7b8df381b62::t_1d527b3b33b62c 1-3
+  s_9750491ee7fd74::t_6c635baf76dbda 26-28
+k8s/cf-cdk8s/src/constants.ts
+  s_6bae47f80d4cab::t_8b0f6809faa07c 1-22,24-47
+  s_6bae47f80d4cab::t_2cf79aa4cd824e 23
+k8s/cf-cdk8s/package-lock.json
+  s_9750491ee7fd74::t_9823da5a546de2 1-1300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3b48f764a6987a6391c451d89b841193a906040b",
+  "prompts": {},
+  "sessions": {
+    "s_6bae47f80d4cab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05014dc8bffeUYCz7KBYArUTtt",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_7df7b8df381b62": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0504a6e75ffeBIzrLv7eogitCE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_9750491ee7fd74": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0503fe8e4ffenIsg5lxGgwns0r",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
