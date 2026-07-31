@@ -1,0 +1,19 @@
+docker/Dockerfile.cloudflare
+  s_8adc7fd3fc5830::t_f13c6166ce1002 3-4,10-16,18,20-22,56,61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e2a7b7660dfeb622b0b8b18891ff66ed72b2ae37",
+  "prompts": {},
+  "sessions": {
+    "s_8adc7fd3fc5830": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047d5de64ffeXkBg2RBNV2DKW6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
