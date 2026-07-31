@@ -1,0 +1,20 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_48ab8122596cc9::t_5d5719b28c662d 228-234,237-239
+  s_48ab8122596cc9::t_78cae5c2484d8b 236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "59988bfd58faac32f5f63381df0578992c925ad0",
+  "prompts": {},
+  "sessions": {
+    "s_48ab8122596cc9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0463c76fdffeEkN0S1vnjFYWrT",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
