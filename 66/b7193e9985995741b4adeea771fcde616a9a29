@@ -1,0 +1,30 @@
+crates/arroyo-api/src/rest.rs
+  s_3a2fa084876766::t_8170ae7e273002 247
+crates/arroyo-api/src/cf_endpoints.rs
+  s_3a2fa084876766::t_eb4eeb24582f3c 890
+crates/arroyo-api/src/pipelines.rs
+  s_3a2fa084876766::t_db1f316b212a93 479
+crates/arroyo-api/src/jobs.rs
+  s_3a2fa084876766::t_2adb56d75e7b53 201
+  s_3a2fa084876766::t_57d78435c5307c 33
+  s_3a2fa084876766::t_bc5ceb5c72ae85 265
+  s_3a2fa084876766::t_10e4a744369df9 257
+crates/arroyo-api/Cargo.toml
+  s_3a2fa084876766::t_98c958dcc62a77 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "66b7193e9985995741b4adeea771fcde616a9a29",
+  "prompts": {},
+  "sessions": {
+    "s_3a2fa084876766": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05afbb53dffemzNMrgWF6ug4GS",
+        "model": "claude-opus-5"
+      },
+      "human_author": "aayushnair <aayush@cloudflare.com>"
+    }
+  }
+}
