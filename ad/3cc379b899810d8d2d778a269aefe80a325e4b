@@ -1,0 +1,85 @@
+k8s/arroyo-cloudflare/templates/configmap.yaml
+  s_920f697252c6b1::t_161afeb5e19c3e 40-59
+  s_b916f99885bca5::t_ff8d7f791fa5f4 64-66
+crates/arroyo-rpc/src/config.rs
+  s_b916f99885bca5::t_49e44f152b2c07 1215
+  s_920f697252c6b1::t_161afeb5e19c3e 1153-1156,1210
+  s_b916f99885bca5::t_d85f60e5c0996a 1203-1205,1208-1209,1211-1214
+k8s/arroyo-cloudflare/values.yaml
+  s_b916f99885bca5::t_cb3663eec93cab 167-171
+  s_b916f99885bca5::t_010f63a9bb43e3 113
+  s_b916f99885bca5::t_080c868757b1c3 96,101-104,114,121-125
+  s_b916f99885bca5::t_91300b568e31da 97-100,105-112
+crates/arroyo-controller/src/schedulers/cloudchamber/colostat.rs
+  s_b916f99885bca5::t_d9462e513eb44f 217
+  s_30afaae202edba::t_fa245abc97e43c 128
+  s_b916f99885bca5::t_904e0128be8296 69
+  s_b916f99885bca5::t_d7e12c1e4bbc24 365-389
+  s_920f697252c6b1::t_161afeb5e19c3e 15-21,45-46,104-106,109
+  s_b916f99885bca5::t_f2d0da72362fad 161
+  s_b916f99885bca5::t_3fa0e6c05b1054 215-216,218-229,231-242,245-249
+  s_30afaae202edba::t_55d1ef501af24f 1
+  s_b916f99885bca5::t_b535e8f30a1fc2 2-14,22-44,47-68,70-103,107-108,110-127,129-160,162-214,230,243-244,250-364
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_b916f99885bca5::t_464bb3f9dd0dae 227-229
+  s_b916f99885bca5::t_e02381e64ed50c 233-235
+  s_b916f99885bca5::t_dd8fff6bcd8dc5 215-222
+  s_b916f99885bca5::t_562c663378df65 193-194,200,210,214,223
+  s_b916f99885bca5::t_ef31bcbc7be3e8 195-199
+  s_b916f99885bca5::t_8da0d833622117 230-232
+  s_b916f99885bca5::t_81ba08ef00bfb6 201-209
+  s_b916f99885bca5::t_0e863537cc7956 192
+  s_b916f99885bca5::t_98709335d5d614 125-127
+  s_b916f99885bca5::t_1b3c9e7b4c391c 224-226
+  s_b916f99885bca5::t_fcd9418e298144 211-213
+  s_b916f99885bca5::t_3756f36b2783fa 236-237
+crates/arroyo-rpc/src/config_cf.rs
+  s_b916f99885bca5::t_3477b031c5b99a 104-105,107-110,112-113,122-126,132-135,141
+  s_b916f99885bca5::t_5a0c5b0d95691c 6
+  s_b916f99885bca5::t_1e8cecc8295bdc 111,129-131,136-137
+  s_b916f99885bca5::t_cdd4591918e4aa 106,114-121,127-128,138-140,142-143
+k8s/arroyo-cloudflare/templates/networkpolicy.yaml
+  s_b916f99885bca5::t_0ced5c9e38d8b3 165-186
+crates/arroyo-controller/src/schedulers/cloudchamber/mod.rs
+  s_b916f99885bca5::t_49cb20a1003303 684-686
+  s_b916f99885bca5::t_b61633c0381961 614-620,626,672,720,747
+  s_b916f99885bca5::t_fc3b8a12a7bba0 520,529,538-539
+  s_b916f99885bca5::t_1a6f511b3e19df 790-877,879-885
+  s_b916f99885bca5::t_28d3aa72934ae2 1
+  s_b916f99885bca5::t_16694bc94e91e1 32-33
+  s_b916f99885bca5::t_cc2adbee1b6c7f 22-23
+  s_920f697252c6b1::t_161afeb5e19c3e 79-82,161-162,878
+  s_b916f99885bca5::t_92623d3b16bb04 220-259,266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ad3cc379b899810d8d2d778a269aefe80a325e4b",
+  "prompts": {},
+  "sessions": {
+    "s_30afaae202edba": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0562af65bffe1x3KobGuGlOtW5",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_920f697252c6b1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04bd88ab7ffeluHMrFc7X934EJ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_b916f99885bca5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05a95d80cffeAw9Ko9uonHC8s0",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
