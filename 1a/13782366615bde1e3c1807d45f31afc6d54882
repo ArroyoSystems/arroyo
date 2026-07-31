@@ -1,0 +1,907 @@
+k8s/cf-cdk8s/node_modules/.bin/oxfmt
+  s_9750491ee7fd74::t_59de500d0a35c7 1
+k8s/cf-cdk8s/node_modules/.bin/oxlint
+  s_9750491ee7fd74::t_da967761c13fb3 1
+k8s/cf-cdk8s/node_modules/.bin/tsc
+  s_9750491ee7fd74::t_1837fd9a915ea4 1
+k8s/cf-cdk8s/node_modules/.package-lock.json
+  s_9750491ee7fd74::t_72b5e5024983d2 1-298
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/README.md
+  s_9750491ee7fd74::t_004d6cb500c147 1-116
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/authorization.k8s.io.d.ts
+  s_9750491ee7fd74::t_3a5cd2371788c7 1-185
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/authorization.k8s.io.js
+  s_9750491ee7fd74::t_185276703f96bb 1-133
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/ca.secrets.cfplat.com.d.ts
+  s_9750491ee7fd74::t_e1e1d4f93cc176 1-76
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/ca.secrets.cfplat.com.js
+  s_9750491ee7fd74::t_a50e6f38fb0026 1-90
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/cert-manager.io.d.ts
+  s_9750491ee7fd74::t_18e97dbecc6c6f 1-12881
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/cert-manager.io.js
+  s_9750491ee7fd74::t_3cc2839fe85638 1-6296
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/cosmas.k8s.cloudflare.com.d.ts
+  s_9750491ee7fd74::t_283d8628991e38 1-1194
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/cosmas.k8s.cloudflare.com.js
+  s_9750491ee7fd74::t_3ff6eb8df84191 1-990
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/gateway.networking.k8s.io.d.ts
+  s_9750491ee7fd74::t_8e6a39a4c3909e 1-5787
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/gateway.networking.k8s.io.js
+  s_9750491ee7fd74::t_d0c35fe3a53cae 1-2197
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/gitops.cfplat.com.d.ts
+  s_9750491ee7fd74::t_f32ba0a5450672 1-137
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/gitops.cfplat.com.js
+  s_9750491ee7fd74::t_5e3505a62fd23e 1-112
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/index.d.ts
+  s_9750491ee7fd74::t_900dc66aac1513 1-11
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/index.js
+  s_9750491ee7fd74::t_429f248c3a32bb 1-48
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/k8s.d.ts
+  s_9750491ee7fd74::t_da88d9c2df057d 1-21811
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/k8s.js
+  s_9750491ee7fd74::t_055194977cb483 1-16463
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/kubevirt.io.d.ts
+  s_9750491ee7fd74::t_e567b27739dbee 1-22535
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/kubevirt.io.js
+  s_9750491ee7fd74::t_e81d7e65a37f50 1-13990
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/networking.cfplat.com.d.ts
+  s_9750491ee7fd74::t_dd838633f6889f 1-1101
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/networking.cfplat.com.js
+  s_9750491ee7fd74::t_043e92ab7df118 1-821
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/package.json
+  s_9750491ee7fd74::t_50ec2932532ec4 1-53
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/prometheus-rules.d.ts
+  s_9750491ee7fd74::t_2b878e85452fb2 1-89
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/prometheus-rules.js
+  s_9750491ee7fd74::t_53383b605e3451 1-66
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/secrets.cfplat.com.d.ts
+  s_9750491ee7fd74::t_3584ed0ce25013 1-132
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/secrets.cfplat.com.js
+  s_9750491ee7fd74::t_48455bff0e4ae1 1-126
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/v1alpha1-argoproj.io.d.ts
+  s_9750491ee7fd74::t_cd2fccc7bd2547 1-73166
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/v1alpha1-argoproj.io.js
+  s_9750491ee7fd74::t_2c7ea019bcd832 1-54443
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/v2-networking.cfplat.com.d.ts
+  s_9750491ee7fd74::t_391fab366f08f9 1-1024
+k8s/cf-cdk8s/node_modules/@cloudflare/cdk8s-imports/v2-networking.cfplat.com.js
+  s_9750491ee7fd74::t_157329d228d851 1-690
+k8s/cf-cdk8s/node_modules/@oxfmt/binding-darwin-arm64/README.md
+  s_9750491ee7fd74::t_76c55fe012c37f 1-3
+k8s/cf-cdk8s/node_modules/@oxfmt/binding-darwin-arm64/package.json
+  s_9750491ee7fd74::t_8496a4adb4c62e 1-35
+k8s/cf-cdk8s/node_modules/@oxlint/binding-darwin-arm64/README.md
+  s_9750491ee7fd74::t_5938cf1e106b2a 1-3
+k8s/cf-cdk8s/node_modules/@oxlint/binding-darwin-arm64/package.json
+  s_9750491ee7fd74::t_dc3ad6a2a56306 1-35
+k8s/cf-cdk8s/node_modules/@types/node/LICENSE
+  s_9750491ee7fd74::t_d8c9a52c092ca6 1-21
+k8s/cf-cdk8s/node_modules/@types/node/README.md
+  s_9750491ee7fd74::t_c6b720ec76b785 1-15
+k8s/cf-cdk8s/node_modules/@types/node/assert.d.ts
+  s_9750491ee7fd74::t_c368139698ae31 1-1078
+k8s/cf-cdk8s/node_modules/@types/node/assert/strict.d.ts
+  s_9750491ee7fd74::t_038187ddbe9215 1-111
+k8s/cf-cdk8s/node_modules/@types/node/async_hooks.d.ts
+  s_9750491ee7fd74::t_6fb0bc9e8b10ea 1-603
+k8s/cf-cdk8s/node_modules/@types/node/buffer.buffer.d.ts
+  s_9750491ee7fd74::t_445639222840ef 1-472
+k8s/cf-cdk8s/node_modules/@types/node/buffer.d.ts
+  s_9750491ee7fd74::t_e532f233028aec 1-1934
+k8s/cf-cdk8s/node_modules/@types/node/child_process.d.ts
+  s_9750491ee7fd74::t_90e5a03d41c284 1-1476
+k8s/cf-cdk8s/node_modules/@types/node/cluster.d.ts
+  s_9750491ee7fd74::t_594fec71ce14e8 1-578
+k8s/cf-cdk8s/node_modules/@types/node/compatibility/disposable.d.ts
+  s_9750491ee7fd74::t_ca9ab941f59861 1-14
+k8s/cf-cdk8s/node_modules/@types/node/compatibility/index.d.ts
+  s_9750491ee7fd74::t_57afd96b23ad90 1-9
+k8s/cf-cdk8s/node_modules/@types/node/compatibility/indexable.d.ts
+  s_9750491ee7fd74::t_3683e614764530 1-20
+k8s/cf-cdk8s/node_modules/@types/node/compatibility/iterators.d.ts
+  s_9750491ee7fd74::t_47b4f8b002e6ba 1-20
+k8s/cf-cdk8s/node_modules/@types/node/console.d.ts
+  s_9750491ee7fd74::t_6fc286a11437d5 1-452
+k8s/cf-cdk8s/node_modules/@types/node/constants.d.ts
+  s_9750491ee7fd74::t_fb29db6f67a4e9 1-21
+k8s/cf-cdk8s/node_modules/@types/node/crypto.d.ts
+  s_9750491ee7fd74::t_85c1efcac9b8fd 1-4545
+k8s/cf-cdk8s/node_modules/@types/node/dgram.d.ts
+  s_9750491ee7fd74::t_8e1f0a9af60ed6 1-600
+k8s/cf-cdk8s/node_modules/@types/node/diagnostics_channel.d.ts
+  s_9750491ee7fd74::t_c6870364a60593 1-576
+k8s/cf-cdk8s/node_modules/@types/node/dns.d.ts
+  s_9750491ee7fd74::t_4e30feb4aafed8 1-923
+k8s/cf-cdk8s/node_modules/@types/node/dns/promises.d.ts
+  s_9750491ee7fd74::t_5a6402c8e20879 1-503
+k8s/cf-cdk8s/node_modules/@types/node/domain.d.ts
+  s_9750491ee7fd74::t_637064688aa6ec 1-170
+k8s/cf-cdk8s/node_modules/@types/node/events.d.ts
+  s_9750491ee7fd74::t_d7d4b11b778f69 1-976
+k8s/cf-cdk8s/node_modules/@types/node/fs.d.ts
+  s_9750491ee7fd74::t_e3e6115dbed3f4 1-4463
+k8s/cf-cdk8s/node_modules/@types/node/fs/promises.d.ts
+  s_9750491ee7fd74::t_6f753cbcb3fc85 1-1306
+k8s/cf-cdk8s/node_modules/@types/node/globals.d.ts
+  s_9750491ee7fd74::t_100eef69741f15 1-172
+k8s/cf-cdk8s/node_modules/@types/node/globals.typedarray.d.ts
+  s_9750491ee7fd74::t_6aebb53cba25f8 1-38
+k8s/cf-cdk8s/node_modules/@types/node/http.d.ts
+  s_9750491ee7fd74::t_919848edb2e8c2 1-2097
+k8s/cf-cdk8s/node_modules/@types/node/http2.d.ts
+  s_9750491ee7fd74::t_14c4c906044956 1-2843
+k8s/cf-cdk8s/node_modules/@types/node/https.d.ts
+  s_9750491ee7fd74::t_9f7031bf22547b 1-579
+k8s/cf-cdk8s/node_modules/@types/node/index.d.ts
+  s_9750491ee7fd74::t_f77376efaae885 1-98
+k8s/cf-cdk8s/node_modules/@types/node/inspector.d.ts
+  s_9750491ee7fd74::t_660cc513025b9a 1-253
+k8s/cf-cdk8s/node_modules/@types/node/inspector.generated.d.ts
+  s_9750491ee7fd74::t_2f829a5c3fd74c 1-4052
+k8s/cf-cdk8s/node_modules/@types/node/module.d.ts
+  s_9750491ee7fd74::t_2e3285013fdec4 1-891
+k8s/cf-cdk8s/node_modules/@types/node/net.d.ts
+  s_9750491ee7fd74::t_208fd13cb3582d 1-1076
+k8s/cf-cdk8s/node_modules/@types/node/os.d.ts
+  s_9750491ee7fd74::t_f250910340cd6a 1-506
+k8s/cf-cdk8s/node_modules/@types/node/package.json
+  s_9750491ee7fd74::t_f7f97b0a4a3de7 1-145
+k8s/cf-cdk8s/node_modules/@types/node/path.d.ts
+  s_9750491ee7fd74::t_92cb6224441340 1-200
+k8s/cf-cdk8s/node_modules/@types/node/perf_hooks.d.ts
+  s_9750491ee7fd74::t_6a45be837c9469 1-968
+k8s/cf-cdk8s/node_modules/@types/node/process.d.ts
+  s_9750491ee7fd74::t_b5e9ba47cc45c6 1-2084
+k8s/cf-cdk8s/node_modules/@types/node/punycode.d.ts
+  s_9750491ee7fd74::t_ec3f2aeb0b9c9d 1-117
+k8s/cf-cdk8s/node_modules/@types/node/querystring.d.ts
+  s_9750491ee7fd74::t_2af877619ebda9 1-152
+k8s/cf-cdk8s/node_modules/@types/node/readline.d.ts
+  s_9750491ee7fd74::t_f2c7eaf2ffea3a 1-594
+k8s/cf-cdk8s/node_modules/@types/node/readline/promises.d.ts
+  s_9750491ee7fd74::t_d8a5657b98eaf2 1-161
+k8s/cf-cdk8s/node_modules/@types/node/repl.d.ts
+  s_9750491ee7fd74::t_4a3b31c9aca38b 1-428
+k8s/cf-cdk8s/node_modules/@types/node/sea.d.ts
+  s_9750491ee7fd74::t_3df5256b8aebd4 1-162
+k8s/cf-cdk8s/node_modules/@types/node/sqlite.d.ts
+  s_9750491ee7fd74::t_ced09e739fe787 1-722
+k8s/cf-cdk8s/node_modules/@types/node/stream.d.ts
+  s_9750491ee7fd74::t_a56e1291e2cee9 1-1694
+k8s/cf-cdk8s/node_modules/@types/node/stream/consumers.d.ts
+  s_9750491ee7fd74::t_d36a116c095b0c 1-38
+k8s/cf-cdk8s/node_modules/@types/node/stream/promises.d.ts
+  s_9750491ee7fd74::t_4ca773752ea7a0 1-90
+k8s/cf-cdk8s/node_modules/@types/node/stream/web.d.ts
+  s_9750491ee7fd74::t_483f49da9572ab 1-573
+k8s/cf-cdk8s/node_modules/@types/node/string_decoder.d.ts
+  s_9750491ee7fd74::t_62f65d7d36fbdb 1-67
+k8s/cf-cdk8s/node_modules/@types/node/test.d.ts
+  s_9750491ee7fd74::t_56235ddbcdf2db 1-2265
+k8s/cf-cdk8s/node_modules/@types/node/timers.d.ts
+  s_9750491ee7fd74::t_0700cc899e12db 1-287
+k8s/cf-cdk8s/node_modules/@types/node/timers/promises.d.ts
+  s_9750491ee7fd74::t_d7cdf0850702e8 1-108
+k8s/cf-cdk8s/node_modules/@types/node/tls.d.ts
+  s_9750491ee7fd74::t_c6d8a7db3b7e8b 1-1319
+k8s/cf-cdk8s/node_modules/@types/node/trace_events.d.ts
+  s_9750491ee7fd74::t_e5c4f63b3edfa1 1-197
+k8s/cf-cdk8s/node_modules/@types/node/ts5.6/buffer.buffer.d.ts
+  s_9750491ee7fd74::t_c201583e47641f 1-468
+k8s/cf-cdk8s/node_modules/@types/node/ts5.6/globals.typedarray.d.ts
+  s_9750491ee7fd74::t_df178de504eaef 1-34
+k8s/cf-cdk8s/node_modules/@types/node/ts5.6/index.d.ts
+  s_9750491ee7fd74::t_462ea14cc988ad 1-98
+k8s/cf-cdk8s/node_modules/@types/node/tty.d.ts
+  s_9750491ee7fd74::t_545ba06c7c217d 1-208
+k8s/cf-cdk8s/node_modules/@types/node/url.d.ts
+  s_9750491ee7fd74::t_2c2dcb7e112a19 1-984
+k8s/cf-cdk8s/node_modules/@types/node/util.d.ts
+  s_9750491ee7fd74::t_9322b2d9783a79 1-2606
+k8s/cf-cdk8s/node_modules/@types/node/v8.d.ts
+  s_9750491ee7fd74::t_337366d4e3d2d5 1-920
+k8s/cf-cdk8s/node_modules/@types/node/vm.d.ts
+  s_9750491ee7fd74::t_87fd17636d42dc 1-1053
+k8s/cf-cdk8s/node_modules/@types/node/wasi.d.ts
+  s_9750491ee7fd74::t_105932763072d3 1-181
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/abortcontroller.d.ts
+  s_9750491ee7fd74::t_95c36c3f4c9195 1-34
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/domexception.d.ts
+  s_9750491ee7fd74::t_3082e2fe60571f 1-68
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/events.d.ts
+  s_9750491ee7fd74::t_6dbdfe807f995f 1-97
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/fetch.d.ts
+  s_9750491ee7fd74::t_c144458f7be28b 1-55
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/navigator.d.ts
+  s_9750491ee7fd74::t_ef8de7de1d3c6c 1-22
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/storage.d.ts
+  s_9750491ee7fd74::t_5e1581914f644e 1-24
+k8s/cf-cdk8s/node_modules/@types/node/web-globals/streams.d.ts
+  s_9750491ee7fd74::t_0b667979754b9a 1-22
+k8s/cf-cdk8s/node_modules/@types/node/worker_threads.d.ts
+  s_9750491ee7fd74::t_72a9048d395eab 1-819
+k8s/cf-cdk8s/node_modules/@types/node/zlib.d.ts
+  s_9750491ee7fd74::t_b59a01b9e35109 1-747
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/LICENSE
+  s_9750491ee7fd74::t_7e5546f0b5c4a9 1-55
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/NOTICE.txt
+  s_9750491ee7fd74::t_650e08cd267393 1-436
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/README.md
+  s_9750491ee7fd74::t_1d3df850d53d2b 1-3
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.d.ts
+  s_9750491ee7fd74::t_d022a41c452bd2 1-20
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.decorators.d.ts
+  s_9750491ee7fd74::t_518b7ab18d1d03 1-382
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.decorators.legacy.d.ts
+  s_9750491ee7fd74::t_eff9d980ddb0cf 1-20
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.asynciterable.d.ts
+  s_9750491ee7fd74::t_dec6d1ad8ab9be 1-18
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts
+  s_9750491ee7fd74::t_3edab0f5a688f9 1-45125
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.iterable.d.ts
+  s_9750491ee7fd74::t_a042123be71614 1-18
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.collection.d.ts
+  s_9750491ee7fd74::t_1b8df7e48a40cc 1-159
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.core.d.ts
+  s_9750491ee7fd74::t_ee55ac6ae20cc3 1-595
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.d.ts
+  s_9750491ee7fd74::t_f1ffda890f3872 1-26
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.generator.d.ts
+  s_9750491ee7fd74::t_c6ed94cfd8cb7f 1-75
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.iterable.d.ts
+  s_9750491ee7fd74::t_4287047f0985c8 1-603
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.promise.d.ts
+  s_9750491ee7fd74::t_7d736b84a16c86 1-79
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.proxy.d.ts
+  s_9750491ee7fd74::t_286a7ca4b8c89b 1-126
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.reflect.d.ts
+  s_9750491ee7fd74::t_acc3df021474fc 1-142
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.symbol.d.ts
+  s_9750491ee7fd74::t_12cb73dc0cb639 1-44
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.symbol.wellknown.d.ts
+  s_9750491ee7fd74::t_e14a21c8a65662 1-324
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2016.array.include.d.ts
+  s_9750491ee7fd74::t_609a398c4d89ff 1-114
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2016.d.ts
+  s_9750491ee7fd74::t_0297c0776f4cfb 1-19
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2016.full.d.ts
+  s_9750491ee7fd74::t_e786ef9f148ccc 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2016.intl.d.ts
+  s_9750491ee7fd74::t_eb9c7110da7d41 1-29
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.arraybuffer.d.ts
+  s_9750491ee7fd74::t_24df7b46dbc309 1-19
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.d.ts
+  s_9750491ee7fd74::t_cd830caaacf8ad 1-24
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.date.d.ts
+  s_9750491ee7fd74::t_2cb1d557a58263 1-29
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.full.d.ts
+  s_9750491ee7fd74::t_1c2ad36f2551c0 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.intl.d.ts
+  s_9750491ee7fd74::t_bd0bd59ebed525 1-42
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.object.d.ts
+  s_9750491ee7fd74::t_2d46469af01226 1-47
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.sharedmemory.d.ts
+  s_9750491ee7fd74::t_b10beb43054ca2 1-133
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.string.d.ts
+  s_9750491ee7fd74::t_c9f80dd614a54e 1-47
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2017.typedarrays.d.ts
+  s_9750491ee7fd74::t_4dcdb00e344d68 1-51
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.asyncgenerator.d.ts
+  s_9750491ee7fd74::t_94f9c8dfcd38c2 1-75
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.asynciterable.d.ts
+  s_9750491ee7fd74::t_b83c0da1f57174 1-51
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.d.ts
+  s_9750491ee7fd74::t_1e7c275b105415 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.full.d.ts
+  s_9750491ee7fd74::t_0a88927a62eb1e 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.intl.d.ts
+  s_9750491ee7fd74::t_876b1024ab911e 1-81
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.promise.d.ts
+  s_9750491ee7fd74::t_cd119f1ce05dd2 1-28
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2018.regexp.d.ts
+  s_9750491ee7fd74::t_1ba399aa655a13 1-35
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.array.d.ts
+  s_9750491ee7fd74::t_c0e6dc67ac27be 1-77
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.d.ts
+  s_9750491ee7fd74::t_0f21c6099a6512 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.full.d.ts
+  s_9750491ee7fd74::t_cf11aed6b37d60 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.intl.d.ts
+  s_9750491ee7fd74::t_dd38fffea9af0e 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.object.d.ts
+  s_9750491ee7fd74::t_13a38509fb12b3 1-31
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.string.d.ts
+  s_9750491ee7fd74::t_03e8a2a2fc7f98 1-35
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2019.symbol.d.ts
+  s_9750491ee7fd74::t_bea0ee0c4eccc5 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.bigint.d.ts
+  s_9750491ee7fd74::t_92a189e5edacc2 1-763
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.d.ts
+  s_9750491ee7fd74::t_d6314ace4ed996 1-25
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.date.d.ts
+  s_9750491ee7fd74::t_9e407034f23423 1-40
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.full.d.ts
+  s_9750491ee7fd74::t_5d59b39d0db1d8 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.intl.d.ts
+  s_9750491ee7fd74::t_6c1ae1ab25e747 1-472
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.number.d.ts
+  s_9750491ee7fd74::t_e08e4a79727c99 1-26
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.promise.d.ts
+  s_9750491ee7fd74::t_3723a52b9cd588 1-45
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.sharedmemory.d.ts
+  s_9750491ee7fd74::t_a7740045d46f55 1-97
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.string.d.ts
+  s_9750491ee7fd74::t_09ea8163ae987a 1-42
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2020.symbol.wellknown.d.ts
+  s_9750491ee7fd74::t_96e9e774e69186 1-39
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.d.ts
+  s_9750491ee7fd74::t_e25bf178f746d0 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.full.d.ts
+  s_9750491ee7fd74::t_7f2ca753d6542c 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.intl.d.ts
+  s_9750491ee7fd74::t_9955827fbe311b 1-164
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.promise.d.ts
+  s_9750491ee7fd74::t_4cdc5e1fa86c0a 1-46
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.string.d.ts
+  s_9750491ee7fd74::t_a47abf93e2bead 1-31
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2021.weakref.d.ts
+  s_9750491ee7fd74::t_0f4709f0a44b6d 1-76
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.array.d.ts
+  s_9750491ee7fd74::t_ecfdb9a8e3b7eb 1-119
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.d.ts
+  s_9750491ee7fd74::t_6d9c71b9aff1bd 1-23
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.error.d.ts
+  s_9750491ee7fd74::t_75de8caca694a4 1-73
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.full.d.ts
+  s_9750491ee7fd74::t_bffd9612770bbf 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.intl.d.ts
+  s_9750491ee7fd74::t_9a24c79d1a3a4d 1-143
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.object.d.ts
+  s_9750491ee7fd74::t_1d94b675961137 1-24
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.regexp.d.ts
+  s_9750491ee7fd74::t_ecd4bb5716fc94 1-37
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2022.string.d.ts
+  s_9750491ee7fd74::t_ea7125b0639ffb 1-23
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2023.array.d.ts
+  s_9750491ee7fd74::t_48680ba4f34391 1-922
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2023.collection.d.ts
+  s_9750491ee7fd74::t_f698781fedf486 1-19
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2023.d.ts
+  s_9750491ee7fd74::t_ed85df376814d7 1-20
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2023.full.d.ts
+  s_9750491ee7fd74::t_003e28ff598d83 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2023.intl.d.ts
+  s_9750491ee7fd74::t_3f5671b3c27038 1-62
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.arraybuffer.d.ts
+  s_9750491ee7fd74::t_20129d329fa45c 1-63
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.collection.d.ts
+  s_9750491ee7fd74::t_56fb41eafb09a9 1-27
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.d.ts
+  s_9750491ee7fd74::t_cdc6f526f60ffa 1-24
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.full.d.ts
+  s_9750491ee7fd74::t_699538b501a6cb 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.object.d.ts
+  s_9750491ee7fd74::t_ff12653f1740e5 1-27
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.promise.d.ts
+  s_9750491ee7fd74::t_76b012e1e393d7 1-33
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.regexp.d.ts
+  s_9750491ee7fd74::t_52bbf0f2c19720 1-23
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.sharedmemory.d.ts
+  s_9750491ee7fd74::t_233fe7c592b119 1-66
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2024.string.d.ts
+  s_9750491ee7fd74::t_222ac8e7a55dc7 1-27
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.collection.d.ts
+  s_9750491ee7fd74::t_33be7cfe95d0f6 1-94
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.d.ts
+  s_9750491ee7fd74::t_04967b64a679bc 1-23
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.float16.d.ts
+  s_9750491ee7fd74::t_d0c1669c5b076d 1-443
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.full.d.ts
+  s_9750491ee7fd74::t_c7d5e0d2454ddd 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.intl.d.ts
+  s_9750491ee7fd74::t_72f18a413ef29a 1-200
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.iterator.d.ts
+  s_9750491ee7fd74::t_aa822ded29f9d1 1-146
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.promise.d.ts
+  s_9750491ee7fd74::t_3568d2de65e837 1-32
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2025.regexp.d.ts
+  s_9750491ee7fd74::t_464fa9a45ba000 1-30
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es5.d.ts
+  s_9750491ee7fd74::t_a5acfa3d12c616 1-4599
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.es6.d.ts
+  s_9750491ee7fd74::t_f09afb5cee7df6 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.array.d.ts
+  s_9750491ee7fd74::t_1b2a71c2b1a81a 1-33
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.collection.d.ts
+  s_9750491ee7fd74::t_d3ac2d8792d2a5 1-47
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.d.ts
+  s_9750491ee7fd74::t_7d4d31c815625b 1-27
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.date.d.ts
+  s_9750491ee7fd74::t_9acc98893dcee6 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.decorators.d.ts
+  s_9750491ee7fd74::t_eb1e8eecd1013b 1-26
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.disposable.d.ts
+  s_9750491ee7fd74::t_6a02d0cf859283 1-191
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.error.d.ts
+  s_9750491ee7fd74::t_89d620f4dcae00 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.full.d.ts
+  s_9750491ee7fd74::t_6d4cd6742d72ea 1-22
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.intl.d.ts
+  s_9750491ee7fd74::t_48b996580b3dc6 1-107
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.sharedmemory.d.ts
+  s_9750491ee7fd74::t_25c7e4de446baa 1-23
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.temporal.d.ts
+  s_9750491ee7fd74::t_96467a3d1431f2 1-485
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.esnext.typedarrays.d.ts
+  s_9750491ee7fd74::t_27ff1ee6652ed9 1-90
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.scripthost.d.ts
+  s_9750491ee7fd74::t_979d2c46fbda96 1-320
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.webworker.asynciterable.d.ts
+  s_9750491ee7fd74::t_ee56c8e42fe561 1-18
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.webworker.d.ts
+  s_9750491ee7fd74::t_f83dd08f43be8f 1-15606
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.webworker.importscripts.d.ts
+  s_9750491ee7fd74::t_82ce079314b97c 1-21
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/lib/lib.webworker.iterable.d.ts
+  s_9750491ee7fd74::t_e29b08182469d7 1-18
+k8s/cf-cdk8s/node_modules/@typescript/typescript-darwin-arm64/package.json
+  s_9750491ee7fd74::t_cf1ad5273290f4 1-45
+k8s/cf-cdk8s/node_modules/cdk8s/.jsii
+  s_9750491ee7fd74::t_a5359ad19b41e0 1-4475
+k8s/cf-cdk8s/node_modules/cdk8s/CODE_OF_CONDUCT.md
+  s_9750491ee7fd74::t_545b4c10ab0a83 1-3
+k8s/cf-cdk8s/node_modules/cdk8s/CONTRIBUTING.md
+  s_9750491ee7fd74::t_768df23dbaeae1 1-65
+k8s/cf-cdk8s/node_modules/cdk8s/DCO
+  s_9750491ee7fd74::t_e9394b1526d0d3 1-34
+k8s/cf-cdk8s/node_modules/cdk8s/LICENSE
+  s_9750491ee7fd74::t_3ace9aca821ef6 1-202
+k8s/cf-cdk8s/node_modules/cdk8s/NOTICE
+  s_9750491ee7fd74::t_4ea5d86e132d87 1
+k8s/cf-cdk8s/node_modules/cdk8s/README.md
+  s_9750491ee7fd74::t_a21259db16adf7 1-26
+k8s/cf-cdk8s/node_modules/cdk8s/SECURITY.md
+  s_9750491ee7fd74::t_05ccdc90bede22 1-5
+k8s/cf-cdk8s/node_modules/cdk8s/docs/java.md
+  s_9750491ee7fd74::t_daec6c8fdc6e84 1-4725
+k8s/cf-cdk8s/node_modules/cdk8s/docs/python.md
+  s_9750491ee7fd74::t_e2af07c34a4d16 1-5134
+k8s/cf-cdk8s/node_modules/cdk8s/docs/typescript.md
+  s_9750491ee7fd74::t_52359a8fe22fc5 1-4236
+k8s/cf-cdk8s/node_modules/cdk8s/git-hooks/README.md
+  s_9750491ee7fd74::t_398059eb15d1af 1-9
+k8s/cf-cdk8s/node_modules/cdk8s/git-hooks/prepare-commit-msg
+  s_9750491ee7fd74::t_4847f8cb8b135b 1-18
+k8s/cf-cdk8s/node_modules/cdk8s/git-hooks/setup.sh
+  s_9750491ee7fd74::t_52f5cc1d4e751e 1-10
+k8s/cf-cdk8s/node_modules/cdk8s/lib/_child_process.d.ts
+  s_9750491ee7fd74::t_9a06ee5eaafccb 1-9
+k8s/cf-cdk8s/node_modules/cdk8s/lib/_child_process.js
+  s_9750491ee7fd74::t_fa6905f1021b07 1-13
+k8s/cf-cdk8s/node_modules/cdk8s/lib/_loadurl.mjs
+  s_9750491ee7fd74::t_72cfed3bfc72b1 1-53
+k8s/cf-cdk8s/node_modules/cdk8s/lib/_util.d.ts
+  s_9750491ee7fd74::t_287180e4c00492 1-18
+k8s/cf-cdk8s/node_modules/cdk8s/lib/_util.js
+  s_9750491ee7fd74::t_48e78feeae2fab 1-35
+k8s/cf-cdk8s/node_modules/cdk8s/lib/api-object.d.ts
+  s_9750491ee7fd74::t_3ee6ba58b814af 1-134
+k8s/cf-cdk8s/node_modules/cdk8s/lib/api-object.js
+  s_9750491ee7fd74::t_955e1c9069943a 1-181
+k8s/cf-cdk8s/node_modules/cdk8s/lib/app.d.ts
+  s_9750491ee7fd74::t_7816ce48d461b4 1-117
+k8s/cf-cdk8s/node_modules/cdk8s/lib/app.js
+  s_9750491ee7fd74::t_cb340b810fadc7 1-341
+k8s/cf-cdk8s/node_modules/cdk8s/lib/chart.d.ts
+  s_9750491ee7fd74::t_037a4d0d605330 1-105
+k8s/cf-cdk8s/node_modules/cdk8s/lib/chart.js
+  s_9750491ee7fd74::t_9d5e507f6b54bd 1-121
+k8s/cf-cdk8s/node_modules/cdk8s/lib/cron.d.ts
+  s_9750491ee7fd74::t_a7260060898613 1-76
+k8s/cf-cdk8s/node_modules/cdk8s/lib/cron.js
+  s_9750491ee7fd74::t_cb4905568e94bf 1-70
+k8s/cf-cdk8s/node_modules/cdk8s/lib/dependency.d.ts
+  s_9750491ee7fd74::t_f0873f417f833e 1-69
+k8s/cf-cdk8s/node_modules/cdk8s/lib/dependency.js
+  s_9750491ee7fd74::t_0143f657c7db9f 1-171
+k8s/cf-cdk8s/node_modules/cdk8s/lib/duration.d.ts
+  s_9750491ee7fd74::t_d95a66eceb75ae 1-113
+k8s/cf-cdk8s/node_modules/cdk8s/lib/duration.js
+  s_9750491ee7fd74::t_11093d0dca12e9 1-235
+k8s/cf-cdk8s/node_modules/cdk8s/lib/helm.d.ts
+  s_9750491ee7fd74::t_7ee2b961238c0d 1-75
+k8s/cf-cdk8s/node_modules/cdk8s/lib/helm.js
+  s_9750491ee7fd74::t_a1ac891be81d78 1-112
+k8s/cf-cdk8s/node_modules/cdk8s/lib/include.d.ts
+  s_9750491ee7fd74::t_f2d679326647ba 1-24
+k8s/cf-cdk8s/node_modules/cdk8s/lib/include.js
+  s_9750491ee7fd74::t_b67119494071c5 1-36
+k8s/cf-cdk8s/node_modules/cdk8s/lib/index.d.ts
+  s_9750491ee7fd74::t_904bc5542619ed 1-16
+k8s/cf-cdk8s/node_modules/cdk8s/lib/index.js
+  s_9750491ee7fd74::t_cade511cd81362 1-33
+k8s/cf-cdk8s/node_modules/cdk8s/lib/json-patch.d.ts
+  s_9750491ee7fd74::t_0935a95c893817 1-75
+k8s/cf-cdk8s/node_modules/cdk8s/lib/json-patch.js
+  s_9750491ee7fd74::t_1632644cdd34fc 1-90
+k8s/cf-cdk8s/node_modules/cdk8s/lib/lazy.d.ts
+  s_9750491ee7fd74::t_67b114c07e3fa8 1-9
+k8s/cf-cdk8s/node_modules/cdk8s/lib/lazy.js
+  s_9750491ee7fd74::t_1c99392a87d7cd 1-19
+k8s/cf-cdk8s/node_modules/cdk8s/lib/metadata.d.ts
+  s_9750491ee7fd74::t_a40329916cbb45 1-236
+k8s/cf-cdk8s/node_modules/cdk8s/lib/metadata.js
+  s_9750491ee7fd74::t_79832351d55e47 1-127
+k8s/cf-cdk8s/node_modules/cdk8s/lib/names.d.ts
+  s_9750491ee7fd74::t_eef12097ebfeb8 1-88
+k8s/cf-cdk8s/node_modules/cdk8s/lib/names.js
+  s_9750491ee7fd74::t_12f60667eee622 1-194
+k8s/cf-cdk8s/node_modules/cdk8s/lib/resolve.d.ts
+  s_9750491ee7fd74::t_c3828277074619 1-79
+k8s/cf-cdk8s/node_modules/cdk8s/lib/resolve.js
+  s_9750491ee7fd74::t_abcffb864ac061 1-129
+k8s/cf-cdk8s/node_modules/cdk8s/lib/size.d.ts
+  s_9750491ee7fd74::t_57cc1b79397252 1-83
+k8s/cf-cdk8s/node_modules/cdk8s/lib/size.js
+  s_9750491ee7fd74::t_3b7b90102a05b7 1-149
+k8s/cf-cdk8s/node_modules/cdk8s/lib/testing.d.ts
+  s_9750491ee7fd74::t_24cae074f92d02 1-21
+k8s/cf-cdk8s/node_modules/cdk8s/lib/testing.js
+  s_9750491ee7fd74::t_83008e0931f105 1-80
+k8s/cf-cdk8s/node_modules/cdk8s/lib/yaml.d.ts
+  s_9750491ee7fd74::t_0778b7d908ee05 1-46
+k8s/cf-cdk8s/node_modules/cdk8s/lib/yaml.js
+  s_9750491ee7fd74::t_46f23f2cde0e1a 1-144
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/.bin/yaml
+  s_9750491ee7fd74::t_81391c912d124b 1
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/LICENSE.txt
+  s_9750491ee7fd74::t_17663b17b67fa0 1-22
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/README.md
+  s_9750491ee7fd74::t_5d0c653fb947cd 1-428
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/core.d.ts
+  s_9750491ee7fd74::t_b5d2bc5901ec1c 1-111
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/core.js
+  s_9750491ee7fd74::t_729ec2164f5f1d 1-441
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/duplex.d.ts
+  s_9750491ee7fd74::t_20c44f276d957a 1-23
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/duplex.js
+  s_9750491ee7fd74::t_f526e7cb8c0a32 1-181
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/helpers.d.ts
+  s_9750491ee7fd74::t_0bd354d13d6b90 1-41
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/commonjs/helpers.js
+  s_9750491ee7fd74::t_dfe2973a4061b2 1-181
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/index.d.ts
+  s_9750491ee7fd74::t_4f0ed58dcbc5fc 1-34
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/index.js
+  s_9750491ee7fd74::t_3b3ac519738d03 1-11
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/index.mjs
+  s_9750491ee7fd74::t_f6d4add7cf4877 1-29
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/index.ts
+  s_9750491ee7fd74::t_80b277ce7ab514 1-31
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/jasmine-run.mjs
+  s_9750491ee7fd74::t_7da988a0802880 1-23
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/core.d.ts
+  s_9750491ee7fd74::t_78054068f5bdb9 1-111
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/core.mjs
+  s_9750491ee7fd74::t_56977b587862e5 1-433
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/duplex.d.ts
+  s_9750491ee7fd74::t_a1a607c7ae7554 1-23
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/duplex.mjs
+  s_9750491ee7fd74::t_b70b466c3a2fcb 1-176
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/helpers.d.ts
+  s_9750491ee7fd74::t_995b3863302c82 1-41
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/module/helpers.mjs
+  s_9750491ee7fd74::t_5dac08ff9f8891 1-171
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/package.json
+  s_9750491ee7fd74::t_b2bab37f6bdbf4 1-65
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/tsc-to-mjs.sh
+  s_9750491ee7fd74::t_a060efa81e6482 1-10
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/fast-json-patch/webpack.config.js
+  s_9750491ee7fd74::t_d2606e04c9052d 1-63
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/LICENSE
+  s_9750491ee7fd74::t_d120952e0b647d 1-18
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/README.md
+  s_9750491ee7fd74::t_50f09595bbdafc 1-157
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/debug.js
+  s_9750491ee7fd74::t_f219b993d787a4 1-15
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/http.js
+  s_9750491ee7fd74::t_ed159bdd6ffad3 1
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/https.js
+  s_9750491ee7fd74::t_500433203703ba 1
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/index.js
+  s_9750491ee7fd74::t_73d56ee1ebcd5a 1-709
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/follow-redirects/package.json
+  s_9750491ee7fd74::t_9ecf00e9f5011e 1-58
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/LICENSE
+  s_9750491ee7fd74::t_53c4e435b9e210 1-13
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/README.md
+  s_9750491ee7fd74::t_744ccd26e0218f 1-172
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/bin.mjs
+  s_9750491ee7fd74::t_0b5b47090b7d15 1-11
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/browser/index.js
+  s_9750491ee7fd74::t_058f549222c6c4 1-5
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/browser/package.json
+  s_9750491ee7fd74::t_041375571cb79d 1-3
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/package.json
+  s_9750491ee7fd74::t_0cb22b5fe8c39a 1-97
+k8s/cf-cdk8s/node_modules/cdk8s/node_modules/yaml/util.js
+  s_9750491ee7fd74::t_9fdfefd7a4962a 1-2
+k8s/cf-cdk8s/node_modules/cdk8s/package.json
+  s_9750491ee7fd74::t_72d9a364fcd748 1-180
+k8s/cf-cdk8s/node_modules/constructs/.compatignore
+  s_9750491ee7fd74::t_ed79248417630f 1-23
+k8s/cf-cdk8s/node_modules/constructs/.jsii
+  s_9750491ee7fd74::t_19a4371bff9038 1-1517
+k8s/cf-cdk8s/node_modules/constructs/API.md
+  s_9750491ee7fd74::t_b7791c0c8a6abb 1-1357
+k8s/cf-cdk8s/node_modules/constructs/CODE_OF_CONDUCT.md
+  s_9750491ee7fd74::t_10ce603dfbf2f3 1-4
+k8s/cf-cdk8s/node_modules/constructs/CONTRIBUTING.md
+  s_9750491ee7fd74::t_4825c78b2c6198 1-138
+k8s/cf-cdk8s/node_modules/constructs/LICENSE
+  s_9750491ee7fd74::t_ae9c2ddc017765 1-202
+k8s/cf-cdk8s/node_modules/constructs/NOTICE
+  s_9750491ee7fd74::t_3cbe2ec7b4a6e9 1
+k8s/cf-cdk8s/node_modules/constructs/README.md
+  s_9750491ee7fd74::t_1c288078466f2c 1-32
+k8s/cf-cdk8s/node_modules/constructs/lib/construct.d.ts
+  s_9750491ee7fd74::t_b4ee7fce1c2d30 1-417
+k8s/cf-cdk8s/node_modules/constructs/lib/construct.js
+  s_9750491ee7fd74::t_ba492e773a8888 1-566
+k8s/cf-cdk8s/node_modules/constructs/lib/dependency.d.ts
+  s_9750491ee7fd74::t_3e00b5e17db1a5 1-69
+k8s/cf-cdk8s/node_modules/constructs/lib/dependency.js
+  s_9750491ee7fd74::t_cf68a4c34649df 1-88
+k8s/cf-cdk8s/node_modules/constructs/lib/index.d.ts
+  s_9750491ee7fd74::t_bea6b7ba3cdd0a 1-4
+k8s/cf-cdk8s/node_modules/constructs/lib/index.js
+  s_9750491ee7fd74::t_c94fe8699d522f 1-19
+k8s/cf-cdk8s/node_modules/constructs/lib/metadata.d.ts
+  s_9750491ee7fd74::t_397bb4d00905b4 1-21
+k8s/cf-cdk8s/node_modules/constructs/lib/metadata.js
+  s_9750491ee7fd74::t_42bde292fa08b2 1-3
+k8s/cf-cdk8s/node_modules/constructs/lib/mixin.d.ts
+  s_9750491ee7fd74::t_4853d19368678f 1-15
+k8s/cf-cdk8s/node_modules/constructs/lib/mixin.js
+  s_9750491ee7fd74::t_e7a7cd392b5571 1-3
+k8s/cf-cdk8s/node_modules/constructs/lib/private/node-addr.d.ts
+  s_9750491ee7fd74::t_9da4a71cf4eea0 1-17
+k8s/cf-cdk8s/node_modules/constructs/lib/private/node-addr.js
+  s_9750491ee7fd74::t_fe4387aad3aee4 1-39
+k8s/cf-cdk8s/node_modules/constructs/lib/private/stack-trace.d.ts
+  s_9750491ee7fd74::t_e792b3ef48b504 1
+k8s/cf-cdk8s/node_modules/constructs/lib/private/stack-trace.js
+  s_9750491ee7fd74::t_873dc296ed6243 1-21
+k8s/cf-cdk8s/node_modules/constructs/package.json
+  s_9750491ee7fd74::t_a97f698436c09d 1-154
+k8s/cf-cdk8s/node_modules/constructs/version.json
+  s_9750491ee7fd74::t_668761058b26fd 1-3
+k8s/cf-cdk8s/node_modules/oxfmt/LICENSE
+  s_9750491ee7fd74::t_4788faa1694bb9 1-22
+k8s/cf-cdk8s/node_modules/oxfmt/README.md
+  s_9750491ee7fd74::t_9f135a1ff1ad56 1-57
+k8s/cf-cdk8s/node_modules/oxfmt/bin/oxfmt
+  s_9750491ee7fd74::t_439811e495f5b6 1-3
+k8s/cf-cdk8s/node_modules/oxfmt/configuration_schema.json
+  s_9750491ee7fd74::t_9ada5a792c185c 1-814
+k8s/cf-cdk8s/node_modules/oxfmt/package.json
+  s_9750491ee7fd74::t_4cdc20e1fa868b 1-109
+k8s/cf-cdk8s/node_modules/oxlint/LICENSE
+  s_9750491ee7fd74::t_02a78048ff8e30 1-22
+k8s/cf-cdk8s/node_modules/oxlint/README.md
+  s_9750491ee7fd74::t_ec5002d14bbd7d 1-58
+k8s/cf-cdk8s/node_modules/oxlint/bin/oxlint
+  s_9750491ee7fd74::t_70c59f7088d9be 1-3
+k8s/cf-cdk8s/node_modules/oxlint/configuration_schema.json
+  s_9750491ee7fd74::t_5b7c28d233c064 1-19385
+k8s/cf-cdk8s/node_modules/oxlint/package.json
+  s_9750491ee7fd74::t_70742f91888055 1-110
+k8s/cf-cdk8s/node_modules/tinypool/LICENSE
+  s_9750491ee7fd74::t_2281211d00ce1c 1-24
+k8s/cf-cdk8s/node_modules/tinypool/README.md
+  s_9750491ee7fd74::t_5f0519e7b38dea 1-214
+k8s/cf-cdk8s/node_modules/tinypool/package.json
+  s_9750491ee7fd74::t_350d26fcb7fce7 1-58
+k8s/cf-cdk8s/node_modules/typescript/LICENSE
+  s_9750491ee7fd74::t_e77ec441908062 1-55
+k8s/cf-cdk8s/node_modules/typescript/NOTICE.txt
+  s_9750491ee7fd74::t_47f835351982ad 1-436
+k8s/cf-cdk8s/node_modules/typescript/README.md
+  s_9750491ee7fd74::t_3539d6c2928799 1-49
+k8s/cf-cdk8s/node_modules/typescript/bin/tsc
+  s_9750491ee7fd74::t_33be3a246a5325 1-2
+k8s/cf-cdk8s/node_modules/typescript/lib/getExePath.d.ts
+  s_9750491ee7fd74::t_df1fbc189dbd44 1-2
+k8s/cf-cdk8s/node_modules/typescript/lib/getExePath.js
+  s_9750491ee7fd74::t_c51b3fabb6ff2d 1-70
+k8s/cf-cdk8s/node_modules/typescript/lib/tsc.js
+  s_9750491ee7fd74::t_54b2961fc14962 1-28
+k8s/cf-cdk8s/node_modules/typescript/lib/version.cjs
+  s_9750491ee7fd74::t_53832c5c4f04f1 1-3
+k8s/cf-cdk8s/node_modules/typescript/lib/version.d.cts
+  s_9750491ee7fd74::t_b1bbac8ba58039 1-2
+k8s/cf-cdk8s/node_modules/typescript/package.json
+  s_9750491ee7fd74::t_ba256c6cba2d38 1-87
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/License.txt
+  s_9750491ee7fd74::t_27a2e34a20359a 1-11
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/README.md
+  s_9750491ee7fd74::t_45512e529cc113 1-54
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/browser/main.d.ts
+  s_9750491ee7fd74::t_c1bbe380be20a4 1-17
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/browser/main.js
+  s_9750491ee7fd74::t_79ec5bdf25a779 1-83
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/browser/ril.d.ts
+  s_9750491ee7fd74::t_bb6af157e6b02b 1-22
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/browser/ril.js
+  s_9750491ee7fd74::t_2b30e6f06d8a4f 1-210
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/api.d.ts
+  s_9750491ee7fd74::t_d38e203cd556be 1-14
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/api.js
+  s_9750491ee7fd74::t_f69a499c344a58 1-87
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/cancellation.d.ts
+  s_9750491ee7fd74::t_895b7e4c168ed2 1-32
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/cancellation.js
+  s_9750491ee7fd74::t_115b34b1591184 1-132
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/connection.d.ts
+  s_9750491ee7fd74::t_32399cc29161bf 1-367
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/connection.js
+  s_9750491ee7fd74::t_4dd27da4f70a40 1-1271
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/disposable.d.ts
+  s_9750491ee7fd74::t_c5f90ca21b2e8c 1-9
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/disposable.js
+  s_9750491ee7fd74::t_519b01343b88d8 1-16
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/encoding.d.ts
+  s_9750491ee7fd74::t_f8ae64844cd121 1-52
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/encoding.js
+  s_9750491ee7fd74::t_1458b95b37c413 1-70
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/events.d.ts
+  s_9750491ee7fd74::t_54199b887c5ce5 1-39
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/events.js
+  s_9750491ee7fd74::t_1fb5c7d456b4cd 1-135
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/is.d.ts
+  s_9750491ee7fd74::t_22dc412af8b705 1-7
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/is.js
+  s_9750491ee7fd74::t_b08435b4b29cfa 1-34
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/linkedMap.d.ts
+  s_9750491ee7fd74::t_5b86d5a0d62622 1-55
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/linkedMap.js
+  s_9750491ee7fd74::t_64c078214f3a08 1-412
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageBuffer.d.ts
+  s_9750491ee7fd74::t_72f740dc90e9f8 1-18
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageBuffer.js
+  s_9750491ee7fd74::t_86a8e12fdd2363 1-155
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageReader.d.ts
+  s_9750491ee7fd74::t_35b1de479a8bcd 1-77
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageReader.js
+  s_9750491ee7fd74::t_35b79d39aae7f1 1-246
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageWriter.d.ts
+  s_9750491ee7fd74::t_7bd68471a1a3b4 1-60
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messageWriter.js
+  s_9750491ee7fd74::t_e66d4f987d1949 1-157
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messages.d.ts
+  s_9750491ee7fd74::t_ca38f8d4372f8c 1-369
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/messages.js
+  s_9750491ee7fd74::t_2922cf3500aa86 1-436
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/ral.d.ts
+  s_9750491ee7fd74::t_17100598121872 1-74
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/ral.js
+  s_9750491ee7fd74::t_7c5d96bf3457c7 1-23
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/semaphore.d.ts
+  s_9750491ee7fd74::t_2511b3ebf1da3f 1-10
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/semaphore.js
+  s_9750491ee7fd74::t_3571efef3d705c 1-74
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/sharedArrayCancellation.d.ts
+  s_9750491ee7fd74::t_e1bf4bf7945eac 1-15
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/common/sharedArrayCancellation.js
+  s_9750491ee7fd74::t_0b6c903e56eb7b 1-77
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/node/main.d.ts
+  s_9750491ee7fd74::t_d78a990d64c8c9 1-58
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/node/main.js
+  s_9750491ee7fd74::t_5d956882654728 1-289
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/node/ril.d.ts
+  s_9750491ee7fd74::t_a1486d13b139c8 1-12
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/lib/node/ril.js
+  s_9750491ee7fd74::t_f91e2a56c84279 1-163
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/package.json
+  s_9750491ee7fd74::t_a1bd49d59f84d0 1-54
+k8s/cf-cdk8s/node_modules/typescript/vendor/vscode-jsonrpc/typings/thenable.d.ts
+  s_9750491ee7fd74::t_fffb04870ceef4 1-5
+k8s/cf-cdk8s/node_modules/undici-types/LICENSE
+  s_9750491ee7fd74::t_d5409aa756fbfa 1-21
+k8s/cf-cdk8s/node_modules/undici-types/README.md
+  s_9750491ee7fd74::t_1ae7cf467fc6aa 1-6
+k8s/cf-cdk8s/node_modules/undici-types/agent.d.ts
+  s_9750491ee7fd74::t_d96efef9945f12 1-31
+k8s/cf-cdk8s/node_modules/undici-types/api.d.ts
+  s_9750491ee7fd74::t_1a5b343259a07b 1-43
+k8s/cf-cdk8s/node_modules/undici-types/balanced-pool.d.ts
+  s_9750491ee7fd74::t_d9572082ae3c4e 1-29
+k8s/cf-cdk8s/node_modules/undici-types/cache.d.ts
+  s_9750491ee7fd74::t_a61ae0f1d91ddf 1-36
+k8s/cf-cdk8s/node_modules/undici-types/client.d.ts
+  s_9750491ee7fd74::t_580eb418d6cd65 1-108
+k8s/cf-cdk8s/node_modules/undici-types/connector.d.ts
+  s_9750491ee7fd74::t_805553306ff863 1-34
+k8s/cf-cdk8s/node_modules/undici-types/content-type.d.ts
+  s_9750491ee7fd74::t_0871c9dee47f0a 1-21
+k8s/cf-cdk8s/node_modules/undici-types/cookies.d.ts
+  s_9750491ee7fd74::t_979ddef322c746 1-28
+k8s/cf-cdk8s/node_modules/undici-types/diagnostics-channel.d.ts
+  s_9750491ee7fd74::t_b8d0dedcb02f35 1-66
+k8s/cf-cdk8s/node_modules/undici-types/dispatcher.d.ts
+  s_9750491ee7fd74::t_21a9a01ec8a12e 1-256
+k8s/cf-cdk8s/node_modules/undici-types/env-http-proxy-agent.d.ts
+  s_9750491ee7fd74::t_116c4a6c79cf91 1-21
+k8s/cf-cdk8s/node_modules/undici-types/errors.d.ts
+  s_9750491ee7fd74::t_ca487134ca3408 1-149
+k8s/cf-cdk8s/node_modules/undici-types/eventsource.d.ts
+  s_9750491ee7fd74::t_f804258f25598d 1-61
+k8s/cf-cdk8s/node_modules/undici-types/fetch.d.ts
+  s_9750491ee7fd74::t_ddaff558507f34 1-209
+k8s/cf-cdk8s/node_modules/undici-types/file.d.ts
+  s_9750491ee7fd74::t_8169bde4ff3330 1-39
+k8s/cf-cdk8s/node_modules/undici-types/filereader.d.ts
+  s_9750491ee7fd74::t_b9528f5993c0ef 1-54
+k8s/cf-cdk8s/node_modules/undici-types/formdata.d.ts
+  s_9750491ee7fd74::t_c8840720a3688e 1-108
+k8s/cf-cdk8s/node_modules/undici-types/global-dispatcher.d.ts
+  s_9750491ee7fd74::t_9155f251d6c12e 1-9
+k8s/cf-cdk8s/node_modules/undici-types/global-origin.d.ts
+  s_9750491ee7fd74::t_e5b72baf844b23 1-7
+k8s/cf-cdk8s/node_modules/undici-types/handlers.d.ts
+  s_9750491ee7fd74::t_2d21776401b43c 1-15
+k8s/cf-cdk8s/node_modules/undici-types/header.d.ts
+  s_9750491ee7fd74::t_a954569bd7a42b 1-4
+k8s/cf-cdk8s/node_modules/undici-types/index.d.ts
+  s_9750491ee7fd74::t_87396cff0b32b8 1-71
+k8s/cf-cdk8s/node_modules/undici-types/interceptors.d.ts
+  s_9750491ee7fd74::t_fc77a7d83697ae 1-17
+k8s/cf-cdk8s/node_modules/undici-types/mock-agent.d.ts
+  s_9750491ee7fd74::t_7e2cb626c73518 1-50
+k8s/cf-cdk8s/node_modules/undici-types/mock-client.d.ts
+  s_9750491ee7fd74::t_4a613e68ab20c2 1-25
+k8s/cf-cdk8s/node_modules/undici-types/mock-errors.d.ts
+  s_9750491ee7fd74::t_cda196784d8e57 1-12
+k8s/cf-cdk8s/node_modules/undici-types/mock-interceptor.d.ts
+  s_9750491ee7fd74::t_bb7d14bc1d0ae3 1-93
+k8s/cf-cdk8s/node_modules/undici-types/mock-pool.d.ts
+  s_9750491ee7fd74::t_40c4c7d865fbee 1-25
+k8s/cf-cdk8s/node_modules/undici-types/package.json
+  s_9750491ee7fd74::t_0b428b60c23473 1-55
+k8s/cf-cdk8s/node_modules/undici-types/patch.d.ts
+  s_9750491ee7fd74::t_8902fd63eb171f 1-33
+k8s/cf-cdk8s/node_modules/undici-types/pool-stats.d.ts
+  s_9750491ee7fd74::t_ce4ef30c3fcbcd 1-19
+k8s/cf-cdk8s/node_modules/undici-types/pool.d.ts
+  s_9750491ee7fd74::t_f7f9fbf2a9b26d 1-39
+k8s/cf-cdk8s/node_modules/undici-types/proxy-agent.d.ts
+  s_9750491ee7fd74::t_7914cd718fbefd 1-28
+k8s/cf-cdk8s/node_modules/undici-types/readable.d.ts
+  s_9750491ee7fd74::t_7728ef3852bd1f 1-65
+k8s/cf-cdk8s/node_modules/undici-types/retry-agent.d.ts
+  s_9750491ee7fd74::t_798a0f7a46a248 1-8
+k8s/cf-cdk8s/node_modules/undici-types/retry-handler.d.ts
+  s_9750491ee7fd74::t_d29675ef8a8599 1-116
+k8s/cf-cdk8s/node_modules/undici-types/util.d.ts
+  s_9750491ee7fd74::t_02fb67d1ba5e9a 1-18
+k8s/cf-cdk8s/node_modules/undici-types/webidl.d.ts
+  s_9750491ee7fd74::t_2d3fb093e90d28 1-228
+k8s/cf-cdk8s/node_modules/undici-types/websocket.d.ts
+  s_9750491ee7fd74::t_adb725f6dc8e31 1-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1a13782366615bde1e3c1807d45f31afc6d54882",
+  "prompts": {},
+  "sessions": {
+    "s_9750491ee7fd74": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0503fe8e4ffenIsg5lxGgwns0r",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

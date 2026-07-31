@@ -1,0 +1,21 @@
+crates/arroyo-controller/src/schedulers/cloudchamber/colostat.rs
+  s_ca4d440690bcf2::t_cec2e80ed745fb 6,63-65,76,113,165-181,184,187-190,192,228,231
+  s_ca4d440690bcf2::t_3d615403570433 127,149
+  s_ca4d440690bcf2::t_dc97791c7adefd 147-148,191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03d41323fa250e3682a67d90720b197d1564da29",
+  "prompts": {},
+  "sessions": {
+    "s_ca4d440690bcf2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04b0337b8ffe7pgcUfy3IJzdap",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
