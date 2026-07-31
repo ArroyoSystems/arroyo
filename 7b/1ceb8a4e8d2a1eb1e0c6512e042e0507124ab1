@@ -1,0 +1,24 @@
+k8s/arroyo-cloudflare/templates/configmap.yaml
+  s_d461b2e2a7e817::t_9dcaef01d0b320 18-20
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_d461b2e2a7e817::t_6c2d5041da77d0 90
+  s_d461b2e2a7e817::t_9b36e7c09af518 28
+k8s/arroyo-cloudflare/overlays/production.yaml
+  s_d461b2e2a7e817::t_0f50afd6de0add 29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7b1ceb8a4e8d2a1eb1e0c6512e042e0507124ab1",
+  "prompts": {},
+  "sessions": {
+    "s_d461b2e2a7e817": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_045b3dc2cffeyL0a7JfP7AplxI",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
