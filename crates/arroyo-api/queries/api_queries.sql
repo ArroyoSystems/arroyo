@@ -183,7 +183,6 @@ UPDATE job_configs
 SET
    updated_at = :updated_at,
    updated_by = :updated_by,
-   stop = 'none',
    restart_nonce = restart_nonce + 1,
    restart_mode = :mode,
    ignore_state_before_epoch = :ignore_state_before_epoch

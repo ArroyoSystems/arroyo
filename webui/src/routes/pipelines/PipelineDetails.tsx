@@ -138,7 +138,7 @@ export function PipelineDetails() {
 
   async function updateJobState(stop: StopType) {
     console.log(`Setting pipeline stop_mode=${stop}`);
-    await updatePipeline({ stop });
+    updatePipeline({ stop });
   }
 
   async function updateJobParallelism(parallelism: number) {
@@ -352,29 +352,23 @@ export function PipelineDetails() {
   let actionButton = <></>;
   if (pipeline) {
     editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
-    const isStopped = job.state === 'Stopped' && pipeline.action != null;
-    if (job.state === 'Failed' || isStopped) {
-      const actionText = isStopped ? 'Start' : 'Restart';
+    if (job.state == 'Failed') {
       actionButton = (
         <Popover trigger="hover" placement="bottom-start">
           <PopoverTrigger>
             <Button
               onClick={async () => {
-                if (isStopped) {
-                  await updateJobState(pipeline.action!);
-                } else {
-                  await restartPipeline(false);
-                }
+                await restartPipeline(false);
               }}
             >
-              {actionText}
+              Restart
             </Button>
           </PopoverTrigger>
           <PopoverContent width="auto">
             <PopoverArrow />
             <PopoverBody p={4}>
               <Button size="sm" colorScheme="red" onClick={onRestartWithoutStateModalOpen}>
-                {actionText} Without State
+                Restart Without State
               </Button>
             </PopoverBody>
           </PopoverContent>
@@ -394,10 +388,6 @@ export function PipelineDetails() {
       );
     }
   }
-
-  const startingWithoutState = job.state === 'Stopped';
-  const withoutStateAction = startingWithoutState ? 'Start' : 'Restart';
-  const withoutStateActionPresentParticiple = startingWithoutState ? 'Starting' : 'Restarting';
 
   const headerArea = (
     <Flex>
@@ -432,13 +422,13 @@ export function PipelineDetails() {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {withoutStateAction} Without State
+              Restart Without State
             </AlertDialogHeader>
 
             <AlertDialogBody>
               <Text>
-                {withoutStateActionPresentParticiple} without state could lead to data loss,
-                duplication, and incorrect results. Are you sure you want to continue?
+                Restarting without state could lead to data loss, duplication, and incorrect
+                results. Are you sure you want to continue?
               </Text>
             </AlertDialogBody>
 
@@ -454,7 +444,7 @@ export function PipelineDetails() {
                 }}
                 ml={3}
               >
-                {withoutStateAction} Without State
+                Restart Without State
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

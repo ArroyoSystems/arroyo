@@ -111,8 +111,6 @@ pub struct JobConfig {
     parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
     restart_mode: RestartMode,
-    /// Minimum checkpoint epoch in controller mode; generation to start without state in leader
-    /// mode.
     ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
