@@ -15,8 +15,7 @@ use crate::{
 };
 
 use arrow_schema::DataType;
-use arroyo_rpc::TIMESTAMP_FIELD;
-use arroyo_rpc::UPDATING_META_FIELD;
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD, api_types::connections::ConnectionType};
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
 use crate::extension::AsyncUDFExtension;
@@ -192,6 +191,13 @@ impl SourceRewriter<'_> {
         table_scan: &TableScan,
         table: &ConnectorTable,
     ) -> DFResult<Transformed<LogicalPlan>> {
+        if table.connection_type == ConnectionType::Sink {
+            return plan_err!(
+                "attempted to read from table '{}', but it is a sink",
+                table.name
+            );
+        }
+
         let input = self.projection(table_scan, table)?;
 
         let schema = input.schema().clone();
