@@ -1,5 +1,3 @@
-# Default values for arroyo.
-
 nameOverride: ""
 fullnameOverride: ""
 clusterDomain: cluster.local
@@ -11,17 +9,35 @@ imagePullPolicy: IfNotPresent
 imagePullSecrets: []
 
 controller:
+  replicas: 1
+
+  service:
+    type: ClusterIP
+    annotations: {}
+    loadBalancerIP: ""
+    loadBalancerSourceRanges: []
+    grpcPort: 5116
+    compilerPort: 5117
+    adminPort: 5114
+    httpPort: 80
+
   resources:
     limits: {}
     requests:
       memory: 256Mi
       cpu: 500m
 
-  service:
-    grpcPort: 5116
-    compilerPort: 5117
-    adminPort: 5114
-    httpPort: 80
+  probeInitialDelaySeconds: 5
+
+  podLabels: {}
+
+  initContainers:
+    migrate:
+      resources: {}
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 worker:
   resources:
@@ -30,35 +46,21 @@ worker:
       memory: 490Mi
       cpu: 900m
   slots: 16
-  # ref: https://kubernetes.io/docs/user-guide/node-selection/
   nodeSelector: {}
-    # kubernetes.io/role: worker
-    # node-type: arroyo-worker
-
-  # Tolerations for worker pods assignment
-  # ref: https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/
-  #
   tolerations: []
-    # - key: "dedicated"
-    #   operator: "Equal"
-    #   value: "arroyo"
-    #   effect: "NoSchedule"
-    # - key: "CriticalAddonsOnly"
-    #   operator: "Exists"
 
 postgresql:
-  # set to true to deploy a postgres instance in-cluster
   deploy: true
 
-  # otherwise, configure the connection to an external postgres instance
   externalDatabase:
     host: localhost
     port: 5432
     name: arroyo
     user: arroyo
     password: arroyo
+    existingSecret: ""
+    existingSecretPasswordKey: "password"
 
-  # postgresql configuration
   auth:
     username: arroyo
     password: arroyo
@@ -72,15 +74,12 @@ postgresql:
     create: true
     name: arroyo-postgresql
 
-  # for now, use the legacy bitnami images while we figure out how to migrate off
   image:
     registry: docker.io
     repository: bitnamilegacy/postgresql
     tag: 15.3.0-debian-11-r24
 
 prometheus:
-  # set to true to enable prometheus annotations on Arroyo cluster resources; if false,
-  # you will need to configure prometheus separately to discover Arroyo pods
   setAnnotations: true
 
 s3:
@@ -90,45 +89,41 @@ artifactUrl: ""
 checkpointUrl: ""
 
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
 
 role:
-  # Specified whether the role should be created
   create: true
-
 
 podAnnotations: {}
 
 podSecurityContext: {}
-  # fsGroup: 2000
-
 securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
-
-
-
-controllerResources: {}
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
 
 volumes: []
 volumeMounts: []
 
 existingConfigMap: ""
 
-env: []  
+env: []
+
+ingress:
+  enabled: false
+  ingressClassName: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+gateway:
+  httpRoute:
+    enabled: false
+    annotations: {}
+    parentRefs: []
+    hostnames: []
+    matches: []
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
