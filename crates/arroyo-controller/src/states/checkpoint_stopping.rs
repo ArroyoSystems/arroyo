@@ -18,6 +18,8 @@ impl State for CheckpointStopping {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
+        let job_id = ctx.config.id.clone();
+        let pipeline_id = ctx.pipeline_info.pipeline_id.clone();
         let job_controller = ctx.job_controller.as_mut().unwrap();
 
         let mut final_checkpoint_started = false;
@@ -26,6 +28,8 @@ impl State for CheckpointStopping {
             match job_controller.checkpoint_finished().await {
                 Ok(done) => {
                     debug!(
+                        job_id = %job_id,
+                        pipeline_id = *pipeline_id,
                         "checked checkpoint, got {}, job_controller.finished(): {}, final_checkpoint_started: {}",
                         done,
                         job_controller.finished(),

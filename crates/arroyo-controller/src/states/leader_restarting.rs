@@ -57,7 +57,12 @@ impl State for LeaderRestarting {
 
                                 }
                                 Some(msg) => {
-                                    warn!(job_id = *ctx.config.id, ?msg, "unexpected job message in leader mode");
+                                    warn!(
+                                        job_id = %ctx.config.id,
+                                        pipeline_id = *ctx.pipeline_info.pipeline_id,
+                                        ?msg,
+                                        "unexpected job message in leader mode"
+                                    );
                                 }
                                 None => {
                                     panic!("job queue shut down");
@@ -86,7 +91,8 @@ impl State for LeaderRestarting {
             }
             RestartMode::force => {
                 info!(
-                    job_id = *ctx.config.id,
+                    job_id = %ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id,
                     "force restarting job, tearing down cluster"
                 );
 

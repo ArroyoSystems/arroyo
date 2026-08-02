@@ -5,6 +5,7 @@ use arroyo_operator::operator::Registry;
 use arroyo_planner::physical::new_registry;
 use std::fmt::Write;
 use std::sync::Arc;
+use tracing::warn;
 
 fn format_arrow_schema_fields(schema: &Schema) -> Vec<(String, String)> {
     schema
@@ -134,4 +135,56 @@ pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
     }
 
     Ok(d2)
+}
+
+pub(crate) const MAX_TASK_ERROR_FIELD_BYTES: usize = 64 * 1024;
+
+pub(crate) fn maybe_truncate(mut value: String, max_size_bytes: usize) -> String {
+    let original_bytes = value.len();
+    if original_bytes <= max_size_bytes {
+        return value;
+    }
+
+    let suffix = format!(" [truncated; original_bytes={original_bytes}]");
+    let mut end = max_size_bytes - suffix.len();
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    value.truncate(end);
+    value.push_str(&suffix);
+
+    warn!(
+        "Truncated oversized String from {} bytes to {} bytes: {}",
+        original_bytes,
+        value.len(),
+        value
+    );
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::maybe_truncate;
+
+    #[test]
+    fn maybe_truncate_preserves_value_at_limit() {
+        let value = "a".repeat(64);
+
+        assert_eq!(maybe_truncate(value.clone(), value.len()), value);
+    }
+
+    #[test]
+    fn maybe_truncate_respects_limit() {
+        let value = "a".repeat(100);
+        let max_size_bytes = 64;
+
+        let truncated = maybe_truncate(value, max_size_bytes);
+
+        assert_eq!(truncated.len(), max_size_bytes);
+        assert_eq!(
+            truncated,
+            format!("{} [truncated; original_bytes=100]", "a".repeat(32))
+        );
+    }
 }

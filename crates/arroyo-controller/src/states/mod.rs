@@ -117,7 +117,8 @@ async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
         warn!(
             message = "Failed to clean up cluster",
             error = format!("{:?}", e),
-            job_id = *ctx.config.id
+            job_id = %ctx.config.id,
+            pipeline_id = *ctx.pipeline_info.pipeline_id
         );
     }
 }
@@ -551,7 +552,12 @@ impl JobContext<'_> {
             msg,
             JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat { .. })
         ) {
-            warn!("unhandled job message {:?}", msg);
+            warn!(
+                job_id = %self.config.id,
+                pipeline_id = *self.pipeline_info.pipeline_id,
+                "unhandled job message {:?}",
+                msg
+            );
         }
         Ok(())
     }
@@ -578,7 +584,8 @@ impl JobContext<'_> {
         event: TaskFailedEvent,
     ) -> Result<Transition, StateError> {
         error!(
-            job_id = self.config.id.as_str(),
+            job_id = %self.config.id.as_str(),
+            pipeline_id = *self.pipeline_info.pipeline_id,
             task_id = event.task_id,
             operator_subtask = event.subtask_idx,
             operator_id = event.operator_id,
@@ -603,7 +610,12 @@ impl JobContext<'_> {
         )
         .await
         {
-            warn!("Failed to log task failure to database: {:?}", db_err);
+            warn!(
+                job_id = %self.config.id,
+                pipeline_id = *self.pipeline_info.pipeline_id,
+                "Failed to log task failure to database: {:?}",
+                db_err
+            );
         }
 
         match event.retry_hint {
@@ -638,7 +650,8 @@ impl JobContext<'_> {
         let reason = failure.message.clone();
 
         error!(
-            job_id = self.config.id.as_str(),
+            job_id = %self.config.id.as_str(),
+            pipeline_id = *self.pipeline_info.pipeline_id,
             task_id = format!("{:?}", failure.task_id),
             operator_subtask = subtask_index,
             operator_id,
@@ -666,7 +679,12 @@ impl JobContext<'_> {
             )
             .await
             {
-                warn!("Failed to log job failure to database: {:?}", db_err);
+                warn!(
+                    job_id = %self.config.id,
+                    pipeline_id = *self.pipeline_info.pipeline_id,
+                    "Failed to log job failure to database: {:?}",
+                    db_err
+                );
             }
         }
 
@@ -741,7 +759,8 @@ async fn execute_state<'a>(
 
     debug!(
         message = "executing state",
-        job_id = *ctx.config.id,
+        job_id = %ctx.config.id,
+        pipeline_id = *ctx.pipeline_info.pipeline_id,
         state = state_name,
         config = format!("{:?}", ctx.config)
     );
@@ -750,7 +769,8 @@ async fn execute_state<'a>(
         Ok(Transition::Advance(s)) => {
             info!(
                 message = "state transition",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 from = state_name,
                 to = s.state.name(),
                 duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
@@ -779,24 +799,11 @@ async fn execute_state<'a>(
             message,
             source,
             domain,
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 1,
-            ..
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 0,
-            ..
         }) => {
             error!(
                 message = "fatal state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source)
@@ -821,6 +828,30 @@ async fn execute_state<'a>(
             Some(s)
         }
         Err(StateError::RetryableError {
+            message,
+            source,
+            domain,
+            retries: 0 | 1,
+            ..
+        }) => {
+            error!(
+                message = "exhausted in-state retries, moving to recovering",
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                state = state_name,
+                error_message = message,
+                error = format!("{:?}", source)
+            );
+            ctx.status.restarts += 1;
+            ctx.retries_attempted = 0;
+            let s: Box<dyn State> = Box::new(Recovering {
+                source,
+                reason: message,
+                domain,
+            });
+            Some(s)
+        }
+        Err(StateError::RetryableError {
             state,
             message,
             source,
@@ -829,7 +860,8 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "retryable state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source),
@@ -848,7 +880,12 @@ async fn execute_state<'a>(
                 ["retries" => retries]
             );
 
-            state_backoff(ctx.retries_attempted).await;
+            state_backoff(
+                ctx.retries_attempted,
+                &ctx.config.id,
+                &ctx.pipeline_info.pipeline_id,
+            )
+            .await;
 
             ctx.retries_attempted += 1;
             Some(state)
@@ -867,7 +904,7 @@ async fn execute_state<'a>(
     (next, ctx)
 }
 
-pub(crate) async fn state_backoff(retries_attempted: usize) {
+pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeline_id: &str) {
     let pipeline_config = &config().pipeline;
     let base = *pipeline_config.state_initial_backoff;
     let max = *pipeline_config.state_max_backoff;
@@ -879,13 +916,18 @@ pub(crate) async fn state_backoff(retries_attempted: usize) {
             0..exp_backoff.as_micros() as u64 / 2,
         ));
 
-    debug!("waiting {}ms to retry", backoff.as_millis());
+    debug!(
+        %job_id,
+        pipeline_id,
+        "waiting {}ms to retry",
+        backoff.as_millis()
+    );
     tokio::time::sleep(backoff).await;
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_to_completion(
-    config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
+    job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
     mut program: LogicalProgram,
     mut status: JobStatus,
@@ -895,19 +937,21 @@ async fn run_to_completion(
     scheduler: Arc<dyn Scheduler>,
     metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
-    let job_config = config.read().unwrap().0.clone();
+    let job_config = job_config_and_status.read().unwrap().0.clone();
 
     let leader_manager = if let Some(ctx) = &status.state_context.leader {
         LeaderManager::connect(
             JobId(job_config.id.clone()),
+            pipeline_info.pipeline_id.clone(),
             ctx.generation,
             ctx.worker_id,
             ctx.rpc_address.clone(),
+            config().controller.connect_timeout.as_deref().copied(),
         )
         .await
         .map(Some)
         .unwrap_or_else(|e| {
-            warn!(job_id = *job_config.id,
+            warn!(job_id = %job_config.id,
                     pipeline_id = *pipeline_info.pipeline_id,
                     leader_ctx =? ctx,
                     error =? e,
@@ -934,7 +978,7 @@ async fn run_to_completion(
     };
 
     loop {
-        config.write().unwrap().1 = AppliedStatus::Applied;
+        job_config_and_status.write().unwrap().1 = AppliedStatus::Applied;
         match execute_state(state, ctx).await {
             (Some(new_state), new_ctx) => {
                 state = new_state;
@@ -943,7 +987,7 @@ async fn run_to_completion(
             (None, _) => break,
         }
 
-        ctx.config = config.read().unwrap().0.clone();
+        ctx.config = job_config_and_status.read().unwrap().0.clone();
     }
 }
 
@@ -1021,7 +1065,12 @@ impl StateMachine {
             match Self::decode_program(&res.program) {
                 Ok(p) => Some((p, info)),
                 Err(e) => {
-                    warn!("Failed to start {}: {}", job_id, e);
+                    warn!(
+                        %job_id,
+                        pipeline_id = *info.pipeline_id,
+                        "Failed to start job: {}",
+                        e
+                    );
                     None
                 }
             }
@@ -1086,9 +1135,14 @@ impl StateMachine {
                 match Self::get_program(&db, &status.id, pipeline_id).await {
                     Ok(Some((program, pipeline_info))) => {
                         let pipeline_info = Arc::new(pipeline_info);
+                        let pipeline_id = pipeline_info.pipeline_id.clone();
                         shutdown_guard.into_spawn_task(async move {
                             let id = { config.read().unwrap().0.id.clone() };
-                            info!(message = "starting state machine", job_id = *id);
+                            info!(
+                                message = "starting state machine",
+                                job_id = %id,
+                                pipeline_id = *pipeline_id
+                            );
                             run_to_completion(
                                 config,
                                 pipeline_info,
@@ -1101,7 +1155,11 @@ impl StateMachine {
                                 metrics,
                             )
                             .await;
-                            info!(message = "finished state machine", job_id = *id);
+                            info!(
+                                message = "finished state machine",
+                                job_id = %id,
+                                pipeline_id = *pipeline_id
+                            );
                             Ok(())
                         });
                     }
@@ -1110,7 +1168,7 @@ impl StateMachine {
                     }
                     Err(e) => {
                         // something went wrong, we'll retry on the next go around
-                        warn!("Failed to start {}: {:?}", status.id, e);
+                        warn!(job_id = %status.id, "Failed to start job: {:?}", e);
                     }
                 }
             }
@@ -1148,6 +1206,10 @@ impl StateMachine {
         } else {
             Err("State machine is inactive")
         }
+    }
+
+    pub(crate) fn sender(&self) -> Option<Sender<JobMessage>> {
+        self.tx.clone()
     }
 
     pub fn done(&self) -> bool {

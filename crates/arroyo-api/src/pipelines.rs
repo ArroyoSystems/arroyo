@@ -46,13 +46,13 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, log_and_map, not_found,
-    paginate_results, required_field, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, log_and_map,
+    not_found, paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{JobControllerMode, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
@@ -631,7 +631,7 @@ pub async fn create_pipeline(
 pub async fn put_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
@@ -761,7 +761,9 @@ pub async fn create_preview_pipeline(
 pub async fn patch_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
     WithRejection(Json(pipeline_patch), _): WithRejection<Json<PipelinePatch>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
@@ -815,6 +817,16 @@ pub async fn patch_pipeline(
         None
     };
 
+    let env_vars = pipeline_patch
+        .env_vars
+        .map(|e| serde_json::to_value(e).map_err(log_and_map))
+        .transpose()?;
+
+    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
+        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+        v => v,
+    });
+
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
@@ -822,6 +834,8 @@ pub async fn patch_pipeline(
         stop,
         &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
+        &env_vars,
+        &scheduler_config,
         &job_id,
         &auth_data.organization_id,
     )
@@ -850,18 +864,18 @@ pub async fn patch_pipeline(
 pub async fn restart_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(id): Path<String>,
+    Path(PipelinePath { id }): Path<PipelinePath>,
     WithRejection(Json(req), _): WithRejection<Json<PipelineRestart>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
+
     let db = state.database.client().await?;
 
-    let job_id = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
+    let job = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
         .await?
         .into_iter()
         .next()
-        .ok_or_else(|| bad_request("No jobs for pipeline"))?
-        .id;
+        .ok_or_else(|| bad_request("No jobs for pipeline"))?;
 
     let mode = if req.force == Some(true) {
         RestartMode::force
@@ -869,14 +883,29 @@ pub async fn restart_pipeline(
         RestartMode::safe
     };
 
-    // If user wants to ignore state, query max checkpoint epoch and compute threshold
     let ignore_before_epoch = if req.ignore_state.unwrap_or(false) {
-        api_queries::fetch_max_checkpoint_epoch(&db, &job_id, &auth_data.organization_id)
-            .await?
-            .into_iter()
-            .next()
-            .and_then(|r| r.max_epoch)
-            .map(|max_epoch| max_epoch + 1)
+        match config().job_controller {
+            JobControllerMode::Controller => {
+                // Controller mode uses this as an epoch threshold.
+                api_queries::fetch_max_checkpoint_epoch(&db, &job.id, &auth_data.organization_id)
+                    .await?
+                    .into_iter()
+                    .next()
+                    .and_then(|r| r.max_epoch)
+                    .map(|max_epoch| max_epoch + 1)
+            }
+            JobControllerMode::Worker => {
+                // Leader mode uses this as the generation that should start without state.
+                Some(
+                    job.run_id
+                        .unwrap_or(0)
+                        .max(0)
+                        .checked_add(1)
+                        .and_then(|generation| generation.try_into().ok())
+                        .ok_or_else(|| bad_request("Job generation is too large to restart"))?,
+                )
+            }
+        }
     } else {
         None
     };
@@ -887,7 +916,7 @@ pub async fn restart_pipeline(
         &auth_data.user_id,
         &mode,
         &ignore_before_epoch,
-        &job_id,
+        &job.id,
         &auth_data.organization_id,
     )
     .await?;
@@ -965,7 +994,9 @@ pub async fn get_pipelines(
 pub async fn get_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -993,7 +1024,9 @@ pub async fn get_pipeline(
 pub async fn delete_pipeline(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<(), ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
@@ -1046,7 +1079,9 @@ pub async fn delete_pipeline(
 pub async fn get_pipeline_jobs(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path(pipeline_pub_id): Path<String>,
+    Path(PipelinePath {
+        id: pipeline_pub_id,
+    }): Path<PipelinePath>,
 ) -> Result<Json<JobCollection>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;

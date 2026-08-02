@@ -5,6 +5,7 @@ use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
+use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
@@ -111,6 +112,19 @@ impl State for LeaderRunning {
                                 ));
                             }
 
+                            // env_vars and scheduler_config are only applied when workers are
+                            // (re)scheduled, so a change to either while the job is running
+                            // requires a restart to take effect.
+                            if c.scheduler_config != ctx.config.scheduler_config
+                                || c.env_vars != ctx.config.env_vars {
+                                return Ok(Transition::next(
+                                    *self,
+                                    LeaderRestarting {
+                                        mode: RestartMode::safe,
+                                    },
+                                ));
+                            }
+
                             for (node_id, p) in &c.parallelism_overrides {
                                 if let Some(actual) = operator_parallelism.get(node_id)
                                     && *actual != *p {
@@ -123,7 +137,12 @@ impl State for LeaderRunning {
 
                         }
                         Some(msg) => {
-                            warn!(job_id = *ctx.config.id, msg =? msg, "unexpected job message in leader mode");
+                            warn!(
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                                msg =? msg,
+                                "unexpected job message in leader mode"
+                            );
                         }
                         None => {
                             panic!("job queue shut down");
@@ -135,8 +154,12 @@ impl State for LeaderRunning {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
                         if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(message = "Failed to update status", error = format!("{:?}", e),
-                                job_id = *ctx.config.id);
+                            error!(
+                                message = "Failed to update status",
+                                error = format!("{:?}", e),
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             ctx.status.restarts = restarts;
                         }
                     }
@@ -206,7 +229,12 @@ impl State for LeaderRunning {
                             }
                         }
                         Err(err) => {
-                            warn!(message = "error while polling leader status", error = format!("{:?}", err), job_id = *ctx.config.id);
+                            warn!(
+                                message = "error while polling leader status",
+                                error = format!("{:?}", err),
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }

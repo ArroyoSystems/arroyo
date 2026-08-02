@@ -4,10 +4,10 @@ use axum::{
     routing::{delete, get, patch, post, put},
 };
 
-use http::{HeaderMap, HeaderName, StatusCode, Uri, header};
+use anyhow::{Context, bail};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use rust_embed::RustEmbed;
-use tower_http::cors;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, Any, CorsLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -31,7 +31,7 @@ use crate::pipelines::{
 };
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{CorsConfig, CorsOriginPolicy, config};
 use cornucopia_async::DatabaseSource;
 
 static BASENAME_HEADER: HeaderName = HeaderName::from_static("x-arroyo-basename");
@@ -60,6 +60,37 @@ pub async fn ping() -> impl IntoResponse {
 
 pub async fn api_fallback() -> impl IntoResponse {
     not_found("Route")
+}
+
+fn pipeline_jobs_routes() -> Router<AppState> {
+    Router::new()
+        .route("/", get(get_pipeline_jobs))
+        .route("/:job_id/errors", get(get_job_errors))
+        .route("/:job_id/checkpoints", get(get_job_checkpoints))
+        .route(
+            "/:job_id/checkpoints/:epoch/operator_checkpoint_groups",
+            get(get_checkpoint_details),
+        )
+        .route("/:job_id/output", get(get_job_output))
+        .route(
+            "/:job_id/operator_metric_groups",
+            get(get_operator_metric_groups),
+        )
+}
+
+fn pipeline_and_job_routes() -> Router<AppState> {
+    Router::new()
+        .route("/pipelines", post(create_pipeline))
+        .route("/pipelines/preview", post(create_preview_pipeline))
+        .route("/pipelines", get(get_pipelines))
+        .route("/jobs", get(get_jobs))
+        .route("/pipelines/validate_query", post(validate_query))
+        .route("/pipelines/:id", put(put_pipeline))
+        .route("/pipelines/:id", patch(patch_pipeline))
+        .route("/pipelines/:id", get(get_pipeline))
+        .route("/pipelines/:id/restart", post(restart_pipeline))
+        .route("/pipelines/:id", delete(delete_pipeline))
+        .nest("/pipelines/:id/jobs", pipeline_jobs_routes())
 }
 
 async fn not_found_static() -> Response {
@@ -125,26 +156,54 @@ async fn index_html(headers: HeaderMap) -> Response {
     }
 }
 
-pub fn create_rest_app(database: DatabaseSource) -> Router {
-    // TODO: enable in development only!!!
+fn cors_layer(config: &CorsConfig) -> anyhow::Result<CorsLayer> {
     let cors = CorsLayer::new()
-        .allow_methods(cors::Any)
-        .allow_headers(cors::Any)
-        .allow_origin(cors::Any);
+        .allow_methods(AllowMethods::mirror_request())
+        .allow_headers(AllowHeaders::mirror_request());
 
-    let jobs_routes = Router::new()
-        .route("/", get(get_pipeline_jobs))
-        .route("/:job_id/errors", get(get_job_errors))
-        .route("/:job_id/checkpoints", get(get_job_checkpoints))
-        .route(
-            "/:job_id/checkpoints/:checkpoint_id/operator_checkpoint_groups",
-            get(get_checkpoint_details),
-        )
-        .route("/:job_id/output", get(get_job_output))
-        .route(
-            "/:job_id/operator_metric_groups",
-            get(get_operator_metric_groups),
-        );
+    match config.origin_policy {
+        CorsOriginPolicy::Any => {
+            if config.allow_credentials {
+                bail!("CORS credentials cannot be enabled when allowing any origin");
+            }
+            if !config.allowed_origins.is_empty() {
+                bail!("CORS allowed origins must be empty when allowing any origin");
+            }
+
+            Ok(cors.allow_credentials(false).allow_origin(Any))
+        }
+        CorsOriginPolicy::AllowList => {
+            if config.allowed_origins.iter().any(|origin| origin == "*") {
+                bail!("CORS allow-list cannot contain the wildcard origin '*'");
+            }
+
+            let origins = config
+                .allowed_origins
+                .iter()
+                .map(|origin| {
+                    let url = url::Url::parse(origin)
+                        .with_context(|| format!("invalid CORS allowed origin {origin:?}"))?;
+                    if url.origin().ascii_serialization() != *origin {
+                        bail!(
+                            "CORS allowed origin {origin:?} must contain only a canonical scheme, host, and optional port"
+                        );
+                    }
+
+                    origin
+                        .parse::<HeaderValue>()
+                        .with_context(|| format!("invalid CORS allowed origin {origin:?}"))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
+
+            Ok(cors
+                .allow_credentials(config.allow_credentials)
+                .allow_origin(AllowOrigin::list(origins)))
+        }
+    }
+}
+
+pub fn create_rest_app(database: DatabaseSource) -> anyhow::Result<Router> {
+    let cors = cors_layer(&config().api.cors)?;
 
     let api_routes = Router::new()
         .route("/ping", get(ping))
@@ -169,26 +228,20 @@ pub fn create_rest_app(database: DatabaseSource) -> Router {
         .route("/udfs", get(get_udfs))
         .route("/udfs/validate", post(validate_udf))
         .route("/udfs/:id", delete(delete_udf))
-        .route("/pipelines", post(create_pipeline))
-        .route("/pipelines/preview", post(create_preview_pipeline))
-        .route("/pipelines", get(get_pipelines))
-        .route("/jobs", get(get_jobs))
-        .route("/pipelines/validate_query", post(validate_query))
-        .route("/pipelines/:id", put(put_pipeline))
-        .route("/pipelines/:id", patch(patch_pipeline))
-        .route("/pipelines/:id", get(get_pipeline))
-        .route("/pipelines/:id/restart", post(restart_pipeline))
-        .route("/pipelines/:id", delete(delete_pipeline))
-        .nest("/pipelines/:id/jobs", jobs_routes)
+        .merge(pipeline_and_job_routes())
         .fallback(api_fallback);
 
-    Router::new()
+    Ok(Router::new()
         .merge(
             SwaggerUi::new("/api/v1/swagger-ui")
                 .url("/api/v1/api-docs/openapi.json", ApiDoc::openapi()),
         )
         .nest("/api/v1", api_routes)
+        .nest(
+            "/api/v1/admin/organizations/:organization_id",
+            pipeline_and_job_routes(),
+        )
         .fallback(static_handler)
         .with_state(AppState { database })
-        .layer(cors)
+        .layer(cors))
 }

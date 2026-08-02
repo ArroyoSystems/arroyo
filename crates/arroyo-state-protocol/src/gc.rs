@@ -2,18 +2,29 @@ use crate::ProtocolPaths;
 use crate::store::{ProtocolStore, StoreError, read_protobuf};
 use crate::types::{CheckpointRef, Epoch, Generation, ProtocolError};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, GlobalKeyedTableTaskCheckpointMetadata, TableCheckpointMetadata, TableEnum,
+    CheckpointManifest, ExpiringKeyedTimeTableCheckpointMetadata,
+    GlobalKeyedTableTaskCheckpointMetadata, TableCheckpointMetadata, TableEnum,
 };
-use futures::future::join_all;
+use futures::{TryStreamExt, stream};
 use prost::Message;
 use std::collections::HashSet;
 use std::path::Path;
-use tracing::{debug, warn};
+use tracing::debug;
+
+const MAX_CONCURRENT_DELETES: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct CheckpointOwner {
     pub generation: Generation,
     pub epoch: Epoch,
+}
+
+/// A fully classified GC operation. Classification must complete before any deletion begins.
+struct CleanupPlan {
+    /// Checkpoints below the retention boundary, ordered newest to oldest by traversal order.
+    old_checkpoints: Vec<CheckpointOwner>,
+    /// Deduplicated files referenced only by old checkpoints.
+    data_files: Vec<CheckpointRef>,
 }
 
 pub async fn cleanup_leader_checkpoints<S>(
@@ -25,10 +36,42 @@ pub async fn cleanup_leader_checkpoints<S>(
 where
     S: ProtocolStore + ?Sized,
 {
-    let history =
-        collect_history_and_clean_checkpoint_files(store, paths, head, new_min_epoch).await?;
+    let cleanup = classify_checkpoint_history(store, head, new_min_epoch).await?;
 
-    for c in history.iter().rev() {
+    let data_directories: HashSet<_> = cleanup
+        .data_files
+        .iter()
+        .filter_map(|f| Path::new(f.as_str()).parent().and_then(|p| p.to_str()))
+        .map(|f| f.to_string())
+        .collect();
+    let checkpoint_directories: HashSet<_> = data_directories
+        .iter()
+        .filter_map(|directory| Path::new(directory).parent().and_then(|p| p.to_str()))
+        .map(|directory| directory.to_string())
+        .collect();
+
+    let mut objects = cleanup.data_files;
+    for checkpoint in &cleanup.old_checkpoints {
+        objects.push(paths.committed_marker(checkpoint.generation, checkpoint.epoch));
+        objects.push(paths.epoch_record(checkpoint.epoch));
+    }
+
+    delete_objects(store, objects).await?;
+
+    for directory in data_directories {
+        store.delete_directory(&directory).await;
+    }
+
+    // A carried-forward file may live under a checkpoint whose manifest was deleted by an earlier
+    // GC pass. Retry its checkpoint directory now that the file and its operator directory are
+    // gone. Local storage removes only empty directories; object stores treat this as a no-op.
+    for directory in checkpoint_directories {
+        store.delete_directory(&directory).await;
+    }
+
+    // Traversal records checkpoints newest-to-oldest. Delete manifests in reverse so a failed
+    // cleanup cannot create a gap that makes still-reachable older checkpoints undiscoverable.
+    for c in cleanup.old_checkpoints.iter().rev() {
         debug!(
             generation = c.generation.0,
             epoch = c.epoch.0,
@@ -45,25 +88,35 @@ where
     Ok(())
 }
 
-/// Traverses backwards through the checkpoint history, doing two things:
-/// 1. Finding and cleaning data files for GC'able checkpoints
-/// 2. Collecting a record of ownership for each checkpoint
+async fn delete_objects<S>(store: &S, objects: Vec<CheckpointRef>) -> Result<(), StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    stream::iter(objects.into_iter().map(Ok::<_, StoreError>))
+        .try_for_each_concurrent(MAX_CONCURRENT_DELETES, |object| async move {
+            store.delete_object(&object).await
+        })
+        .await
+}
+
+/// Traverses the reachable checkpoint history and classifies all files before deleting anything.
 ///
-/// We do it in this order because we must delete metadata files by going forward, to prevent
-/// gaps from forming in case of failure which would orphan older files. However, we do not
-/// want to re-read or retain the metadata in order to do file deletion as that could exhaust
-/// memory, so we opportunistically delete data files.
-async fn collect_history_and_clean_checkpoint_files<S>(
+/// Data files referenced by retained checkpoints are protected even if an older checkpoint also
+/// references them. This intentionally buffers deduplicated candidate and protected file refs for
+/// the reachable chain, but not full manifests. That memory cost is required to safely handle
+/// cumulative table metadata such as expiring keyed-time tables.
+async fn classify_checkpoint_history<S>(
     store: &S,
-    paths: &ProtocolPaths,
     current: CheckpointRef,
     new_min_epoch: Epoch,
-) -> Result<Vec<CheckpointOwner>, StoreError>
+) -> Result<CleanupPlan, StoreError>
 where
     S: ProtocolStore + ?Sized,
 {
     let mut head = true;
-    let mut history = vec![];
+    let mut old_checkpoints = vec![];
+    let mut candidate_files = HashSet::new();
+    let mut protected_files = HashSet::new();
     let mut seen = HashSet::new();
     let mut next = Some(current);
 
@@ -80,12 +133,20 @@ where
             break;
         };
 
-        head = false;
-
         let owner = CheckpointOwner {
             generation: Generation(manifest.generation),
             epoch: Epoch(manifest.epoch),
         };
+
+        if head && owner.epoch < new_min_epoch {
+            return Err(ProtocolError::CheckpointGcMinEpochBeyondHead {
+                head_epoch: owner.epoch,
+                new_min_epoch,
+            }
+            .into());
+        }
+
+        head = false;
 
         if !seen.insert(owner) {
             return Err(ProtocolError::CheckpointCycle {
@@ -95,15 +156,12 @@ where
             .into());
         }
 
+        let files = checkpoint_data_files(&checkpoint_ref, &manifest)?;
         if manifest.epoch < *new_min_epoch {
-            history.push(owner);
-            if let Err(e) = clean_checkpoint(store, paths, &checkpoint_ref, &manifest).await {
-                warn!(
-                    checkpoint = checkpoint_ref.as_str(),
-                    error =? e,
-                    "failed to clean checkpoint"
-                );
-            }
+            old_checkpoints.push(owner);
+            candidate_files.extend(files);
+        } else {
+            protected_files.extend(files);
         }
 
         next = manifest
@@ -112,20 +170,19 @@ where
             .transpose()?;
     }
 
-    Ok(history)
+    candidate_files.retain(|file| !protected_files.contains(file));
+
+    Ok(CleanupPlan {
+        old_checkpoints,
+        data_files: candidate_files.into_iter().collect(),
+    })
 }
 
-/// cleans a checkpoint but leaves the metadata file in place
-async fn clean_checkpoint<S>(
-    store: &S,
-    paths: &ProtocolPaths,
+fn checkpoint_data_files(
     manifest_path: &CheckpointRef,
     checkpoint: &CheckpointManifest,
-) -> Result<(), StoreError>
-where
-    S: ProtocolStore + ?Sized,
-{
-    let mut to_delete = vec![];
+) -> Result<Vec<CheckpointRef>, StoreError> {
+    let mut files = vec![];
     for operator in &checkpoint.operators {
         for (table_name, metadata) in &operator.table_checkpoint_metadata {
             let op_metadata =
@@ -142,33 +199,12 @@ where
                 table_name,
                 manifest_path,
                 metadata,
-                &mut to_delete,
+                &mut files,
             )?;
         }
     }
 
-    let directories: HashSet<_> = to_delete
-        .iter()
-        .filter_map(|f| Path::new(f.as_str()).parent().and_then(|p| p.to_str()))
-        .map(|f| f.to_string())
-        .collect();
-
-    to_delete
-        .push(paths.committed_marker(Generation(checkpoint.generation), Epoch(checkpoint.epoch)));
-
-    to_delete.push(paths.epoch_record(Epoch(checkpoint.epoch)));
-
-    for r in join_all(to_delete.iter().map(|f| store.delete_object(f))).await {
-        r?;
-    }
-
-    for d in directories {
-        // this will loop over duplicate directory when there are multiples tables per operator,
-        // but it's a no-op if the directory is already deleted
-        store.delete_directory(&d).await;
-    }
-
-    Ok(())
+    Ok(files)
 }
 
 fn table_checkpoint_data_files(
@@ -200,14 +236,16 @@ fn table_checkpoint_data_files(
             }
         }
         TableEnum::ExpiringKeyedTimeTable => {
-            return Err(StoreError::InvalidProtobuf {
-                path: metadata_path.clone(),
-                msg: format!(
-                    "table metadata for operator '{}' table '{}' has table type \
-                ExpiringKeyedTimeTable, which is not yet supported in leader mode",
-                    operator_id, table_name
-                ),
-            });
+            let metadata =
+                ExpiringKeyedTimeTableCheckpointMetadata::decode(metadata.data.as_slice())
+                    .map_err(|e| StoreError::DecodeProtobuf {
+                        path: metadata_path.clone(),
+                        source: e,
+                    })?;
+
+            for file in metadata.files {
+                files.push(CheckpointRef::new(file.file)?);
+            }
         }
     }
 

@@ -5,7 +5,8 @@ use axum::extract::{Path, State};
 use crate::queries::api_queries;
 use crate::rest::AppState;
 use crate::rest_utils::{
-    BearerAuth, ErrorResp, authenticate, log_and_map, not_found, service_unavailable,
+    BearerAuth, ErrorResp, PipelineJobPath, authenticate, log_and_map, not_found,
+    service_unavailable,
 };
 use arroyo_rpc::api_types::OperatorMetricGroupCollection;
 use arroyo_rpc::api_types::metrics::OperatorMetricGroup;
@@ -32,7 +33,10 @@ use tracing::error;
 pub async fn get_operator_metric_groups(
     State(state): State<AppState>,
     bearer_auth: BearerAuth,
-    Path((pipeline_pub_id, job_pub_id)): Path<(String, String)>,
+    Path(PipelineJobPath {
+        id: pipeline_pub_id,
+        job_id: job_pub_id,
+    }): Path<PipelineJobPath>,
 ) -> Result<Json<OperatorMetricGroupCollection>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 

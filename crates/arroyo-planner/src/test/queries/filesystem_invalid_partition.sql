@@ -37,5 +37,5 @@ create table events_sink (
     type = 'sink'
 );
 
-INSERT INTO events
+INSERT INTO events_sink
 SELECT * from events;

@@ -28,6 +28,11 @@ checkpoints-to-compact = 4
 bind-address = "0.0.0.0"
 http-port = 5115
 
+[api.cors]
+origin-policy = "any"
+allowed-origins = []
+allow-credentials = false
+
 [controller]
 bind-address = "0.0.0.0"
 rpc-port = 5116

@@ -377,7 +377,7 @@ where
 }
 
 async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
-    let _guard = arroyo_server_common::init_logging("migrate");
+    let _guard = arroyo_server_common::init_logging("migrate", &[]);
 
     let mut client = if let Some(wait) = wait {
         info!("Waiting for database to be ready to run migrations");
@@ -443,7 +443,7 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
 }
 
 async fn start_control_plane(service: CPService) {
-    let _guard = arroyo_server_common::init_logging(service.name());
+    let _guard = arroyo_server_common::init_logging(service.name(), &[]);
 
     let config = config::config();
 
@@ -494,11 +494,8 @@ async fn start_worker() {
     let server =
         WorkerServer::from_config(shutdown.guard("worker")).expect("Could not start worker");
 
-    let _guard = arroyo_server_common::init_logging(&format!(
-        "worker-{}-{}",
-        server.id().0,
-        server.job_id()
-    ));
+    let _guard =
+        arroyo_server_common::init_logging("worker", &[("worker_id", &server.id().to_string())]);
 
     shutdown.spawn_task("admin", start_admin_server("worker"));
     let token = shutdown.token();
@@ -516,7 +513,7 @@ async fn start_node() {
     let shutdown = Shutdown::new("node", SignalBehavior::Handle);
     let id = arroyo_node::start_server(shutdown.guard("node")).await;
 
-    let _guard = arroyo_server_common::init_logging(&format!("node-{}", id.0,));
+    let _guard = arroyo_server_common::init_logging("node", &[("node_id", &id)]);
 
     shutdown.spawn_task("admin", start_admin_server("worker"));
 
@@ -524,7 +521,7 @@ async fn start_node() {
 }
 
 async fn visualize(query: Input, open: bool) {
-    let _guard = arroyo_server_common::init_logging("visualize");
+    let _guard = arroyo_server_common::init_logging("visualize", &[]);
 
     let query = std::io::read_to_string(query).expect("Failed to read query");
 

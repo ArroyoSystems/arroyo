@@ -25,6 +25,7 @@ impl Recovering {
     pub async fn cleanup_job_controller(
         job_controller: &mut JobController,
         job_id: &str,
+        pipeline_id: &str,
         rx: &mut Receiver<JobMessage>,
     ) {
         // first try to stop it gracefully
@@ -33,7 +34,7 @@ impl Recovering {
         }
 
         // stop the job
-        info!(message = "stopping job", job_id);
+        info!(message = "stopping job", %job_id, pipeline_id);
         let start = Instant::now();
         match job_controller.stop_job(StopMode::Immediate).await {
             Ok(_) => {
@@ -42,7 +43,8 @@ impl Recovering {
                 {
                     info!(
                         message = "job stopped",
-                        job_id,
+                        %job_id,
+                        pipeline_id,
                         duration = start.elapsed().as_secs_f32()
                     );
                 }
@@ -51,20 +53,40 @@ impl Recovering {
                 warn!(
                     message = "failed to stop job",
                     error = format!("{:?}", e),
-                    job_id,
+                    %job_id,
+                    pipeline_id,
                 );
             }
         }
     }
 
-    pub async fn cleanup_leader(leader_manager: &mut LeaderManager, job_id: &str) {
-        let status = match leader_manager.poll_leader_status().await {
-            Ok(status) => status,
-            Err(e) => {
-                warn!(job_id, error =? e, "failed to get leader status while recovering");
-                return;
-            }
-        };
+    pub async fn cleanup_leader(
+        leader_manager: &mut LeaderManager,
+        job_id: &str,
+        pipeline_id: &str,
+    ) {
+        let status =
+            match timeout(Duration::from_secs(30), leader_manager.poll_leader_status()).await {
+                Ok(Ok(status)) => status,
+                Ok(Err(e)) => {
+                    warn!(
+                        %job_id,
+                        pipeline_id,
+                        error =? e,
+                        "failed to get leader status while recovering"
+                    );
+                    return;
+                }
+                Err(e) => {
+                    warn!(
+                        %job_id,
+                        pipeline_id,
+                        error =? e,
+                        "timed out polling leader status while recovering"
+                    );
+                    return;
+                }
+            };
 
         let expected_state = match JobState::try_from(status.job_state) {
             Ok(JobState::JobFailed) => {
@@ -72,29 +94,28 @@ impl Recovering {
             }
             Ok(JobState::JobUnknown) | Err(_) => {
                 warn!(
-                    job_id,
-                    "received unknown job state {} while cleaning job", status.job_state
+                    %job_id,
+                    pipeline_id,
+                    "received unknown job state {} while cleaning job",
+                    status.job_state
                 );
                 return;
             }
             Ok(JobState::JobInitializing) => {
-                warn!(job_id, "job is in initializing while cleaning");
+                warn!(%job_id, pipeline_id, "job is in initializing while cleaning");
                 return;
             }
             Ok(JobState::JobRunning) => {
                 // shutdown
-                info!(job_id, "job is still running in recovering, shutting down");
-                if retry!(
-                    leader_manager
-                        .stop_leader(JobStopMode::JobStopImmediate)
-                        .await,
-                    10,
-                    Duration::from_millis(200),
-                    Duration::from_secs(2),
-                    |e| warn!(job_id, err = ?e, "failed to stop job")
-                )
-                .is_err()
+                info!(
+                    %job_id,
+                    pipeline_id, "job is still running in recovering, shutting down"
+                );
+                if let Err(e) = leader_manager
+                    .stop_leader(JobStopMode::JobStopImmediate)
+                    .await
                 {
+                    warn!(%job_id, pipeline_id, error =? e, "failed to stop leader");
                     return;
                 }
                 JobState::JobStopped
@@ -114,16 +135,17 @@ impl Recovering {
                 return;
             }
             Ok(JobState::JobFailing) => {
-                info!(job_id, "job is failing in recovering, shutting down");
-                let _ = retry!(
-                    leader_manager
-                        .stop_leader(JobStopMode::JobStopImmediate)
-                        .await,
-                    5,
-                    Duration::from_millis(200),
-                    Duration::from_secs(2),
-                    |e| warn!(job_id, err = ?e, "failed to stop failing job")
+                info!(
+                    %job_id,
+                    pipeline_id, "job is failing in recovering, shutting down"
                 );
+                if let Err(e) = leader_manager
+                    .stop_leader(JobStopMode::JobStopImmediate)
+                    .await
+                {
+                    warn!(%job_id, pipeline_id, error =? e, "failed to stop leader");
+                    return;
+                }
                 JobState::JobFailed
             }
         };
@@ -134,7 +156,13 @@ impl Recovering {
         )
         .await
         {
-            warn!(job_id, error = ?e, ?expected_state, "timed out waiting for state during cleanup");
+            warn!(
+                %job_id,
+                pipeline_id,
+                error = ?e,
+                ?expected_state,
+                "timed out waiting for state during cleanup"
+            );
         }
     }
 
@@ -148,7 +176,11 @@ impl Recovering {
             return Ok(());
         }
 
-        info!(message = "tearing down workers", job_id = *ctx.config.id);
+        info!(
+            message = "tearing down workers",
+            job_id = %ctx.config.id,
+            pipeline_id = *ctx.pipeline_info.pipeline_id
+        );
 
         ctx.scheduler
             .stop_workers(&ctx.config.id, Some(ctx.status.generation), true)
@@ -158,8 +190,18 @@ impl Recovering {
     pub async fn cleanup<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
         // attempt to shutdown the job cleanly
         match (ctx.job_controller.as_mut(), ctx.leader_manager.as_mut()) {
-            (Some(jc), None) => Self::cleanup_job_controller(jc, &ctx.config.id, ctx.rx).await,
-            (None, Some(lm)) => Self::cleanup_leader(lm, &ctx.config.id).await,
+            (Some(jc), None) => {
+                Self::cleanup_job_controller(
+                    jc,
+                    &ctx.config.id,
+                    &ctx.pipeline_info.pipeline_id,
+                    ctx.rx,
+                )
+                .await
+            }
+            (None, Some(lm)) => {
+                Self::cleanup_leader(lm, &ctx.config.id, &ctx.pipeline_info.pipeline_id).await
+            }
             (Some(_), Some(_)) => unreachable!("both job controller and leader manager are set!"),
             (None, None) => {
                 // somehow we got here before scheduling set the job controller / leader manager
@@ -177,7 +219,12 @@ impl Recovering {
             10,
             Duration::from_millis(200),
             Duration::from_secs(10),
-            |e| warn!(job_id = *ctx.config.id, error =? e, "failed to tear down cluster")
+            |e| warn!(
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                error =? e,
+                "failed to tear down cluster"
+            )
         )?;
 
         Ok(())
@@ -212,10 +259,16 @@ impl State for Recovering {
         }
 
         // backoff
-        state_backoff(ctx.status.restarts as usize).await;
+        state_backoff(
+            ctx.status.restarts as usize,
+            &ctx.config.id,
+            &ctx.pipeline_info.pipeline_id,
+        )
+        .await;
 
         info!(
-            job_id = *ctx.config.id,
+            job_id = %ctx.config.id,
+            pipeline_id = *ctx.pipeline_info.pipeline_id,
             retries_remaining = pipeline_config.allowed_restarts - ctx.status.restarts,
             "recovering pipeline"
         );

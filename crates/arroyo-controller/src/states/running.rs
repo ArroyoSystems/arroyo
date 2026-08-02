@@ -11,6 +11,7 @@ use crate::states::recovering::Recovering;
 use crate::states::rescaling::Rescaling;
 use crate::states::restarting::Restarting;
 use crate::states::stop_if_desired_running;
+use crate::types::public::RestartMode;
 use crate::{job_controller::ControllerProgress, states::StateError};
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
@@ -59,6 +60,16 @@ impl State for Running {
                                 }));
                             }
 
+                            // env_vars and scheduler_config are only applied when workers are
+                            // (re)scheduled, so a change to either while the job is running
+                            // requires a restart to take effect.
+                            if c.scheduler_config != ctx.config.scheduler_config
+                                || c.env_vars != ctx.config.env_vars {
+                                return Ok(Transition::next(*self, Restarting {
+                                    mode: RestartMode::safe
+                                }));
+                            }
+
                             let job_controller = ctx.job_controller.as_mut().unwrap();
 
                             for (node_id, p) in &c.parallelism_overrides {
@@ -91,8 +102,12 @@ impl State for Running {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
                         if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(message = "Failed to update status", error = format!("{:?}", e),
-                                job_id = *ctx.config.id);
+                            error!(
+                                message = "Failed to update status",
+                                error = format!("{:?}", e),
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             ctx.status.restarts = restarts;
                             // we'll try again on the next round
                         }
@@ -122,7 +137,12 @@ impl State for Running {
                             return ctx.handle_task_error(self, event).await;
                         }
                         Err(err) => {
-                            error!(message = "error while running", error = format!("{:?}", err), job_id = *ctx.config.id);
+                            error!(
+                                message = "error while running",
+                                error = format!("{:?}", err),
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             log_event!("running_error", {
                                 "service": "controller",
                                 "job_id": ctx.config.id,

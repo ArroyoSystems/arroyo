@@ -124,12 +124,13 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
     let config = config();
     let endpoint = config.compiler_endpoint();
 
-    let channel = arroyo_rpc::connect_grpc("api", endpoint, &config.api.tls, &config.compiler.tls)
-        .await
-        .map_err(|e| {
-            error!("Failed to connect to compiler service: {}", e);
-            service_unavailable("compiler-service")
-        })?;
+    let channel =
+        arroyo_rpc::connect_grpc("api", endpoint, &config.api.tls, &config.compiler.tls, None)
+            .await
+            .map_err(|e| {
+                error!("Failed to connect to compiler service: {}", e);
+                service_unavailable("compiler-service")
+            })?;
 
     Ok(CompilerGrpcClient::new(channel))
 }
@@ -138,7 +139,7 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     let config = config();
     let addr = SocketAddr::new(config.api.bind_address, config.api.http_port);
 
-    let mut app = rest::create_rest_app(database).layer(
+    let mut app = rest::create_rest_app(database)?.layer(
         CompressionLayer::new().zstd(true).compress_when(
             DefaultPredicate::new()
                 // compression doesn't work for server-sent events

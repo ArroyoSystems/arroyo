@@ -3,6 +3,7 @@ use std::sync::Arc;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
     UPDATING_META_FIELD,
+    api_types::connections::ConnectionType,
     df::{ArroyoSchema, ArroyoSchemaRef},
 };
 use datafusion::common::{DFSchemaRef, Result, TableReference, plan_err};
@@ -46,6 +47,13 @@ impl SinkExtension {
             .has_column_with_unqualified_name(UPDATING_META_FIELD);
         match &table {
             Table::ConnectorTable(connector_table) => {
+                if connector_table.connection_type == ConnectionType::Source {
+                    return plan_err!(
+                        "attempted to insert into table '{}', but it is a source",
+                        connector_table.name
+                    );
+                }
+
                 match (input_is_updating, connector_table.is_updating()) {
                     (_, true) => {
                         let to_debezium_extension =

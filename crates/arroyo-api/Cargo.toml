@@ -41,6 +41,7 @@ utoipa-swagger-ui = { version = "7", features = ["axum"] }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+url = { workspace = true }
 
 # logging
 tracing = { workspace = true }

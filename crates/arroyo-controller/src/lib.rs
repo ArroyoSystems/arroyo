@@ -28,6 +28,8 @@ use arroyo_server_common::wrap_start;
 use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
 use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use cornucopia_async::DatabaseSource;
+use lazy_static::lazy_static;
+use prometheus::{IntGaugeVec, register_int_gauge_vec};
 use states::{Created, State, StateMachine};
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -52,6 +54,43 @@ mod states;
 
 const TTL_PIPELINE_CLEANUP_TIME: Duration = Duration::from_secs(60 * 60);
 
+lazy_static! {
+    static ref JOBS_BY_STATE: IntGaugeVec = register_int_gauge_vec!(
+        "arroyo_controller_jobs",
+        "Current number of jobs by controller state",
+        &["state"]
+    )
+    .unwrap();
+}
+
+fn metric_job_state<'a>(state: Option<&'a str>, failure_domain: Option<&str>) -> &'a str {
+    let state = state.unwrap_or("Created");
+    if state == "Failed" && failure_domain == Some("user") {
+        "UserFailed"
+    } else {
+        state
+    }
+}
+
+fn job_state_counts<'a>(
+    jobs: impl Iterator<Item = (Option<&'a str>, Option<&'a str>)>,
+) -> HashMap<&'a str, i64> {
+    let mut counts = HashMap::new();
+    for (state, failure_domain) in jobs {
+        *counts
+            .entry(metric_job_state(state, failure_domain))
+            .or_default() += 1;
+    }
+    counts
+}
+
+fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
+    JOBS_BY_STATE.reset();
+    for (state, count) in counts {
+        JOBS_BY_STATE.with_label_values(&[state]).set(*count);
+    }
+}
+
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
@@ -72,6 +111,8 @@ pub struct JobConfig {
     parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
     restart_mode: RestartMode,
+    /// Minimum checkpoint epoch in controller mode; generation to start without state in leader
+    /// mode.
     ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
@@ -193,16 +234,18 @@ impl ControllerGrpc for ControllerServer {
         &self,
         request: Request<RegisterWorkerReq>,
     ) -> Result<Response<RegisterWorkerResp>, Status> {
-        info!(
-            "Worker registered: {:?} -- {:?}",
-            request.get_ref(),
-            request.remote_addr()
-        );
-
+        let remote_addr = request.remote_addr();
         let req = request.into_inner();
         let worker = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        info!(
+            job_id = %worker.job_id,
+            pipeline_id = worker.pipeline_id,
+            "Worker registered: {:?} -- {:?}",
+            worker,
+            remote_addr
+        );
 
         self.send_to_job_queue(
             &worker.job_id,
@@ -225,11 +268,17 @@ impl ControllerGrpc for ControllerServer {
         request: Request<TaskStartedReq>,
     ) -> Result<Response<TaskStartedResp>, Status> {
         let req = request.into_inner();
-        info!("task started: {:?}", req);
-
         let ctx = req
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        info!(
+            job_id = %ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            worker_id = ctx.worker_id,
+            task_id = req.task_id,
+            subtask_idx = req.subtask_idx,
+            "task started"
+        );
 
         self.send_to_job_queue(
             &ctx.job_id,
@@ -354,8 +403,12 @@ impl ControllerGrpc for ControllerServer {
             .worker_context
             .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
         info!(
+            job_id = %ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
             "Worker {} initialization completed: success={}, error={:?}",
-            ctx.worker_id, req.success, req.error_message
+            ctx.worker_id,
+            req.success,
+            req.error_message
         );
 
         self.send_to_job_queue(
@@ -380,8 +433,17 @@ impl JobControllerGrpc for ControllerServer {
     ) -> Result<Response<TaskCheckpointEventResp>, Status> {
         let req = request.into_inner();
 
-        debug!("received task checkpoint event {:?}", req);
-        let job_id = job_id_from_context(&req.worker_context)?;
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        debug!(
+            job_id = %ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            "received task checkpoint event {:?}",
+            req
+        );
+        let job_id = ctx.job_id.clone();
 
         self.send_to_job_queue(
             &job_id,
@@ -398,8 +460,17 @@ impl JobControllerGrpc for ControllerServer {
     ) -> Result<Response<TaskCheckpointCompletedResp>, Status> {
         let req = request.into_inner();
 
-        debug!("received task checkpoint completed {:?}", req);
-        let job_id = job_id_from_context(&req.worker_context)?;
+        let ctx = req
+            .worker_context
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
+        debug!(
+            job_id = %ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
+            "received task checkpoint completed {:?}",
+            req
+        );
+        let job_id = ctx.job_id.clone();
 
         self.send_to_job_queue(
             &job_id,
@@ -497,7 +568,8 @@ impl JobControllerGrpc for ControllerServer {
             .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing error"))?;
 
         info!(
-            job_id = ctx.job_id,
+            job_id = %ctx.job_id,
+            pipeline_id = ctx.pipeline_id,
             operator_id = err.operator_id,
             message = "operator error",
             error_message = err.error,
@@ -579,22 +651,28 @@ impl ControllerServer {
     }
 
     async fn send_to_job_queue(&self, job_id: &str, msg: JobMessage) -> Result<(), Status> {
-        let mut jobs = self.job_state.lock().await;
+        // Keep per-job backpressure from holding the global job map lock.
+        let tx = {
+            let jobs = self.job_state.lock().await;
+            let Some(sm) = jobs.get(job_id) else {
+                warn!(message = "Received message for unknown job id", %job_id);
+                return Err(Status::failed_precondition(format!(
+                    "No job with id {job_id}"
+                )));
+            };
 
-        if let Some(sm) = jobs.get_mut(job_id) {
-            if let Err(e) = sm.send(msg).await {
-                Err(Status::failed_precondition(format!(
-                    "Cannot handle message for {job_id}: {e}"
-                )))
-            } else {
-                Ok(())
-            }
-        } else {
-            warn!(message = "Received message for unknown job id", job_id);
-            Err(Status::failed_precondition(format!(
-                "No job with id {job_id}"
-            )))
-        }
+            sm.sender().ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "Cannot handle message for {job_id}: State machine is inactive"
+                ))
+            })?
+        };
+
+        tx.send(msg).await.map_err(|_| {
+            Status::failed_precondition(format!(
+                "Cannot handle message for {job_id}: State machine is inactive"
+            ))
+        })
     }
 
     fn start_updater(&self, guard: ShutdownGuard) {
@@ -612,6 +690,12 @@ impl ControllerServer {
             while !token.is_cancelled() {
                 let client = db.client().await?;
                 let res = queries::controller_queries::fetch_all_jobs(&client).await?;
+                let state_counts = job_state_counts(
+                    res.iter()
+                        .map(|p| (p.state.as_deref(), p.failure_domain.as_deref())),
+                );
+                update_job_state_metrics(&state_counts);
+
                 for p in res {
                     let id = Arc::new(p.id);
                     let config = JobConfig {
@@ -644,7 +728,7 @@ impl ControllerServer {
 
                     let state_context: StateContext =
                         serde_json::from_value(p.state_context.clone()).unwrap_or_else(|e| {
-                            warn!(job_id = *id, original =? p.state_context, error =? e,
+                            warn!(job_id = %id, original =? p.state_context, error =? e,
                                 "failed to deserialize state context");
                             StateContext {
                                 version: 1,
@@ -764,5 +848,41 @@ impl ControllerServer {
         }
 
         Ok(local_addr.port())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prometheus::core::Collector;
+
+    use super::*;
+
+    #[test]
+    fn metric_job_states_preserve_raw_states() {
+        for state in ["Created", "Running", "Finished", "Unexpected"] {
+            assert_eq!(metric_job_state(Some(state), None), state);
+        }
+        assert_eq!(metric_job_state(None, None), "Created");
+
+        assert_eq!(metric_job_state(Some("Failed"), Some("user")), "UserFailed");
+        assert_eq!(metric_job_state(Some("Failed"), Some("internal")), "Failed");
+    }
+
+    #[test]
+    fn job_state_metrics_clear_absent_states() {
+        let counts = job_state_counts(
+            [
+                (Some("Running"), None),
+                (Some("Running"), None),
+                (Some("Failed"), Some("user")),
+            ]
+            .into_iter(),
+        );
+        update_job_state_metrics(&counts);
+        assert_eq!(JOBS_BY_STATE.with_label_values(&["Running"]).get(), 2);
+        assert_eq!(JOBS_BY_STATE.with_label_values(&["UserFailed"]).get(), 1);
+
+        update_job_state_metrics(&HashMap::new());
+        assert!(JOBS_BY_STATE.collect()[0].get_metric().is_empty());
     }
 }

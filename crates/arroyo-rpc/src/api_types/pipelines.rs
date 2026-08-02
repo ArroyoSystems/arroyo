@@ -56,6 +56,15 @@ pub struct PipelinePatch {
     pub parallelism: Option<u64>,
     pub checkpoint_interval_micros: Option<u64>,
     pub stop: Option<StopType>,
+    /// Per-job environment variables forwarded to workers.
+    pub env_vars: Option<HashMap<String, String>>,
+    /// Per-job scheduler configuration overlay. The shape mirrors the
+    /// controller's global scheduler config (e.g. the
+    /// `kubernetes-scheduler.*` block) and is merged on top of it at
+    /// scheduling time. An omitted field, `null`, or an empty object
+    /// all mean "use the controller's global scheduler config
+    /// unchanged".
+    pub scheduler_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

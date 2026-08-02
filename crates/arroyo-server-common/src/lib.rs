@@ -54,9 +54,10 @@ pub const VERSION: &str = "0.16.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> Option<WorkerGuard> {
+pub fn init_logging(name: &str, tags: &[(&str, &str)]) -> Option<WorkerGuard> {
     init_logging_with_filter(
         name,
+        tags,
         EnvFilter::builder()
             .with_default_directive(LevelFilter::INFO.into())
             .from_env_lossy(),
@@ -80,7 +81,11 @@ macro_rules! register_log {
     }};
 }
 
-pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+pub fn init_logging_with_filter(
+    name: &str,
+    tags: &[(&str, &str)],
+    filter: EnvFilter,
+) -> Option<WorkerGuard> {
     init_event_logger(Arc::new(AnalyticsEventLogger::new()));
 
     if let Err(e) = LogTracer::init() {
@@ -137,6 +142,15 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
             }
             if config().logging.enable_file_name {
                 layer.with_file("filename");
+            }
+
+            layer.add_static_field("arroyo_service", serde_json::json!(name));
+            if let Ok(pipeline_id) = env::var(arroyo_types::PIPELINE_ID_ENV) {
+                layer.add_static_field("pipeline_id", serde_json::json!(pipeline_id));
+            }
+
+            for (k, v) in tags {
+                layer.add_static_field(*k, json!(*v));
             }
 
             // add static fields
@@ -330,17 +344,16 @@ fn require_profiling_activated(
     }
 }
 
-pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
-    let config = config();
-    let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
-
+fn admin_router(
+    service: &str,
+    auth_mode: &ApiAuthMode,
+    allow_unauthenticated_metrics: bool,
+) -> Router {
     let state = Arc::new(AdminState {
         name: format!("arroyo-{service}"),
     });
-    let mut app = Router::new()
-        .route("/status", get(status))
+    let mut protected = Router::new()
         .route("/name", get(root))
-        .route("/metrics", get(metrics))
         .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
         .route("/config", get(config_route))
@@ -348,9 +361,30 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
-    if let ApiAuthMode::StaticApiKey { api_key } = &config.admin.auth_mode {
-        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+    if !allow_unauthenticated_metrics {
+        protected = protected.route("/metrics", get(metrics));
+    }
+
+    if let ApiAuthMode::StaticApiKey { api_key } = auth_mode {
+        protected = protected.layer(ValidateRequestHeaderLayer::bearer(api_key));
     };
+
+    // /status is always reachable without auth (e.g. for liveness probes).
+    let mut public = Router::new().route("/status", get(status));
+    if allow_unauthenticated_metrics {
+        public = public.route("/metrics", get(metrics));
+    }
+    public.merge(protected)
+}
+
+pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
+    let config = config();
+    let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
+    let app = admin_router(
+        service,
+        &config.admin.auth_mode,
+        config.admin.allow_unauthenticated_metrics,
+    );
 
     let tls_config =
         tls::create_http_tls_config(&config.admin.auth_mode, &config.admin.tls).await?;
@@ -520,4 +554,46 @@ pub async fn wrap_start(
                 .unwrap_or_else(|| e.to_string())
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    fn static_auth() -> ApiAuthMode {
+        toml::from_str(
+            r#"
+                type = "static-api-key"
+                api-key = "secret"
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_metrics_are_configurable() {
+        let response = admin_router("test", &static_auth(), false)
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let app = admin_router("test", &static_auth(), true);
+        let response = app
+            .clone()
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(Request::get("/details").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
 }

@@ -4,16 +4,34 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum_extra::TypedHeader;
-use axum_extra::headers::Authorization;
-use axum_extra::headers::authorization::Bearer;
-use tracing::{error, warn};
-
 use cornucopia_async::{DatabaseSource, DbError};
 use serde::{Deserialize, Serialize};
+use tracing::{error, warn};
 use utoipa::ToSchema;
 
-pub type BearerAuth = Option<TypedHeader<Authorization<Bearer>>>;
+pub type BearerAuth = cloud::BearerAuth;
+
+pub(crate) trait AuthRequest {
+    fn impersonated_organization_id(&self) -> Option<&str>;
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PipelinePath {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PipelineJobPath {
+    pub id: String,
+    pub job_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PipelineJobCheckpointPath {
+    pub id: String,
+    pub job_id: String,
+    pub epoch: u32,
+}
 
 const DEFAULT_ITEMS_PER_PAGE: u32 = 10;
 
@@ -109,7 +127,38 @@ pub(crate) async fn authenticate(
     db: &DatabaseSource,
     bearer_auth: BearerAuth,
 ) -> Result<AuthData, ErrorResp> {
-    cloud::authenticate(&db.client().await?, bearer_auth).await
+    let impersonated_organization_id = bearer_auth
+        .impersonated_organization_id()
+        .map(str::to_string);
+    let mut auth_data = cloud::authenticate(&db.client().await?, bearer_auth).await?;
+    apply_impersonated_organization(&mut auth_data, impersonated_organization_id)?;
+    Ok(auth_data)
+}
+
+fn apply_impersonated_organization(
+    auth_data: &mut AuthData,
+    impersonated_organization_id: Option<String>,
+) -> Result<(), ErrorResp> {
+    let Some(organization_id) = impersonated_organization_id else {
+        return Ok(());
+    };
+
+    if organization_id.is_empty() {
+        return Err(bad_request(
+            "organization_id path parameter must not be empty",
+        ));
+    }
+
+    if auth_data.role != "admin" {
+        warn!(role = %auth_data.role, "rejecting non-admin caller on org-scoped admin route");
+        return Err(ErrorResp {
+            status_code: StatusCode::FORBIDDEN,
+            message: "Admin role required".to_string(),
+        });
+    }
+
+    auth_data.organization_id = organization_id;
+    Ok(())
 }
 
 pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {
@@ -173,4 +222,57 @@ pub fn paginate_results<T>(results: Vec<T>, limit: u32) -> (Vec<T>, bool) {
     }
 
     (results, has_more)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OrgMetadata;
+
+    fn auth(role: &str, organization_id: &str) -> AuthData {
+        AuthData {
+            user_id: "user".to_string(),
+            organization_id: organization_id.to_string(),
+            role: role.to_string(),
+            org_metadata: OrgMetadata::default(),
+        }
+    }
+
+    #[test]
+    fn admin_can_impersonate_path_organization() {
+        let mut auth_data = auth("admin", "");
+
+        apply_impersonated_organization(&mut auth_data, Some("acct_42".to_string())).unwrap();
+
+        assert_eq!(auth_data.organization_id, "acct_42");
+    }
+
+    #[test]
+    fn tenant_cannot_impersonate_path_organization() {
+        let mut auth_data = auth("tenant", "acct_1");
+
+        let err = apply_impersonated_organization(&mut auth_data, Some("acct_2".to_string()))
+            .unwrap_err();
+
+        assert_eq!(err.status_code, StatusCode::FORBIDDEN);
+        assert_eq!(auth_data.organization_id, "acct_1");
+    }
+
+    #[test]
+    fn impersonated_organization_must_not_be_empty() {
+        let mut auth_data = auth("admin", "");
+
+        let err = apply_impersonated_organization(&mut auth_data, Some(String::new())).unwrap_err();
+
+        assert_eq!(err.status_code, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn missing_impersonation_keeps_authenticated_organization() {
+        let mut auth_data = auth("tenant", "acct_1");
+
+        apply_impersonated_organization(&mut auth_data, None).unwrap();
+
+        assert_eq!(auth_data.organization_id, "acct_1");
+    }
 }
