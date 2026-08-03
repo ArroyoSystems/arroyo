@@ -1,0 +1,22 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_7fdc4607321144::t_2be0f70b10edec 493
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_7fdc4607321144::t_37b3635766e933 150-155
+  s_7fdc4607321144::t_56e2526d1dfdeb 177-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "666eec483e98e7cc560c6adbf6722658261acc70",
+  "prompts": {},
+  "sessions": {
+    "s_7fdc4607321144": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03921bd20ffeH9EwIIRUaTmqmI",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
