@@ -47,7 +47,13 @@ async fn validate_query(path: &Path) {
     if fail {
         let err = result.unwrap_err();
         if let Some(error_message) = error_message {
-            let err: Vec<_> = err.error.split_whitespace().collect();
+            let err: Vec<_> = err
+                .diagnostics
+                .first()
+                .unwrap()
+                .message
+                .split_whitespace()
+                .collect();
             let err = err.join(" ");
             assert!(
                 err.contains(error_message),

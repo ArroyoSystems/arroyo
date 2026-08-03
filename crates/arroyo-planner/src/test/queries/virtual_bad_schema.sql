@@ -1,4 +1,4 @@
---fail=Schema error: No field named notfield. Valid fields are input.length.
+--fail='notfield' not found
 create table input (
     length JSON,
     diff INT GENERATED ALWAYS AS (notfield) STORED
