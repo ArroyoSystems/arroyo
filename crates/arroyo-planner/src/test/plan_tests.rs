@@ -47,8 +47,7 @@ async fn validate_query(path: &Path) {
     if fail {
         let err = result.unwrap_err();
         if let Some(error_message) = error_message {
-            let err_s = err.to_string();
-            let err: Vec<_> = err_s.split_whitespace().collect();
+            let err: Vec<_> = err.error.split_whitespace().collect();
             let err = err.join(" ");
             assert!(
                 err.contains(error_message),
@@ -56,7 +55,7 @@ async fn validate_query(path: &Path) {
             );
         }
     } else if let Err(e) = result {
-        println!("{e}");
-        panic!("{}", e);
+        println!("{e:?}");
+        panic!("{e:?}");
     }
 }

@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
 use crate::grpc as grpc_proto;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -17,7 +16,34 @@ pub struct ValidateQueryPost {
 #[serde(rename_all = "snake_case")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
-    pub errors: Vec<String>,
+    pub errors: Vec<SqlDiagnostic>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlLocation {
+    pub line: u64,
+    pub column: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlSpan {
+    pub start: SqlLocation,
+    pub end: SqlLocation,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlDiagnostic {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<SqlSpan>,
+}
+impl SqlDiagnostic {
+    pub fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]

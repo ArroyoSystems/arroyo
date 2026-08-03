@@ -1,4 +1,5 @@
 use crate::{AuthData, cloud};
+use arroyo_planner::PlannerError;
 use arroyo_rpc::log_event;
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -64,6 +65,20 @@ pub fn map_delete_err(name: &str, user: &str, error: DbError) -> ErrorResp {
         ))
     } else {
         error.into()
+    }
+}
+
+impl From<PlannerError> for ErrorResp {
+    fn from(value: PlannerError) -> Self {
+        let mut message = "Failed to plan query:".to_string();
+        for d in &value.diagnostics {
+            message.push_str(&format!("\n * {}", d.message));
+        }
+
+        ErrorResp {
+            status_code: StatusCode::BAD_REQUEST,
+            message,
+        }
     }
 }
 

@@ -8,6 +8,7 @@ import {
   Flex,
   HStack,
   Icon,
+  Link,
   Spinner,
   Stack,
   Tab,
@@ -25,6 +26,7 @@ import { SqlOptions } from '../../lib/types';
 import {
   JobLogMessage,
   PipelineLocalUdf,
+  SqlDiagnostic,
   post,
   useOperatorErrors,
   usePipeline,
@@ -54,6 +56,7 @@ import UdfLabel from '../udfs/UdfLabel';
 import { PiFileSqlDuotone, PiFunction, PiGraph } from 'react-icons/pi';
 import { BiTable } from 'react-icons/bi';
 import { IoWarningOutline } from 'react-icons/io5';
+import { VscError } from 'react-icons/vsc';
 import { useNavbar } from '../../App';
 import { FiDatabase } from 'react-icons/fi';
 import CatalogTab from './CatalogTab';
@@ -101,6 +104,9 @@ export function CreatePipeline() {
   const [udfValidationApiError, setUdfValidationApiError] = useState<any | undefined>(undefined);
   const [validationInProgress, setValidationInProgress] = useState<boolean>(false);
   const [startingPreview, setStartingPreview] = useState<boolean>(false);
+  const [selectedQueryDiagnostic, setSelectedQueryDiagnostic] = useState<
+    SqlDiagnostic | undefined
+  >();
 
   const { tourActive, tourStep, setTourStep, disableTour } = useContext(TourContext);
 
@@ -109,7 +115,8 @@ export function CreatePipeline() {
 
   const { setMenuItems } = useNavbar();
 
-  const hasValidationErrors = queryValidation?.errors?.length || hasUdfValidationErrors;
+  const queryDiagnostics = queryInput === queryInputToCheck ? queryValidation?.errors ?? [] : [];
+  const hasValidationErrors = queryDiagnostics.length > 0 || hasUdfValidationErrors;
 
   useEffect(() => {
     setMenuItems([
@@ -444,16 +451,55 @@ export function CreatePipeline() {
     let queryErrors = <></>;
     let udfErrors = <></>;
 
-    if (queryValidation?.errors) {
+    if (queryDiagnostics.length > 0) {
       queryErrors = (
         <Flex flexDirection={'column'} py={3} gap={2}>
-          <Flex gap={1} onClick={() => openTab('query')} cursor={'pointer'} w={'min-content'}>
+          <Flex gap={1} alignItems={'center'}>
             <Icon as={PiFileSqlDuotone} boxSize={5} />
             <Text>Query</Text>
+            <Text color={'gray.500'} fontSize={'sm'}>
+              {queryDiagnostics.length} {queryDiagnostics.length === 1 ? 'error' : 'errors'}
+            </Text>
           </Flex>
-          <SyntaxHighlighter language="text" style={vs2015} customStyle={{ borderRadius: '5px' }}>
-            {queryValidation.errors[0]}
-          </SyntaxHighlighter>
+          <Flex flexDirection={'column'} borderY={'1px solid'} borderColor={'gray.700'}>
+            {queryDiagnostics.map((diagnostic, index) => {
+              const location = diagnostic.span?.start;
+              return (
+                <Flex
+                  key={`${diagnostic.message}-${location?.line}-${location?.column}-${index}`}
+                  alignItems={'flex-start'}
+                  gap={2}
+                  px={2}
+                  py={1.5}
+                  textAlign={'left'}
+                  borderBottom={index < queryDiagnostics.length - 1 ? '1px solid' : undefined}
+                  borderColor={'gray.700'}
+                  backgroundColor={'#1e1e1e'}
+                >
+                  <Icon as={VscError} color={'red.400'} boxSize={4} mt={0.5} flexShrink={0} />
+                  <Text fontFamily={'monospace'} fontSize={'sm'} flex={1} userSelect={'text'}>
+                    {diagnostic.message}
+                  </Text>
+                  {location && (
+                    <Link
+                      href={'#'}
+                      color={'gray.500'}
+                      fontFamily={'monospace'}
+                      fontSize={'xs'}
+                      whiteSpace={'nowrap'}
+                      onClick={event => {
+                        event.preventDefault();
+                        openTab('query');
+                        setSelectedQueryDiagnostic({ ...diagnostic });
+                      }}
+                    >
+                      Ln {location.line}, Col {location.column}
+                    </Link>
+                  )}
+                </Flex>
+              );
+            })}
+          </Flex>
         </Flex>
       );
     }
@@ -663,6 +709,8 @@ export function CreatePipeline() {
                   updateQuery={updateQuery}
                   previewOptions={previewOptions}
                   setPreviewOptions={setPreviewOptions}
+                  queryDiagnostics={queryDiagnostics}
+                  selectedQueryDiagnostic={selectedQueryDiagnostic}
                   job={job}
                 />
               </Panel>
