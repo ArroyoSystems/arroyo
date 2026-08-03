@@ -168,6 +168,13 @@ pub(crate) fn bad_request(message: impl Into<String>) -> ErrorResp {
     }
 }
 
+pub(crate) fn conflict(message: impl Into<String>) -> ErrorResp {
+    ErrorResp {
+        status_code: StatusCode::CONFLICT,
+        message: message.into(),
+    }
+}
+
 pub(crate) fn service_unavailable(object: &str) -> ErrorResp {
     ErrorResp {
         status_code: StatusCode::SERVICE_UNAVAILABLE,

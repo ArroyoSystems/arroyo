@@ -160,9 +160,6 @@ impl WorkerJobController {
                 job_id: worker_context.job_id.clone(),
                 generation: Generation(worker_context.generation),
                 updated_at: SystemTime::now(),
-                // The controller passes no parent checkpoint when this generation should start
-                // without state (or when there is no state available).
-                ignore_state: parent_ref.is_none(),
             },
             false,
         )

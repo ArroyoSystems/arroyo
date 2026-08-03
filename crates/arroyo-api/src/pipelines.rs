@@ -869,13 +869,24 @@ pub async fn restart_pipeline(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
+    if req.ignore_state.unwrap_or(false)
+        && matches!(config().job_controller, JobControllerMode::Worker)
+    {
+        jobs::replace_job_without_state(&state.database, &id, &auth_data).await?;
+
+        let db = state.database.client().await?;
+        let pipeline = query_pipeline_by_pub_id(&id, &db, &auth_data).await?;
+        return Ok(Json(pipeline));
+    }
+
     let db = state.database.client().await?;
 
-    let job = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
+    let job_id = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
         .await?
         .into_iter()
         .next()
-        .ok_or_else(|| bad_request("No jobs for pipeline"))?;
+        .ok_or_else(|| bad_request("No jobs for pipeline"))?
+        .id;
 
     let mode = if req.force == Some(true) {
         RestartMode::force
@@ -883,29 +894,14 @@ pub async fn restart_pipeline(
         RestartMode::safe
     };
 
+    // If user wants to ignore state, query max checkpoint epoch and compute threshold
     let ignore_before_epoch = if req.ignore_state.unwrap_or(false) {
-        match config().job_controller {
-            JobControllerMode::Controller => {
-                // Controller mode uses this as an epoch threshold.
-                api_queries::fetch_max_checkpoint_epoch(&db, &job.id, &auth_data.organization_id)
-                    .await?
-                    .into_iter()
-                    .next()
-                    .and_then(|r| r.max_epoch)
-                    .map(|max_epoch| max_epoch + 1)
-            }
-            JobControllerMode::Worker => {
-                // Leader mode uses this as the generation that should start without state.
-                Some(
-                    job.run_id
-                        .unwrap_or(0)
-                        .max(0)
-                        .checked_add(1)
-                        .and_then(|generation| generation.try_into().ok())
-                        .ok_or_else(|| bad_request("Job generation is too large to restart"))?,
-                )
-            }
-        }
+        api_queries::fetch_max_checkpoint_epoch(&db, &job_id, &auth_data.organization_id)
+            .await?
+            .into_iter()
+            .next()
+            .and_then(|r| r.max_epoch)
+            .map(|max_epoch| max_epoch + 1)
     } else {
         None
     };
@@ -916,7 +912,7 @@ pub async fn restart_pipeline(
         &auth_data.user_id,
         &mode,
         &ignore_before_epoch,
-        &job.id,
+        &job_id,
         &auth_data.organization_id,
     )
     .await?;

@@ -29,7 +29,8 @@ use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
     BearerAuth, ErrorResp, PipelineJobCheckpointPath, PipelineJobPath, authenticate, bad_request,
-    log_and_map, not_found, paginate_results, validate_pagination_params,
+    conflict, internal_server_error, log_and_map, not_found, paginate_results,
+    validate_pagination_params,
 };
 use crate::types::public::LogLevel;
 use crate::{AuthData, queries::api_queries, to_micros, types::public};
@@ -193,6 +194,216 @@ pub(crate) async fn create_job(
     .await?;
 
     Ok(job_id)
+}
+
+fn replaceable_job(jobs: Vec<(String, String)>) -> Result<String, ErrorResp> {
+    let count = jobs.len();
+    let Some((job_id, state)) = jobs.into_iter().next() else {
+        return Err(not_found("Job for pipeline"));
+    };
+
+    if count != 1 {
+        return Err(internal_server_error(format!(
+            "expected one job for pipeline, found {count}"
+        )));
+    }
+
+    if state != "Stopped" && state != "Failed" {
+        return Err(conflict(format!(
+            "cannot restart job {job_id} without state while it is in state {state}; stop the job first"
+        )));
+    }
+
+    Ok(job_id)
+}
+
+/// Replaces a pipeline's single terminal job with a fresh job.
+///
+/// This is used for restart-without-state in leader mode. Keeping the replacement in a single
+/// transaction preserves the current one-job-per-pipeline assumption for all other API queries.
+pub(crate) async fn replace_job_without_state(
+    db: &DatabaseSource,
+    pipeline_pub_id: &str,
+    auth: &AuthData,
+) -> Result<String, ErrorResp> {
+    let new_job_id = generate_id(IdTypes::JobConfig);
+    let new_status_id = generate_id(IdTypes::JobStatus);
+
+    match db {
+        DatabaseSource::Postgres(pool) => {
+            let mut client = pool.get().await.map_err(log_and_map)?;
+            let transaction = client.transaction().await.map_err(log_and_map)?;
+
+            // Lock the pipeline first. This serializes concurrent replacement requests before
+            // either request resolves the pipeline's current singleton job.
+            let pipeline = transaction
+                .query_opt(
+                    "SELECT id FROM pipelines \
+                     WHERE pub_id = $1 AND organization_id = $2 \
+                     FOR UPDATE",
+                    &[&pipeline_pub_id, &auth.organization_id],
+                )
+                .await
+                .map_err(log_and_map)?
+                .ok_or_else(|| not_found("Pipeline"))?;
+            let pipeline_id: i64 = pipeline.get(0);
+
+            let jobs = transaction
+                .query(
+                    "SELECT c.id, COALESCE(s.state, 'Created') \
+                     FROM job_configs c \
+                     INNER JOIN job_statuses s ON c.id = s.id \
+                     WHERE c.pipeline_id = $1 AND c.organization_id = $2 \
+                     FOR UPDATE OF c, s",
+                    &[&pipeline_id, &auth.organization_id],
+                )
+                .await
+                .map_err(log_and_map)?
+                .into_iter()
+                .map(|row| (row.get(0), row.get(1)))
+                .collect();
+            let old_job_id = replaceable_job(jobs)?;
+
+            let inserted = transaction
+                .execute(
+                    "INSERT INTO job_configs \
+                     (id, organization_id, pipeline_name, created_by, updated_by, updated_at, \
+                      ttl_micros, stop, pipeline_id, parallelism_overrides, \
+                      checkpoint_interval_micros, env_vars, scheduler_config) \
+                     SELECT $1, organization_id, pipeline_name, created_by, $2, CURRENT_TIMESTAMP, \
+                            ttl_micros, 'none', pipeline_id, parallelism_overrides, \
+                            checkpoint_interval_micros, env_vars, scheduler_config \
+                     FROM job_configs WHERE id = $3",
+                    &[&new_job_id, &auth.user_id, &old_job_id],
+                )
+                .await
+                .map_err(log_and_map)?;
+            if inserted != 1 {
+                return Err(internal_server_error("failed to clone job configuration"));
+            }
+
+            transaction
+                .execute(
+                    "INSERT INTO job_statuses (pub_id, id, organization_id) VALUES ($1, $2, $3)",
+                    &[&new_status_id, &new_job_id, &auth.organization_id],
+                )
+                .await
+                .map_err(log_and_map)?;
+
+            // Delete children explicitly because the SQLite checkpoints table does not have the
+            // same foreign-key cascade as PostgreSQL.
+            transaction
+                .execute("DELETE FROM checkpoints WHERE job_id = $1", &[&old_job_id])
+                .await
+                .map_err(log_and_map)?;
+            transaction
+                .execute(
+                    "DELETE FROM job_log_messages WHERE job_id = $1",
+                    &[&old_job_id],
+                )
+                .await
+                .map_err(log_and_map)?;
+            transaction
+                .execute("DELETE FROM job_statuses WHERE id = $1", &[&old_job_id])
+                .await
+                .map_err(log_and_map)?;
+            transaction
+                .execute("DELETE FROM job_configs WHERE id = $1", &[&old_job_id])
+                .await
+                .map_err(log_and_map)?;
+
+            transaction.commit().await.map_err(log_and_map)?;
+        }
+        DatabaseSource::Sqlite(connection) => {
+            let mut connection = connection.lock().map_err(log_and_map)?;
+            let transaction = connection.transaction().map_err(log_and_map)?;
+
+            // Beginning a SQLite transaction acquires the connection mutex for this entire block,
+            // so resolving and replacing the singleton job cannot interleave with another request.
+            let pipeline_id = transaction
+                .query_row(
+                    "SELECT id FROM pipelines WHERE pub_id = ?1 AND organization_id = ?2",
+                    rusqlite::params![pipeline_pub_id, auth.organization_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => not_found("Pipeline"),
+                    error => log_and_map(error),
+                })?;
+
+            let jobs = {
+                let mut statement = transaction
+                    .prepare(
+                        "SELECT c.id, COALESCE(s.state, 'Created') \
+                         FROM job_configs c \
+                         INNER JOIN job_statuses s ON c.id = s.id \
+                         WHERE c.pipeline_id = ?1 AND c.organization_id = ?2",
+                    )
+                    .map_err(log_and_map)?;
+                statement
+                    .query_map(
+                        rusqlite::params![pipeline_id, auth.organization_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(log_and_map)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(log_and_map)?
+            };
+            let old_job_id = replaceable_job(jobs)?;
+
+            let inserted = transaction
+                .execute(
+                    "INSERT INTO job_configs \
+                     (id, organization_id, pipeline_name, created_by, updated_by, updated_at, \
+                      ttl_micros, stop, pipeline_id, parallelism_overrides, \
+                      checkpoint_interval_micros, env_vars, scheduler_config) \
+                     SELECT ?1, organization_id, pipeline_name, created_by, ?2, CURRENT_TIMESTAMP, \
+                            ttl_micros, 'none', pipeline_id, parallelism_overrides, \
+                            checkpoint_interval_micros, env_vars, scheduler_config \
+                     FROM job_configs WHERE id = ?3",
+                    rusqlite::params![new_job_id, auth.user_id, old_job_id],
+                )
+                .map_err(log_and_map)?;
+            if inserted != 1 {
+                return Err(internal_server_error("failed to clone job configuration"));
+            }
+
+            transaction
+                .execute(
+                    "INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![new_status_id, new_job_id, auth.organization_id],
+                )
+                .map_err(log_and_map)?;
+            transaction
+                .execute(
+                    "DELETE FROM checkpoints WHERE job_id = ?1",
+                    rusqlite::params![old_job_id],
+                )
+                .map_err(log_and_map)?;
+            transaction
+                .execute(
+                    "DELETE FROM job_log_messages WHERE job_id = ?1",
+                    rusqlite::params![old_job_id],
+                )
+                .map_err(log_and_map)?;
+            transaction
+                .execute(
+                    "DELETE FROM job_statuses WHERE id = ?1",
+                    rusqlite::params![old_job_id],
+                )
+                .map_err(log_and_map)?;
+            transaction
+                .execute(
+                    "DELETE FROM job_configs WHERE id = ?1",
+                    rusqlite::params![old_job_id],
+                )
+                .map_err(log_and_map)?;
+
+            transaction.commit().map_err(log_and_map)?;
+        }
+    }
+
+    Ok(new_job_id)
 }
 
 pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option<StopType>, bool) {
@@ -621,5 +832,176 @@ impl TryFrom<DbCheckpoint> for Checkpoint {
             finish_time: val.finish_time.map(to_micros),
             events: events.into_iter().map(|e| e.into()).collect(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OrgMetadata;
+    use std::sync::{Arc, Mutex};
+
+    fn auth() -> AuthData {
+        AuthData {
+            user_id: "user_2".to_string(),
+            organization_id: "org_1".to_string(),
+            role: "user".to_string(),
+            org_metadata: OrgMetadata::default(),
+        }
+    }
+
+    fn sqlite_job(state: &str) -> DatabaseSource {
+        let connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE pipelines (
+                    id INTEGER PRIMARY KEY,
+                    pub_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL
+                );
+                CREATE TABLE job_configs (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT,
+                    pipeline_name TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_by TEXT,
+                    updated_at TIMESTAMP,
+                    ttl_micros INTEGER,
+                    stop TEXT DEFAULT 'none' NOT NULL,
+                    parallelism_overrides TEXT DEFAULT '{}' NOT NULL,
+                    checkpoint_interval_micros INTEGER DEFAULT 10000000 NOT NULL,
+                    pipeline_id INTEGER NOT NULL,
+                    restart_nonce INTEGER DEFAULT 0 NOT NULL,
+                    restart_mode TEXT DEFAULT 'safe' NOT NULL,
+                    ignore_state_before_epoch INTEGER,
+                    env_vars TEXT DEFAULT '{}' NOT NULL,
+                    scheduler_config TEXT DEFAULT '{}' NOT NULL
+                );
+                CREATE TABLE job_statuses (
+                    pub_id TEXT NOT NULL UNIQUE,
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT,
+                    run_id INTEGER DEFAULT 0 NOT NULL,
+                    state TEXT DEFAULT 'Created' NOT NULL
+                );
+                CREATE TABLE checkpoints (job_id TEXT NOT NULL);
+                CREATE TABLE job_log_messages (job_id TEXT NOT NULL);
+                INSERT INTO pipelines (id, pub_id, organization_id)
+                    VALUES (1, 'pl_1', 'org_1');
+                INSERT INTO job_configs
+                    (id, organization_id, pipeline_name, created_by, updated_by, ttl_micros, stop,
+                     parallelism_overrides, checkpoint_interval_micros, pipeline_id, restart_nonce,
+                     restart_mode, ignore_state_before_epoch, env_vars, scheduler_config)
+                    VALUES
+                    ('job_old', 'org_1', 'pipeline', 'user_1', 'user_1', 123, 'immediate',
+                     '{\"1\": 4}', 5000000, 1, 3, 'force', 42,
+                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}');
+                INSERT INTO checkpoints (job_id) VALUES ('job_old');
+                INSERT INTO job_log_messages (job_id) VALUES ('job_old');",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO job_statuses (pub_id, id, organization_id, run_id, state)
+                 VALUES ('js_old', 'job_old', 'org_1', 7, ?1)",
+                [state],
+            )
+            .unwrap();
+
+        DatabaseSource::Sqlite(Arc::new(Mutex::new(connection)))
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_replaces_terminal_job_and_deletes_history() {
+        let database = sqlite_job("Stopped");
+
+        let new_job_id = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap();
+
+        assert_ne!(new_job_id, "job_old");
+        let DatabaseSource::Sqlite(connection) = &database else {
+            unreachable!()
+        };
+        let connection = connection.lock().unwrap();
+
+        let job: (
+            String,
+            String,
+            i64,
+            String,
+            String,
+            Option<i64>,
+            String,
+            String,
+        ) = connection
+            .query_row(
+                "SELECT id, stop, restart_nonce, restart_mode, updated_by,
+                        ignore_state_before_epoch, env_vars, scheduler_config
+                 FROM job_configs",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            job,
+            (
+                new_job_id.clone(),
+                "none".to_string(),
+                0,
+                "safe".to_string(),
+                "user_2".to_string(),
+                None,
+                "{\"ENV\": \"value\"}".to_string(),
+                "{\"scheduler\": true}".to_string(),
+            )
+        );
+
+        let status: (String, i64, String) = connection
+            .query_row("SELECT id, run_id, state FROM job_statuses", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(status, (new_job_id, 0, "Created".to_string()));
+
+        for table in ["checkpoints", "job_log_messages"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be cleared");
+        }
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_rejects_non_terminal_job() {
+        let database = sqlite_job("Running");
+
+        let error = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::CONFLICT);
+        let DatabaseSource::Sqlite(connection) = &database else {
+            unreachable!()
+        };
+        let connection = connection.lock().unwrap();
+        let job_id: String = connection
+            .query_row("SELECT id FROM job_configs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(job_id, "job_old");
     }
 }
