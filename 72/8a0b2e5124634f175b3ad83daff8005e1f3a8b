@@ -1,0 +1,32 @@
+docker/Dockerfile.cloudflare
+  s_7fdc4607321144::t_df023b44fc769d 63-64,69
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_7fdc4607321144::t_8060b720e1ac9b 34
+  s_7fdc4607321144::t_9ca263a0bd118d 124
+Cargo.lock
+  s_8571c5f1eeab41::t_816c93290ac4aa 7541,9279,9288,9292-9293,9300-9301,9304,10638
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "728a0b2e5124634f175b3ad83daff8005e1f3a8b",
+  "prompts": {},
+  "sessions": {
+    "s_7fdc4607321144": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03921bd20ffeH9EwIIRUaTmqmI",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_8571c5f1eeab41": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_032972ac7ffeaZ8VBwZ241w25U",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
