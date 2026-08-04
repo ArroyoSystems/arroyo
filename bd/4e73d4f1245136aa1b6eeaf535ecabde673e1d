@@ -1,0 +1,31 @@
+crates/arroyo-server-common/src/lib_cf.rs
+  s_25e79b6880a722::t_4b483aa9a38e46 1002-1006,1034-1044,1079-1081,1110-1117,1121-1123,1125-1128
+  s_25e79b6880a722::t_5ecc3ce6c50be6 214-215
+  s_25e79b6880a722::t_f2cf4b05381032 731,745,752
+  s_25e79b6880a722::t_8e3fadc7c1077e 260,285,288-289,291-292,294-307
+  s_25e79b6880a722::t_b1098348b211de 392-393
+  s_25e79b6880a722::t_120b9c9cdb48b1 36
+  s_25e79b6880a722::t_128c23e434f358 277-278,286-287,290,293
+  s_25e79b6880a722::t_4af8cbf75fd027 390,396-399,407-420
+  s_25e79b6880a722::t_05d8f57e70b252 523
+  s_25e79b6880a722::t_ed48ae4ef5c865 32-34,37-44,428-522,524-712,715-730,732-742,744,746-751,753-877
+  s_25e79b6880a722::t_5c8582c0fe8b96 27
+  s_25e79b6880a722::t_f5a04d80249560 743
+  s_25e79b6880a722::t_92b13f3b01322b 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd4e73d4f1245136aa1b6eeaf535ecabde673e1d",
+  "prompts": {},
+  "sessions": {
+    "s_25e79b6880a722": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_033cd312cffeOWMJFXKk24FVrj",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
