@@ -1,0 +1,19 @@
+crates/arroyo-connectors/Cargo.toml
+  s_7fdc4607321144::t_98b07a3399675c 126,132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0df7ad156172a242560b1a7ccd56c5c932101f19",
+  "prompts": {},
+  "sessions": {
+    "s_7fdc4607321144": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03921bd20ffeH9EwIIRUaTmqmI",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
