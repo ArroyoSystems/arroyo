@@ -33,6 +33,7 @@ export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
 export type GlobalUdf = schemas['GlobalUdf'];
 export type PipelineLocalUdf = schemas['Udf'];
 export type UdfValidationResult = schemas['UdfValidationResult'];
+export type SqlDiagnostic = schemas['SqlDiagnostic'];
 
 const base = window.__ARROYO_BASENAME.replace(/\/$/, '') || '';
 const BASE_URL = `${base}/api`;

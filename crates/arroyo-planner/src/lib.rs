@@ -64,6 +64,7 @@ use arroyo_connectors::connectors;
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
+use arroyo_rpc::api_types::pipelines::{SqlDiagnostic, SqlLocation, SqlSpan};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::{TIMESTAMP_FIELD, duration_from_sql};
 use arroyo_udf_host::ParsedUdfFile;
@@ -548,17 +549,52 @@ impl Default for SqlConfig {
     }
 }
 
+#[derive(Debug)]
+pub struct PlannerError {
+    pub diagnostics: Vec<SqlDiagnostic>,
+}
+
 pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
     config: SqlConfig,
-) -> Result<CompiledSql> {
+) -> Result<CompiledSql, PlannerError> {
     let query = query.to_string();
 
     if query.trim().is_empty() {
-        return plan_err!("Query is empty");
+        return Err(PlannerError {
+            diagnostics: vec![SqlDiagnostic::message("Query is empty!")],
+        });
     }
-    parse_and_get_arrow_program(query, schema_provider, config).await
+    parse_and_get_arrow_program(query, schema_provider, config)
+        .await
+        .map_err(|e| {
+            let diagnostics = e
+                .iter()
+                .map(|error| {
+                    let diagnostic = error.diagnostic();
+                    SqlDiagnostic {
+                        message: diagnostic
+                            .map(|diagnostic| diagnostic.message.clone())
+                            .unwrap_or_else(|| error.to_string()),
+                        span: diagnostic.and_then(|diagnostic| {
+                            diagnostic.span.map(|span| SqlSpan {
+                                start: SqlLocation {
+                                    line: span.start.line,
+                                    column: span.start.column,
+                                },
+                                end: SqlLocation {
+                                    line: span.end.line,
+                                    column: span.end.column,
+                                },
+                            })
+                        }),
+                    }
+                })
+                .collect();
+
+            PlannerError { diagnostics }
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

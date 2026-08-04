@@ -907,7 +907,7 @@ export interface components {
             message_name?: string | null;
         };
         QueryValidationResult: {
-            errors: string[];
+            errors: components["schemas"]["SqlDiagnostic"][];
             graph?: components["schemas"]["PipelineGraph"] | null;
         };
         RawBytesFormat: Record<string, never>;
@@ -936,6 +936,20 @@ export interface components {
             required?: boolean;
             readonly sql_name?: string | null;
         });
+        SqlDiagnostic: {
+            message: string;
+            span?: components["schemas"]["SqlSpan"] | null;
+        };
+        SqlLocation: {
+            /** Format: int64 */
+            column: number;
+            /** Format: int64 */
+            line: number;
+        };
+        SqlSpan: {
+            end: components["schemas"]["SqlLocation"];
+            start: components["schemas"]["SqlLocation"];
+        };
         /** @enum {string} */
         StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
         StructField: {

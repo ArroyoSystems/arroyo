@@ -57,8 +57,7 @@ use datafusion::{
     },
 };
 use itertools::Itertools;
-use sqlparser::ast;
-use sqlparser::ast::TableConstraint;
+use sqlparser::ast::{self, TableConstraint};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tracing::warn;
@@ -140,7 +139,10 @@ fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
-    let sql_to_rel = SqlToRel::new(schema_provider);
+    let sql_to_rel = SqlToRel::new_with_options(
+        schema_provider,
+        datafusion::sql::planner::ParserOptions::new().with_collect_spans(true),
+    );
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 

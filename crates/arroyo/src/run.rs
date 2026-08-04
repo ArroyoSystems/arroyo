@@ -167,7 +167,7 @@ async fn run_pipeline(
     if !errors.errors.is_empty() {
         eprintln!("There were some issues with the provided query");
         for error in errors.errors {
-            eprintln!("  * {error}");
+            eprintln!("  * {}", error.message);
         }
         exit(1);
     }

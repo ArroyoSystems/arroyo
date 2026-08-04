@@ -356,6 +356,9 @@ impl IntoResponse for HttpError {
         GlobalUdf,
         GlobalUdfCollection,
         BadData,
+        SqlDiagnostic,
+        SqlSpan,
+        SqlLocation
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),

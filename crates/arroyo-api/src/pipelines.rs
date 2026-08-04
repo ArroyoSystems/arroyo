@@ -28,7 +28,7 @@ use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
+use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
@@ -65,7 +65,7 @@ async fn compile_sql(
     auth_data: &AuthData,
     validate_only: bool,
     db: &DatabaseSource,
-) -> Result<CompiledSql, ErrorResp> {
+) -> Result<Result<CompiledSql, PlannerError>, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     let global_udfs = fetch_get_udfs(&db.client().await?, &auth_data.organization_id)
@@ -174,15 +174,14 @@ async fn compile_sql(
         schema_provider.add_connection_profile(profile);
     }
 
-    arroyo_planner::parse_and_get_program(
+    Ok(arroyo_planner::parse_and_get_program(
         &query,
         schema_provider,
         SqlConfig {
             default_parallelism: parallelism,
         },
     )
-    .await
-    .map_err(|err| bad_request(err.to_string()))
+    .await)
 }
 
 fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
@@ -569,7 +568,7 @@ pub async fn validate_query(
         true,
         &state.database,
     )
-    .await
+    .await?
     {
         Ok(CompiledSql { program, .. }) => QueryValidationResult {
             graph: Some(program.try_into().map_err(log_and_map)?),
@@ -577,7 +576,7 @@ pub async fn validate_query(
         },
         Err(e) => QueryValidationResult {
             graph: None,
-            errors: vec![e.message],
+            errors: e.diagnostics,
         },
     };
 
@@ -660,7 +659,7 @@ async fn create_pipeline_inner(
         false,
         &state.database,
     )
-    .await?;
+    .await??;
 
     let pipeline_id = create_pipeline_int(
         pipeline_post.name,
@@ -718,7 +717,7 @@ pub async fn create_preview_pipeline(
         false,
         &state.database,
     )
-    .await?;
+    .await??;
 
     let pipeline_id = create_pipeline_int(
         format!("preview_{}", to_millis(SystemTime::now())),
