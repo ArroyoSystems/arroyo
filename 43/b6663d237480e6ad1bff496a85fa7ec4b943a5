@@ -1,0 +1,45 @@
+crates/arroyo-worker/src/lib.rs
+  s_2c20e92cf38e00::t_43e92e7954b388 1434,1437-1439
+crates/arroyo-controller/src/states/leader_pausing.rs
+  s_3a2fa084876766::t_ca853881d5e869 10-12
+  s_3a2fa084876766::t_7c3a2399a8c108 4-6
+  s_3a2fa084876766::t_42f6d49bd48e9d 7-9
+  s_3a2fa084876766::t_ea32d64d1d0819 1-3
+  s_2c20e92cf38e00::t_7b8db6cd4a026e 13-29
+crates/arroyo-api/src/jobs.rs
+  s_3a2fa084876766::t_8559e75a8f22ea 445-447
+crates/arroyo-controller/src/states/leader_running.rs
+  s_2c20e92cf38e00::t_d2cef811ea9705 4,6,16,18,72-73,196-220
+crates/arroyo-controller/src/states/mod.rs
+  s_2c20e92cf38e00::t_cf5dfe847f4800 23,50,57,326,371-384,1156-1157
+crates/arroyo-rpc/default.toml
+  s_2c20e92cf38e00::t_efa424694b9a35 116-119
+crates/arroyo-rpc/src/config.rs
+  s_2c20e92cf38e00::t_30de9c8a810b66 454-455
+crates/arroyo-rpc/src/config_cf.rs
+  s_2c20e92cf38e00::t_885265587487b8 152-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "43b6663d237480e6ad1bff496a85fa7ec4b943a5",
+  "prompts": {},
+  "sessions": {
+    "s_2c20e92cf38e00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_032b7a55fffeKCiQ1M8uxKhgOW",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_3a2fa084876766": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05afbb53dffemzNMrgWF6ug4GS",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
