@@ -18,7 +18,10 @@ use bytes::{BufMut, Bytes, BytesMut};
 use parquet::{
     arrow::ArrowWriter,
     basic::{GzipLevel, ZstdLevel},
-    file::properties::WriterProperties,
+    file::{
+        metadata::{FileMetaData, ParquetMetaData, ParquetMetaDataWriter},
+        properties::WriterProperties,
+    },
 };
 use std::sync::Mutex;
 use std::time::Duration;
@@ -48,6 +51,30 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
         parquet_writer_options.build(),
         format.row_group_bytes.unwrap_or(DEFAULT_ROW_GROUP_BYTES) as usize,
     )
+}
+
+fn trailing_bytes_for_checkpoint(
+    writer: &ArrowWriter<SharedBuffer>,
+    properties: &WriterProperties,
+) -> parquet::errors::Result<(Vec<u8>, ParquetMetaData)> {
+    let row_groups = writer.flushed_row_groups().to_vec();
+    let schema = row_groups
+        .first()
+        .expect("a flushed parquet writer must contain a row group")
+        .schema_descr_ptr();
+    let num_rows = row_groups.iter().map(|group| group.num_rows()).sum();
+    let file_metadata = FileMetaData::new(
+        properties.writer_version().as_num(),
+        num_rows,
+        Some(properties.created_by().to_owned()),
+        properties.key_value_metadata().cloned(),
+        schema,
+        None,
+    );
+    let metadata = ParquetMetaData::new(file_metadata, row_groups);
+    let mut trailing_bytes = Vec::new();
+    ParquetMetaDataWriter::new(&mut trailing_bytes, &metadata).finish()?;
+    Ok((trailing_bytes, metadata))
 }
 
 /// A buffer with interior mutability shared by the [`ArrowWriter`] and
@@ -92,6 +119,7 @@ pub struct ParquetBatchBufferingWriter {
     writer: Option<ArrowWriter<SharedBuffer>>,
     buffer: SharedBuffer,
     row_group_size_bytes: usize,
+    writer_properties: WriterProperties,
     schema: ArroyoSchemaRef,
     writer_schema: SchemaRef,
     iceberg_schema: Option<iceberg::spec::SchemaRef>,
@@ -126,7 +154,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         let writer = ArrowWriter::try_new(
             buffer.clone(),
             writer_schema.clone(),
-            Some(writer_properties),
+            Some(writer_properties.clone()),
         )
         .unwrap();
 
@@ -134,6 +162,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
             writer: Some(writer),
             buffer,
             row_group_size_bytes,
+            writer_properties,
             writer_schema,
             schema,
             iceberg_schema,
@@ -202,17 +231,14 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
         let writer: &mut ArrowWriter<SharedBuffer> = self.writer.as_mut().unwrap();
         writer.flush().unwrap();
 
-        let (trailing_bytes, metadata) = self
-            .writer
-            .as_mut()
-            .unwrap()
-            .get_trailing_bytes(SharedBuffer::new(0))
-            .unwrap();
+        let (trailing_bytes, metadata) =
+            trailing_bytes_for_checkpoint(self.writer.as_ref().unwrap(), &self.writer_properties)
+                .unwrap();
 
         // TODO: this copy can likely be avoided, as the section we are copying is immutable
         // copy out the current bytes in the shared buffer, plus the trailing bytes
         let mut copied_bytes = self.buffer.buffer.lock().unwrap().get_ref().to_vec();
-        copied_bytes.extend_from_slice(&trailing_bytes.into_inner());
+        copied_bytes.extend_from_slice(&trailing_bytes);
 
         let metadata = self
             .iceberg_schema
@@ -247,6 +273,7 @@ pub struct ParquetLocalWriter {
     stats: Option<MultiPartWriterStats>,
     schema: ArroyoSchemaRef,
     row_group_size_bytes: usize,
+    writer_properties: WriterProperties,
 }
 
 impl LocalWriter for ParquetLocalWriter {
@@ -266,7 +293,7 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = ArrowWriter::try_new(
             shared_buffer.clone(),
             Arc::new(schema.schema_without_timestamp()),
-            Some(writer_properties),
+            Some(writer_properties.clone()),
         )
         .unwrap();
         let file = File::create(tmp_path.clone()).unwrap();
@@ -278,6 +305,7 @@ impl LocalWriter for ParquetLocalWriter {
             shared_buffer,
             stats: None,
             row_group_size_bytes,
+            writer_properties,
             schema,
         }
     }
@@ -343,13 +371,8 @@ impl LocalWriter for ParquetLocalWriter {
         let writer = self.writer.as_mut().unwrap();
         writer.flush()?;
         let bytes_written = self.sync()?;
-        let (buffer, _) = self
-            .writer
-            .as_mut()
-            .unwrap()
-            .get_trailing_bytes(SharedBuffer::new(0))?;
-
-        let trailing_bytes = buffer.buffer.try_lock().unwrap().get_ref().to_vec();
+        let (trailing_bytes, _) =
+            trailing_bytes_for_checkpoint(self.writer.as_ref().unwrap(), &self.writer_properties)?;
 
         Ok(Some(CurrentFileRecovery {
             tmp_file: self.tmp_path.clone(),

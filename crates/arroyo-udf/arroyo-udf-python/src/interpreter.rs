@@ -16,9 +16,7 @@
 
 //! High-level API for Python sub-interpreters.
 
-#[allow(deprecated)]
-use pyo3::GILPool;
-use pyo3::{PyErr, Python, ffi::*, prepare_freethreaded_python};
+use pyo3::{PyErr, Python, ffi::*};
 use std::ffi::CStr;
 
 /// A Python sub-interpreter with its own GIL.
@@ -30,12 +28,12 @@ pub struct SubInterpreter {
 impl SubInterpreter {
     /// Create a new sub-interpreter.
     pub fn new() -> Result<Self, PyError> {
-        prepare_freethreaded_python();
+        Python::initialize();
         // XXX: import the `decimal` module in the main interpreter before creating sub-interpreters.
         //      otherwise it will cause `SIGABRT: pointer being freed was not allocated`
         //      when importing decimal in the second sub-interpreter.
-        Python::with_gil(|py| {
-            py.import_bound("decimal").unwrap();
+        Python::attach(|py| {
+            py.import("decimal").unwrap();
         });
 
         // reference: https://github.com/PyO3/pyo3/blob/9a36b5078989a7c07a5e880aea3c6da205585ee3/examples/sequential/tests/test.rs
@@ -79,12 +77,8 @@ impl SubInterpreter {
         // switch to the sub-interpreter and acquire GIL
         unsafe { PyEval_RestoreThread(self.state) };
 
-        // Safety: the GIL is already held
-        // this pool is used to increment the internal GIL count of pyo3.
-        #[allow(deprecated)]
-        let pool = unsafe { GILPool::new() };
-        let ret = f(pool.python());
-        drop(pool);
+        // Safety: the sub-interpreter's GIL is already held.
+        let ret = f(unsafe { Python::assume_attached() });
 
         // release the GIL
         unsafe { PyEval_SaveThread() };

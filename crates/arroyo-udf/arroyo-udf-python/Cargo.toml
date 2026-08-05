@@ -10,7 +10,7 @@ python-enabled = ["pyo3"]
 arroyo-udf-common = { path = "../arroyo-udf-common" }
 arrow = { workspace = true, features = ["ffi"] }
 datafusion = { workspace = true }
-pyo3 = { version = "0.21", optional = true}
+pyo3 = { version = "0.27", optional = true}
 anyhow = { workspace = true }
 tokio = { workspace = true }
 itertools = { workspace = true }

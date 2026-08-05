@@ -203,7 +203,7 @@ macro_rules! make_transform_udf {
         $signature:expr,
         $mk_transform:expr,
     ) => {
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq, Eq, Hash)]
         struct $type_name(Signature);
 
         impl ScalarUDFImpl for $type_name {
