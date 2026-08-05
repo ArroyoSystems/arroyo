@@ -1,0 +1,21 @@
+crates/arroyo-worker/src/lib.rs
+  s_2c20e92cf38e00::t_5c7c0a984890af 1434
+  s_2c20e92cf38e00::t_291bf33bf85512 1438-1439
+  s_2c20e92cf38e00::t_849d61954a70d9 1437
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ee1ffa9ae028532a1e48e961b8875af18d0accab",
+  "prompts": {},
+  "sessions": {
+    "s_2c20e92cf38e00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_032b7a55fffeKCiQ1M8uxKhgOW",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "aayushnair <aayush@cloudflare.com>"
+    }
+  }
+}
