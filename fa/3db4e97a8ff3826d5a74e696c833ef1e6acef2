@@ -1,0 +1,110 @@
+k8s/arroyo-cloudflare/templates/arroyo-controller.yaml
+  s_1f6ad99a3e9fe1::t_69519c805c9145 107-109
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_1f6ad99a3e9fe1::t_dd0aea614590f8 297
+  s_55e40f9d7ad283::t_1193a54229be18 29-33
+  s_1f6ad99a3e9fe1::t_69519c805c9145 34-39,294-296
+k8s/arroyo-cloudflare/values.yaml
+  s_1f6ad99a3e9fe1::t_69519c805c9145 93,145-149,264-266
+  s_55e40f9d7ad283::t_19c7603f1c6c95 253-263
+k8s/arroyo-cloudflare/templates/networkpolicy.yaml
+  s_1f6ad99a3e9fe1::t_69519c805c9145 293-316
+crates/arroyo-controller/src/states/failing.rs
+  s_55e40f9d7ad283::t_69e03d806d50a9 26-29
+  s_89724a30aeb939::t_3023bbc74d5b86 30
+crates/arroyo-controller/src/alerts.rs
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 2,7,21-22,31-36,39-40,49-50,80-84,87-93,122,124,128,132-138,146,148-152,162,221,405,407,411
+  s_55e40f9d7ad283::t_3558a1d97ec2a5 462-463,466,468,470
+  s_1f6ad99a3e9fe1::t_8306793442f065 96-98
+  s_1f6ad99a3e9fe1::t_f906e63926033d 195,197-200,202-204,336,381-387,389-390
+  s_55e40f9d7ad283::t_1f402249099d33 207,234-239
+  s_55e40f9d7ad283::t_49145900a681f8 342
+  s_1f6ad99a3e9fe1::t_8e3446173f5edd 1,8
+  s_765ad42659d8f9::t_735b936825d37a 201,388
+  s_79c4c00d697ca6::t_f47f241c49d397 59-61
+  s_1f6ad99a3e9fe1::t_cecbb8f80fc816 205,208-220,223-225,227-230,233,240-241,292-293,295-319,321,324,329-335,337-341,343-351,354-380,391-394,410,419,421-425,450-451,453-454,457,477-478,480-483
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 3,5-6,10-13,18-20,23-30,52,54-56,70,72-79,85-86,94-95,99-121,123,125-127,129-131,139-145,147,153-161,163-185,187-193,222,226,242-256,258,260-272,277-280,294,395,403-404,406,408-409,420,505
+  s_1f6ad99a3e9fe1::t_33249dae837a6e 37-38,41-44,47-48,51,53,186
+  s_55e40f9d7ad283::t_e7880f03733bec 352-353
+  s_55e40f9d7ad283::t_fc1ba7a27b3597 426,434-444,449,455-456,458,460-461,464-465,467,469,471-476,479,484
+  s_89724a30aeb939::t_e89413a280bd62 9,14-17,45-46,257,259,273-276,281-291,401-402,412-417
+  s_1f6ad99a3e9fe1::t_bfc8aee85dca71 452
+  s_55e40f9d7ad283::t_d71d64e21ac4c8 71
+  s_55e40f9d7ad283::t_4f651656f811e1 63
+  s_55e40f9d7ad283::t_978c36818f0338 485-504
+  s_765ad42659d8f9::t_29964a2ea52f4e 194,196,206,231-232,320,322-323,325-328,427-433,445-448,459
+  s_79c4c00d697ca6::t_8e5b32ec3622cb 4,57-58,62,64-69
+crates/arroyo-rpc/default.toml
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 125
+k8s/arroyo-cloudflare/templates/configmap.yaml
+  s_55e40f9d7ad283::t_961041bd05dfcd 21-33
+k8s/arroyo-cloudflare/README.md
+  s_1f6ad99a3e9fe1::t_69519c805c9145 74-75
+crates/arroyo-controller/src/lib.rs
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 54,225,663,698,789
+crates/arroyo-rpc/src/config.rs
+  s_1f6ad99a3e9fe1::t_009134465f67c2 482-487
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 491-493
+  s_89724a30aeb939::t_e89413a280bd62 460-463,477-480,945-950,1069-1074
+  s_1f6ad99a3e9fe1::t_e3722ef3531e31 459,464-465,481,488
+  s_1f6ad99a3e9fe1::t_90d7ae58e9bd5b 18,489-490,494-507
+  s_1f6ad99a3e9fe1::t_d413693a50d08a 508
+  s_89724a30aeb939::t_8d7502a1164769 1075
+crates/arroyo-controller/Cargo.toml
+  s_89724a30aeb939::t_54b1e77261be78 56
+crates/arroyo-controller/src/states/mod.rs
+  s_89724a30aeb939::t_3023bbc74d5b86 128-151,159-162,1188,1196-1198,1343-1355
+  s_89724a30aeb939::t_e89413a280bd62 328-329
+  s_1f6ad99a3e9fe1::t_c8d4846d0c6764 621
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 32,1027,1067,1097,1108,1117,1233,1256
+  s_1f6ad99a3e9fe1::t_4b9aa842821062 325-327,332-334,808-811,817,826-827,830-831,842,876,989
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 330-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fa3db4e97a8ff3826d5a74e696c833ef1e6acef2",
+  "prompts": {},
+  "sessions": {
+    "s_1f6ad99a3e9fe1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0317af334ffezuzt9iuSHs6cEQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_55e40f9d7ad283": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02d16e4b3ffe4mUWxboEMTW7zL",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_765ad42659d8f9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_030e541b2ffe6R6HbOyH2kBDTu",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_79c4c00d697ca6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02d5aab0fffeM996YUgysWRje0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_89724a30aeb939": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0312a03c7ffeZ8mzYK3ZHoiM0F",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
