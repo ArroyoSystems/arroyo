@@ -1,0 +1,48 @@
+k8s/cdk8s/alerts.ts
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 27-28
+k8s/cdk8s/tsconfig.json
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 5,19-20
+  s_3e8b2dc06b46d9::t_f8bc67de8b405c 24
+k8s/cdk8s/k8s-helpers.ts
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 46-47
+k8s/cdk8s/chart.ts
+  s_3e8b2dc06b46d9::t_1c92f7aaa768a0 276-280
+  s_3e8b2dc06b46d9::t_cd2c9b505bd502 270-271
+  s_3e8b2dc06b46d9::t_7e3156b517e1d2 266,268-269,272-275
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 27,76-78
+k8s/cdk8s/chart.test.ts
+  s_3e8b2dc06b46d9::t_cd2c9b505bd502 125-126
+  s_3e8b2dc06b46d9::t_1c92f7aaa768a0 132-143
+  s_3e8b2dc06b46d9::t_51666c0a906bf5 2,10-21,81-95,97-98,101,115,121-124,127-131
+k8s/cdk8s/package.json
+  s_3e8b2dc06b46d9::t_1c92f7aaa768a0 8-10
+  s_3e8b2dc06b46d9::t_a2cdd4e7dcefaa 26
+  s_3e8b2dc06b46d9::t_51666c0a906bf5 15,29-30
+k8s/cdk8s/README.md
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 234-235
+  s_3e8b2dc06b46d9::t_1c92f7aaa768a0 39-40
+k8s/cdk8s/secrets.ts
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 4,19
+AGENTS.md
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 11,34-36,39-41,86-88
+k8s/cdk8s/config.ts
+  s_3e8b2dc06b46d9::t_cd2c9b505bd502 203-206,296-299
+  s_3e8b2dc06b46d9::t_7e3156b517e1d2 331,340
+  s_3e8b2dc06b46d9::t_9ecfea57b49ad4 165-166,194,197,207-208,219,300-303,313,315,321-323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8ce2f4203beed93aed92704c894322788fca139c",
+  "prompts": {},
+  "sessions": {
+    "s_3e8b2dc06b46d9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_02706e874ffeHMZKaEZcR5wB40",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
