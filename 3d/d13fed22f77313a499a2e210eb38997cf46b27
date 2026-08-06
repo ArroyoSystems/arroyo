@@ -1,0 +1,48 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_4729dbec050de2::t_2a3c66813b3364 273
+  s_4729dbec050de2::t_2ad285232188fb 348
+  s_4729dbec050de2::t_60b62c47d25c8c 377,386,389
+  s_4729dbec050de2::t_5184ae7aaa494b 488-490
+  s_4729dbec050de2::t_8bb65db37047f3 506-507
+  s_4729dbec050de2::t_ab1779b8b2bb1e 551
+  s_4729dbec050de2::t_3672ead8d4f1e1 258
+  s_4729dbec050de2::t_01059b27a66519 105
+  s_4729dbec050de2::t_3299cc0a52c686 571
+  s_4729dbec050de2::t_089a2f8c6ccd9e 503
+  s_4729dbec050de2::t_a89ccbfe99ab17 51
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_4729dbec050de2::t_2c490c185e57d4 813
+  s_4729dbec050de2::t_777bd662cc93cd 29
+  s_4729dbec050de2::t_0848ffe5a4471f 379-383,385
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_4729dbec050de2::t_c0d3897fcdd3be 85,91-102,104-114,116-132,135-148,151-164,166-168,170,173-180
+  s_4729dbec050de2::t_d1888bc4b6d8af 292
+  s_4729dbec050de2::t_067dfd4320b807 18-21
+  s_4729dbec050de2::t_b861509fdc4687 311
+  s_4729dbec050de2::t_50575f43b83c5e 317
+  s_4729dbec050de2::t_687b279782b3d6 329
+  s_4729dbec050de2::t_7582abc2ab51aa 304
+  s_4729dbec050de2::t_3e7eab03f5c171 56
+  s_4729dbec050de2::t_c23c7974676bc4 103
+  s_4729dbec050de2::t_196cd5b3d82b91 133-134
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_4729dbec050de2::t_d13da7014c0f1b 298-301
+  s_4729dbec050de2::t_d8bd85fb2cc2aa 19
+  s_4729dbec050de2::t_784b5a467768bd 316
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3dd13fed22f77313a499a2e210eb38997cf46b27",
+  "prompts": {},
+  "sessions": {
+    "s_4729dbec050de2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03092364dffeCHN4JbN9Ud25aT",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
