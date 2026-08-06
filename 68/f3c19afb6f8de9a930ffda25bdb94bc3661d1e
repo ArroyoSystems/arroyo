@@ -1,0 +1,21 @@
+k8s/cdk8s/alerts.ts
+  s_0253a73be7a1ab::t_110e48a4676e87 1-63
+k8s/cdk8s/chart.ts
+  s_0253a73be7a1ab::t_110e48a4676e87 5,33-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "68f3c19afb6f8de9a930ffda25bdb94bc3661d1e",
+  "prompts": {},
+  "sessions": {
+    "s_0253a73be7a1ab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_027a55a2cffeU1Gqr5gV44QvQg",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
