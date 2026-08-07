@@ -1,0 +1,25 @@
+k8s/cdk8s/config.ts
+  s_9227b589ea698a::t_6190b7b90372ba 139
+  s_9227b589ea698a::t_851f49d0757cbb 385-388,480-483
+  s_9227b589ea698a::t_ce7ca450bdf3aa 136-138,294-295,324,357,473
+  s_9227b589ea698a::t_8329345b7f4f29 2,153-155,157,323,325,328,337,339
+  s_9227b589ea698a::t_7d10918bfb22d3 133-135,140-152,156,158-159,221-224,229,266,269,274,297,299,301,310-311,313,318,320-321,327,344-356,358-384,389-472,474-479,484-507
+k8s/cdk8s/README.md
+  s_9227b589ea698a::t_7d10918bfb22d3 73-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3c2a7a4e5b2f9d9d069ebb318856b2b54956e8df",
+  "prompts": {},
+  "sessions": {
+    "s_9227b589ea698a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0272ea3ceffe6o3D3wy4jrMtW2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

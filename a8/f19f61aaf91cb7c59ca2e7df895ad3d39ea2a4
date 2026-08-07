@@ -1,0 +1,21 @@
+k8s/cdk8s/ingress.ts
+  s_0253a73be7a1ab::t_5033b5043e7902 1-103
+k8s/cdk8s/chart.ts
+  s_0253a73be7a1ab::t_5033b5043e7902 4,8,43-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a8f19f61aaf91cb7c59ca2e7df895ad3d39ea2a4",
+  "prompts": {},
+  "sessions": {
+    "s_0253a73be7a1ab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_027a55a2cffeU1Gqr5gV44QvQg",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

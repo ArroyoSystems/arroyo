@@ -1,0 +1,48 @@
+k8s/cdk8s/config.ts
+  s_0253a73be7a1ab::t_f56744da5a2d4c 1-433
+CF_README.md
+  s_0253a73be7a1ab::t_a556611aa0d2e3 6,10,29-31,47-50
+  s_0253a73be7a1ab::t_bcb10fc6ec6089 13
+k8s/cdk8s/chart.ts
+  s_0253a73be7a1ab::t_4df952937f02cf 43,48,391,477,733
+  s_0253a73be7a1ab::t_f076fd71686df9 188
+  s_0253a73be7a1ab::t_a556611aa0d2e3 3,75-95,101,105-123,607,611-612
+  s_0253a73be7a1ab::t_d8bb32bdd17896 1-2,4-42,44-47,49-74,96-100,102-104,124-187,189-390,392-476,478-606,608-610,613-732,734-809
+k8s/cdk8s/jest.config.js
+  s_0253a73be7a1ab::t_f076fd71686df9 1-4
+k8s/cdk8s/chart.test.ts
+  s_0253a73be7a1ab::t_f076fd71686df9 1-53,80-81,84,88-92
+  s_0253a73be7a1ab::t_b6392b3ab382cf 82-83,85-87
+  s_0253a73be7a1ab::t_a556611aa0d2e3 54-79
+k8s/cdk8s/.gitignore
+  s_0253a73be7a1ab::t_a556611aa0d2e3 3
+  s_0253a73be7a1ab::t_89d28d909fe58e 1-2
+  s_0253a73be7a1ab::t_19be6a0d1072de 4-6
+k8s/arroyo-cloudflare/README.md
+  s_0253a73be7a1ab::t_bcb10fc6ec6089 129
+  s_0253a73be7a1ab::t_a556611aa0d2e3 3-7,91-93,102,117,121-124
+justfile
+  s_0253a73be7a1ab::t_9b4afacd0b9663 4-5,9,19-20,26-27
+  s_0253a73be7a1ab::t_a556611aa0d2e3 17-18,24-25
+k8s/cdk8s/main.ts
+  s_0253a73be7a1ab::t_d8bb32bdd17896 1-7
+  s_0253a73be7a1ab::t_0175b860a3634f 8
+k8s/cdk8s/package-lock.json
+  s_0253a73be7a1ab::t_4a9b4be642739f 1-5602
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d7c8722efbce4b5c3df28be34bdf4a9a19633970",
+  "prompts": {},
+  "sessions": {
+    "s_0253a73be7a1ab": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_027a55a2cffeU1Gqr5gV44QvQg",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
