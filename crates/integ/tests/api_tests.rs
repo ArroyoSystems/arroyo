@@ -1,4 +1,5 @@
 use anyhow::bail;
+use std::collections::HashSet;
 use std::env;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -10,7 +11,9 @@ use arroyo_openapi::types::{
     ValidateUdfPost, builder,
 };
 use rand::random;
+use rdkafka::Message;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
+use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::{ClientConfig, ClientContext};
 use serde_json::json;
 use tracing::info;
@@ -105,6 +108,7 @@ async fn start_and_monitor(
     query: &str,
     udfs: &[&str],
     checkpoints_to_wait: u32,
+    verify_checkpoint_details: bool,
 ) -> anyhow::Result<(String, String, i64)> {
     let api_client = get_client();
 
@@ -145,18 +149,19 @@ async fn start_and_monitor(
             .find(|c| c.epoch == checkpoints_to_wait as i64)
             && checkpoint.finish_time.is_some()
         {
-            // get details
-            let details = api_client
-                .get_checkpoint_details()
-                .pipeline_id(&pipeline_id)
-                .job_id(&job.id)
-                .epoch(checkpoint.epoch)
-                .send()
-                .await
-                .unwrap()
-                .into_inner();
+            if verify_checkpoint_details {
+                let details = api_client
+                    .get_checkpoint_details()
+                    .pipeline_id(&pipeline_id)
+                    .job_id(&job.id)
+                    .epoch(checkpoint.epoch)
+                    .send()
+                    .await
+                    .unwrap()
+                    .into_inner();
 
-            assert!(!details.data.is_empty());
+                assert!(!details.data.is_empty());
+            }
 
             return Ok((pipeline_id, job.id.clone(), run_id));
         }
@@ -226,7 +231,9 @@ async fn basic_pipeline() {
     assert!(valid.errors.is_empty());
     assert!(valid.graph.is_some());
 
-    let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 10).await.unwrap();
+    let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 10, true)
+        .await
+        .unwrap();
 
     let sink_id = valid
         .graph
@@ -405,7 +412,9 @@ select my_double(cast(counter as bigint)) from impulse;
 
     let run_id: u32 = random();
 
-    let (pipeline_id, _job_id, _) = start_and_monitor(run_id, query, &[udf], 3).await.unwrap();
+    let (pipeline_id, _job_id, _) = start_and_monitor(run_id, query, &[udf], 3, true)
+        .await
+        .unwrap();
 
     // stop job
     patch_and_wait(
@@ -453,6 +462,168 @@ async fn delete_topic(client: &AdminClient<impl ClientContext>, topic: &str) {
         .delete_topics(&[topic], &AdminOptions::new())
         .await
         .expect("deletion should have worked");
+}
+
+fn create_kafka_consumer(topic: &str) -> StreamConsumer {
+    let consumer: StreamConsumer = ClientConfig::new()
+        .set("bootstrap.servers", "localhost:9092")
+        .set("enable.auto.commit", "false")
+        .set("auto.offset.reset", "earliest")
+        .set("group.id", format!("integ-{}", random::<u32>()))
+        .create()
+        .expect("consumer creation should succeed");
+    consumer
+        .subscribe(&[topic])
+        .expect("consumer subscription should succeed");
+    consumer
+}
+
+async fn read_kafka_counters(consumer: &StreamConsumer) -> anyhow::Result<Vec<i64>> {
+    let mut counters = vec![];
+
+    loop {
+        let wait = if counters.is_empty() {
+            Duration::from_secs(10)
+        } else {
+            Duration::from_secs(1)
+        };
+
+        match tokio::time::timeout(wait, consumer.recv()).await {
+            Ok(Ok(message)) => {
+                let payload = message
+                    .payload()
+                    .ok_or_else(|| anyhow::anyhow!("Kafka record had no payload"))?;
+                let value: serde_json::Value = serde_json::from_slice(payload)?;
+                let counter = value
+                    .get("counter")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| anyhow::anyhow!("Kafka record had no counter: {value}"))?;
+                counters.push(counter);
+            }
+            Ok(Err(error)) => return Err(error.into()),
+            Err(_) if counters.is_empty() => bail!("timed out waiting for Kafka output"),
+            Err(_) => return Ok(counters),
+        }
+    }
+}
+
+async fn wait_until_next_checkpoint_is_underway(
+    pipeline_id: &str,
+    job_id: &str,
+    completed_epoch: i64,
+) {
+    loop {
+        let checkpoints = get_client()
+            .get_job_checkpoints()
+            .pipeline_id(pipeline_id)
+            .job_id(job_id)
+            .send()
+            .await
+            .unwrap()
+            .into_inner();
+
+        if checkpoints.data.iter().any(|checkpoint| {
+            checkpoint.epoch > completed_epoch && checkpoint.finish_time.is_none()
+        }) {
+            return;
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn checkpoint_stop_does_not_duplicate_output() {
+    let api_client = get_client();
+    let test_id: u32 = random();
+    let topic = format!("checkpoint_stop_{test_id}");
+    let kafka_admin = create_kafka_admin();
+    create_topic(&kafka_admin, &topic).await;
+    let consumer = create_kafka_consumer(&topic);
+
+    let query = format!(
+        r#"
+CREATE TABLE impulse WITH (
+    connector = 'impulse',
+    event_rate = '100'
+);
+
+CREATE TABLE output (
+    counter BIGINT
+) WITH (
+    connector = 'kafka',
+    type = 'sink',
+    bootstrap_servers = 'localhost:9092',
+    format = 'json',
+    topic = '{topic}'
+);
+
+INSERT INTO output SELECT counter FROM impulse;
+"#
+    );
+
+    let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 2, false)
+        .await
+        .unwrap();
+
+    wait_until_next_checkpoint_is_underway(&pipeline_id, &job_id, 2).await;
+
+    // The stopping checkpoint follows the in-progress scheduled checkpoint. Records covered by
+    // the stopping checkpoint must not be emitted again after restart.
+    let run_id = patch_and_wait(
+        &pipeline_id,
+        None,
+        PipelinePatch::builder().stop(StopType::Checkpoint),
+        "Stopped",
+    )
+    .await
+    .unwrap();
+    let first_run = read_kafka_counters(&consumer).await.unwrap();
+
+    patch_and_wait(
+        &pipeline_id,
+        Some(run_id),
+        PipelinePatch::builder().stop(StopType::None),
+        "Running",
+    )
+    .await
+    .unwrap();
+
+    // Run long enough to replay every record between the scheduled and stopping checkpoints if
+    // recovery incorrectly chose the scheduled checkpoint.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    patch_and_wait(
+        &pipeline_id,
+        None,
+        PipelinePatch::builder().stop(StopType::Immediate),
+        "Stopped",
+    )
+    .await
+    .unwrap();
+
+    let second_run = read_kafka_counters(&consumer).await.unwrap();
+    let first_run: HashSet<_> = first_run.into_iter().collect();
+    let mut duplicates: Vec<_> = second_run
+        .iter()
+        .copied()
+        .filter(|counter| first_run.contains(counter))
+        .collect();
+    duplicates.sort_unstable();
+    duplicates.dedup();
+
+    api_client
+        .delete_pipeline()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
+    drop(consumer);
+    delete_topic(&kafka_admin, &topic).await;
+
+    assert!(
+        duplicates.is_empty(),
+        "checkpoint-stop recovery duplicated counters: {duplicates:?}"
+    );
 }
 
 #[tokio::test]
@@ -622,6 +793,7 @@ async fn connection_table() {
         &format!("select * from {};", connection_table.name),
         &[],
         5,
+        true,
     )
     .await
     .unwrap();

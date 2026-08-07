@@ -1096,13 +1096,6 @@ impl WorkerGrpc for WorkerServer {
     ) -> Result<Response<JobFinishedResp>, Status> {
         let is_worker_leader = self.state.job_controller_tx.get().is_some();
 
-        let mut phase = self.state.phase.lock().unwrap();
-        if let WorkerExecutionPhase::Running(engine_state) = &*phase {
-            engine_state.shutdown_guard.cancel();
-        }
-        *phase = WorkerExecutionPhase::Idle;
-        drop(phase);
-
         if is_worker_leader {
             // Keep the worker leader reachable so the controller can observe the
             // terminal job status before explicitly stopping the worker process.
@@ -1114,6 +1107,13 @@ impl WorkerGrpc for WorkerServer {
                 generation = self.state.worker_context.generation,
             );
         } else {
+            let mut phase = self.state.phase.lock().unwrap();
+            if let WorkerExecutionPhase::Running(engine_state) = &*phase {
+                engine_state.shutdown_guard.cancel();
+            }
+            *phase = WorkerExecutionPhase::Idle;
+            drop(phase);
+
             let token = self.shutdown_guard.token();
             tokio::task::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
