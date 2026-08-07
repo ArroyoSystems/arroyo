@@ -51,6 +51,7 @@ pub struct WorkerJobController {
     cleanup_backoff: Option<SystemTime>,
     rx: Receiver<RunningMessage>,
     stopping: bool,
+    checkpoint_stopping: bool,
     failing: bool,
     final_checkpoint_started: bool,
     replay_commits: Option<(CommitReq, CommitPermit)>,
@@ -279,6 +280,7 @@ impl WorkerJobController {
             cleanup_backoff: None,
             rx,
             stopping: false,
+            checkpoint_stopping: false,
             failing: false,
             final_checkpoint_started: false,
             replay_commits,
@@ -523,12 +525,14 @@ impl WorkerJobController {
 
         if self.stopping {
             if stop_mode == JobStopMode::JobStopImmediate {
+                self.checkpoint_stopping = false;
                 self.stop_job(StopMode::Immediate).await?;
             }
             return Ok(());
         }
 
         self.stopping = true;
+        self.checkpoint_stopping = stop_mode == JobStopMode::JobStopCheckpoint;
         self.status.transition(rpc::JobState::JobStopping)?;
 
         match stop_mode {
@@ -557,11 +561,6 @@ impl WorkerJobController {
         // have any tasks failed?
         if let Some(event) = self.model.task_failed() {
             return Ok(ControllerProgress::TaskFailed(event));
-        }
-
-        // if we're stopping and all tasks have finished, we're done
-        if self.stopping && self.model.all_tasks_finished() {
-            return Ok(ControllerProgress::Stopped);
         }
 
         if !self.stopping && self.model.all_tasks_finished() {
@@ -622,7 +621,9 @@ impl WorkerJobController {
             }
         }
 
-        if self.stopping && !self.final_checkpoint_started && self.model.checkpoint_state.is_none()
+        if self.checkpoint_stopping
+            && !self.final_checkpoint_started
+            && self.model.checkpoint_state.is_none()
         {
             info!(
                 message = "retrying deferred final checkpoint",
@@ -641,6 +642,16 @@ impl WorkerJobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // on final checkpoint we have to wait until we've written the metadata before shutting
+        // down the job controller
+        if self.stopping
+            && self.model.all_tasks_finished()
+            && (!self.checkpoint_stopping
+                || (self.final_checkpoint_started && self.model.checkpoint_state.is_none()))
+        {
+            return Ok(ControllerProgress::Stopped);
         }
 
         // do we need to start cleaning?
