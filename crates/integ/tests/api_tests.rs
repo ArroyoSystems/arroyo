@@ -2,7 +2,7 @@ use anyhow::bail;
 use std::collections::HashSet;
 use std::env;
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use arroyo_openapi::Client;
 use arroyo_openapi::types::{
@@ -512,30 +512,23 @@ async fn wait_until_next_checkpoint_is_underway(
     job_id: &str,
     completed_epoch: i64,
 ) {
-    let checkpoints = get_client()
-        .get_job_checkpoints()
-        .pipeline_id(pipeline_id)
-        .job_id(job_id)
-        .send()
-        .await
-        .unwrap()
-        .into_inner();
-    let finish_time = checkpoints
-        .data
-        .iter()
-        .find(|checkpoint| checkpoint.epoch == completed_epoch)
-        .and_then(|checkpoint| checkpoint.finish_time)
-        .expect("completed checkpoint should have a finish time");
+    loop {
+        let checkpoints = get_client()
+            .get_job_checkpoints()
+            .pipeline_id(pipeline_id)
+            .job_id(job_id)
+            .send()
+            .await
+            .unwrap()
+            .into_inner();
 
-    // Checkpoints run every second in this test. Starting the stop 1.25 seconds after the
-    // previous checkpoint completed puts it behind the next scheduled checkpoint.
-    let target_micros = finish_time + 1_250_000;
-    let now_micros = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_micros() as i64;
-    if target_micros > now_micros {
-        tokio::time::sleep(Duration::from_micros((target_micros - now_micros) as u64)).await;
+        if checkpoints.data.iter().any(|checkpoint| {
+            checkpoint.epoch > completed_epoch && checkpoint.finish_time.is_none()
+        }) {
+            return;
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
 
