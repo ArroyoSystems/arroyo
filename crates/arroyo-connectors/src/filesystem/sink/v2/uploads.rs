@@ -175,28 +175,45 @@ async fn validate_already_there(
 ) -> DataflowResult<()> {
     // check if the file is already there with the correct size -- in which case it means
     // that we've already finalized it
-    if let Ok(meta) = storage.head(path.as_ref()).await.map_err(map_storage_error) {
-        if meta.size != expected_size {
-            Err(connector_err!(
-                External,
-                NoRetry,
-                "file written to {} should have length of {}, not {}",
-                path,
-                expected_size,
-                meta.size,
-            ))
-        } else {
-            debug!(
-                path = %path,
-                size = expected_size,
-                original_error = %e,
-                "file already exists with expected size; \
-                 treating as successful recovery from prior finalization"
-            );
-            Ok(())
+    match storage.head(path.as_ref()).await {
+        Ok(meta) => {
+            if meta.size != expected_size {
+                Err(connector_err!(
+                    External,
+                    NoRetry,
+                    "file written to {} should have length of {}, not {}",
+                    path,
+                    expected_size,
+                    meta.size,
+                ))
+            } else {
+                debug!(
+                    path = %path,
+                    size = expected_size,
+                    original_error = %e,
+                    "file already exists with expected size; \
+                     treating as successful recovery from prior finalization"
+                );
+                Ok(())
+            }
         }
-    } else {
-        Err(handle_error(started, logger, e))
+        Err(head_error) => {
+            if matches!(
+                head_error,
+                StorageError::ObjectStore(object_store::Error::NotFound { .. })
+            ) {
+                // we failed to write the file; return the original write error
+                Err(handle_error(started, logger, e))
+            } else {
+                // we failed to determine the state of the file because head also failed
+                Err(connector_err!(
+                    External,
+                    WithBackoff,
+                    source: head_error.into(),
+                    "failed to validate whether failed multipart write successfully completed",
+                ))
+            }
+        }
     }
 }
 
