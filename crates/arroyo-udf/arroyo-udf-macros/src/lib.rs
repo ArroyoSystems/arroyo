@@ -153,6 +153,9 @@ fn arg_vars(parsed: &ParsedUdf) -> (Vec<TokenStream>, Vec<TokenStream>) {
                 DataType::Binary => {
                     quote!(let #id = arroyo_udf_plugin::arrow::array::BinaryArray::from(args.next().unwrap());)
                 }
+                DataType::Boolean => {
+                    quote!(let #id = arroyo_udf_plugin::arrow::array::BooleanArray::from(args.next().unwrap());)
+                }
                 DataType::List(field) => {
                     let filter = if !field.is_nullable() {
                         quote!(.filter_map(|x| x))
@@ -202,6 +205,9 @@ fn sync_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream 
         DataType::Binary => {
             quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::GenericByteBuilder::<arroyo_udf_plugin::arrow::array::types::GenericBinaryType<i32>>
                 ::with_capacity(batch_size, batch_size * 8);)
+        }
+        DataType::Boolean => {
+            quote!(let mut results_builder = arroyo_udf_plugin::arrow::array::BooleanBuilder::with_capacity(batch_size);)
         }
         _ => {
             let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
@@ -362,6 +368,7 @@ fn async_udf(parsed: ParsedFunction, mangle: Option<TokenStream>) -> TokenStream
         DataType::Binary => quote!(arroyo_udf_plugin::arrow::array::GenericByteBuilder::<
             arroyo_udf_plugin::arrow::array::types::GenericBinaryType<i32>,
         >::new()),
+        DataType::Boolean => quote!(arroyo_udf_plugin::arrow::array::BooleanBuilder::new()),
         _ => {
             let return_type = data_type_to_arrow_type_token(&parsed.ret_type.data_type);
             quote!(arroyo_udf_plugin::arrow::array::PrimitiveBuilder::<arroyo_udf_plugin::arrow::datatypes::#return_type>::new())
