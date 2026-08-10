@@ -196,6 +196,23 @@ VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :check
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
 
+--! clone_job_without_state
+INSERT INTO job_configs
+    (id, organization_id, pipeline_name, created_by, updated_by, updated_at,
+     ttl_micros, stop, pipeline_id, parallelism_overrides,
+     checkpoint_interval_micros, env_vars, scheduler_config)
+SELECT :new_job_id, organization_id, pipeline_name, created_by, :updated_by, CURRENT_TIMESTAMP,
+       ttl_micros, 'none', pipeline_id, parallelism_overrides,
+       checkpoint_interval_micros, env_vars, scheduler_config
+FROM job_configs
+WHERE id = :old_job_id;
+
+--! delete_job_checkpoints
+DELETE FROM checkpoints WHERE job_id = :job_id;
+
+--! delete_job_config
+DELETE FROM job_configs WHERE id = :job_id;
+
 --! get_jobs: (start_time?, finish_time?, state?, tasks?, textual_repr?, failure_message?, run_id?, udfs)
 SELECT job_configs.id as id, pipeline_name, stop, textual_repr, start_time, finish_time, state, tasks, pipeline_id, failure_message, run_id, udfs
 FROM job_configs

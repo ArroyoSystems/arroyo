@@ -217,10 +217,9 @@ fn replaceable_job(jobs: Vec<(String, String)>) -> Result<String, ErrorResp> {
     Ok(job_id)
 }
 
-/// Replaces a pipeline's single terminal job with a fresh job.
+/// Replaces a pipeline's job with a new one with the same configuration but a different job id
 ///
-/// This is used for restart-without-state in leader mode. Keeping the replacement in a single
-/// transaction preserves the current one-job-per-pipeline assumption for all other API queries.
+/// This is used to implement start/restart without state in leader mode.
 pub(crate) async fn replace_job_without_state(
     db: &DatabaseSource,
     pipeline_pub_id: &str,
@@ -228,180 +227,33 @@ pub(crate) async fn replace_job_without_state(
 ) -> Result<String, ErrorResp> {
     let new_job_id = generate_id(IdTypes::JobConfig);
     let new_status_id = generate_id(IdTypes::JobStatus);
+    let db = db.client().await?;
 
-    match db {
-        DatabaseSource::Postgres(pool) => {
-            let mut client = pool.get().await.map_err(log_and_map)?;
-            let transaction = client.transaction().await.map_err(log_and_map)?;
+    let jobs = api_queries::fetch_get_pipeline_jobs(&db, &auth.organization_id, &pipeline_pub_id)
+        .await?
+        .into_iter()
+        .map(|job| (job.id, job.state.unwrap_or_else(|| "Created".to_string())))
+        .collect();
+    let old_job_id = replaceable_job(jobs)?;
 
-            // Lock the pipeline first. This serializes concurrent replacement requests before
-            // either request resolves the pipeline's current singleton job.
-            let pipeline = transaction
-                .query_opt(
-                    "SELECT id FROM pipelines \
-                     WHERE pub_id = $1 AND organization_id = $2 \
-                     FOR UPDATE",
-                    &[&pipeline_pub_id, &auth.organization_id],
-                )
-                .await
-                .map_err(log_and_map)?
-                .ok_or_else(|| not_found("Pipeline"))?;
-            let pipeline_id: i64 = pipeline.get(0);
+    // TODO: Note that this is not transactional, as we don't have the ability to do transactions in
+    //   a database-agnostic way across postgres and sqlite. This is not ideal, but the risk is pretty
+    //   small. If it fails midway, the user can retry the operation.
 
-            let jobs = transaction
-                .query(
-                    "SELECT c.id, COALESCE(s.state, 'Created') \
-                     FROM job_configs c \
-                     INNER JOIN job_statuses s ON c.id = s.id \
-                     WHERE c.pipeline_id = $1 AND c.organization_id = $2 \
-                     FOR UPDATE OF c, s",
-                    &[&pipeline_id, &auth.organization_id],
-                )
-                .await
-                .map_err(log_and_map)?
-                .into_iter()
-                .map(|row| (row.get(0), row.get(1)))
-                .collect();
-            let old_job_id = replaceable_job(jobs)?;
-
-            let inserted = transaction
-                .execute(
-                    "INSERT INTO job_configs \
-                     (id, organization_id, pipeline_name, created_by, updated_by, updated_at, \
-                      ttl_micros, stop, pipeline_id, parallelism_overrides, \
-                      checkpoint_interval_micros, env_vars, scheduler_config) \
-                     SELECT $1, organization_id, pipeline_name, created_by, $2, CURRENT_TIMESTAMP, \
-                            ttl_micros, 'none', pipeline_id, parallelism_overrides, \
-                            checkpoint_interval_micros, env_vars, scheduler_config \
-                     FROM job_configs WHERE id = $3",
-                    &[&new_job_id, &auth.user_id, &old_job_id],
-                )
-                .await
-                .map_err(log_and_map)?;
-            if inserted != 1 {
-                return Err(internal_server_error("failed to clone job configuration"));
-            }
-
-            transaction
-                .execute(
-                    "INSERT INTO job_statuses (pub_id, id, organization_id) VALUES ($1, $2, $3)",
-                    &[&new_status_id, &new_job_id, &auth.organization_id],
-                )
-                .await
-                .map_err(log_and_map)?;
-
-            // Delete children explicitly because the SQLite checkpoints table does not have the
-            // same foreign-key cascade as PostgreSQL.
-            transaction
-                .execute("DELETE FROM checkpoints WHERE job_id = $1", &[&old_job_id])
-                .await
-                .map_err(log_and_map)?;
-            transaction
-                .execute(
-                    "DELETE FROM job_log_messages WHERE job_id = $1",
-                    &[&old_job_id],
-                )
-                .await
-                .map_err(log_and_map)?;
-            transaction
-                .execute("DELETE FROM job_statuses WHERE id = $1", &[&old_job_id])
-                .await
-                .map_err(log_and_map)?;
-            transaction
-                .execute("DELETE FROM job_configs WHERE id = $1", &[&old_job_id])
-                .await
-                .map_err(log_and_map)?;
-
-            transaction.commit().await.map_err(log_and_map)?;
-        }
-        DatabaseSource::Sqlite(connection) => {
-            let mut connection = connection.lock().map_err(log_and_map)?;
-            let transaction = connection.transaction().map_err(log_and_map)?;
-
-            // Beginning a SQLite transaction acquires the connection mutex for this entire block,
-            // so resolving and replacing the singleton job cannot interleave with another request.
-            let pipeline_id = transaction
-                .query_row(
-                    "SELECT id FROM pipelines WHERE pub_id = ?1 AND organization_id = ?2",
-                    rusqlite::params![pipeline_pub_id, auth.organization_id],
-                    |row| row.get::<_, i64>(0),
-                )
-                .map_err(|error| match error {
-                    rusqlite::Error::QueryReturnedNoRows => not_found("Pipeline"),
-                    error => log_and_map(error),
-                })?;
-
-            let jobs = {
-                let mut statement = transaction
-                    .prepare(
-                        "SELECT c.id, COALESCE(s.state, 'Created') \
-                         FROM job_configs c \
-                         INNER JOIN job_statuses s ON c.id = s.id \
-                         WHERE c.pipeline_id = ?1 AND c.organization_id = ?2",
-                    )
-                    .map_err(log_and_map)?;
-                statement
-                    .query_map(
-                        rusqlite::params![pipeline_id, auth.organization_id],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .map_err(log_and_map)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(log_and_map)?
-            };
-            let old_job_id = replaceable_job(jobs)?;
-
-            let inserted = transaction
-                .execute(
-                    "INSERT INTO job_configs \
-                     (id, organization_id, pipeline_name, created_by, updated_by, updated_at, \
-                      ttl_micros, stop, pipeline_id, parallelism_overrides, \
-                      checkpoint_interval_micros, env_vars, scheduler_config) \
-                     SELECT ?1, organization_id, pipeline_name, created_by, ?2, CURRENT_TIMESTAMP, \
-                            ttl_micros, 'none', pipeline_id, parallelism_overrides, \
-                            checkpoint_interval_micros, env_vars, scheduler_config \
-                     FROM job_configs WHERE id = ?3",
-                    rusqlite::params![new_job_id, auth.user_id, old_job_id],
-                )
-                .map_err(log_and_map)?;
-            if inserted != 1 {
-                return Err(internal_server_error("failed to clone job configuration"));
-            }
-
-            transaction
-                .execute(
-                    "INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![new_status_id, new_job_id, auth.organization_id],
-                )
-                .map_err(log_and_map)?;
-            transaction
-                .execute(
-                    "DELETE FROM checkpoints WHERE job_id = ?1",
-                    rusqlite::params![old_job_id],
-                )
-                .map_err(log_and_map)?;
-            transaction
-                .execute(
-                    "DELETE FROM job_log_messages WHERE job_id = ?1",
-                    rusqlite::params![old_job_id],
-                )
-                .map_err(log_and_map)?;
-            transaction
-                .execute(
-                    "DELETE FROM job_statuses WHERE id = ?1",
-                    rusqlite::params![old_job_id],
-                )
-                .map_err(log_and_map)?;
-            transaction
-                .execute(
-                    "DELETE FROM job_configs WHERE id = ?1",
-                    rusqlite::params![old_job_id],
-                )
-                .map_err(log_and_map)?;
-
-            transaction.commit().map_err(log_and_map)?;
-        }
+    let inserted =
+        api_queries::execute_clone_job_without_state(&db, &new_job_id, &auth.user_id, &old_job_id)
+            .await?;
+    if inserted != 1 {
+        return Err(internal_server_error("failed to clone job configuration"));
     }
+
+    api_queries::execute_create_job_status(&db, &new_status_id, &new_job_id, &auth.organization_id)
+        .await?;
+
+    // Deleting job_configs cascades to statuses and log messages on both backends, and to
+    // checkpoints on PostgreSQL. SQLite checkpoints do not have the corresponding foreign key.
+    api_queries::execute_delete_job_checkpoints(&db, &old_job_id).await?;
+    api_queries::execute_delete_job_config(&db, &old_job_id).await?;
 
     Ok(new_job_id)
 }
@@ -854,7 +706,8 @@ mod tests {
         let connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE pipelines (
+                "PRAGMA foreign_keys = ON;
+                CREATE TABLE pipelines (
                     id INTEGER PRIMARY KEY,
                     pub_id TEXT NOT NULL,
                     organization_id TEXT NOT NULL
@@ -883,10 +736,20 @@ mod tests {
                     id TEXT PRIMARY KEY,
                     organization_id TEXT,
                     run_id INTEGER DEFAULT 0 NOT NULL,
-                    state TEXT DEFAULT 'Created' NOT NULL
+                    start_time TIMESTAMP,
+                    finish_time TIMESTAMP,
+                    tasks INTEGER,
+                    failure_message TEXT,
+                    failure_domain TEXT,
+                    state TEXT DEFAULT 'Created' NOT NULL,
+                    state_context TEXT DEFAULT '{\"version\": 1}' NOT NULL,
+                    FOREIGN KEY (id) REFERENCES job_configs(id) ON DELETE CASCADE
                 );
                 CREATE TABLE checkpoints (job_id TEXT NOT NULL);
-                CREATE TABLE job_log_messages (job_id TEXT NOT NULL);
+                CREATE TABLE job_log_messages (
+                    job_id TEXT NOT NULL,
+                    FOREIGN KEY (job_id) REFERENCES job_configs(id) ON DELETE CASCADE
+                );
                 INSERT INTO pipelines (id, pub_id, organization_id)
                     VALUES (1, 'pl_1', 'org_1');
                 INSERT INTO job_configs
