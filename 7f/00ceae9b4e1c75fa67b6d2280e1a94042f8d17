@@ -1,0 +1,21 @@
+k8s/cdk8s/config.ts
+  s_2c3ca2901d7882::t_eb19dbf303ca4a 516-555
+  s_2c3ca2901d7882::t_8f073a2b892dbf 513-515
+  s_2c3ca2901d7882::t_c141b036801a34 556
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7f00ceae9b4e1c75fa67b6d2280e1a94042f8d17",
+  "prompts": {},
+  "sessions": {
+    "s_2c3ca2901d7882": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_01200ab16ffeYD6rsOMj576yVY",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
