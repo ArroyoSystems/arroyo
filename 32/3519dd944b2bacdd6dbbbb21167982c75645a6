@@ -1,0 +1,25 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "323519dd944b2bacdd6dbbbb21167982c75645a6",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_9ae75f405cbe64": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08feadd80ffeZkj0ZjthKnCr38",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

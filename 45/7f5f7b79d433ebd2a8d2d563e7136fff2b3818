@@ -1,0 +1,24 @@
+crates/arroyo-controller/src/schedulers/cloudchamber/colostat.rs
+  s_ccf6662b05b76a::t_d0fb247fbda5e1 4,117-118,130,134-136,139-144,279,294,304,314
+  s_ccf6662b05b76a::t_efb21614c88a5d 110
+  s_ccf6662b05b76a::t_597f2c46522ff9 287
+crates/arroyo-controller/src/schedulers/cloudchamber/mod.rs
+  s_ccf6662b05b76a::t_3b74c83d8bb95e 519,805,875
+  s_ccf6662b05b76a::t_d0fb247fbda5e1 248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "457f5f7b79d433ebd2a8d2d563e7136fff2b3818",
+  "prompts": {},
+  "sessions": {
+    "s_ccf6662b05b76a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04b53bd60ffevF1fFh3WYs7qRc",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

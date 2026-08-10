@@ -1,0 +1,22 @@
+docker/Dockerfile.cloudflare
+  s_c72db0d5e19446::t_478a0fefb1a1f3 14-16
+  s_c72db0d5e19446::t_821044da5ec086 20,57-59
+  s_c72db0d5e19446::t_ba9ae1d5a035b7 18-19,28,38-39,43,54
+  s_c72db0d5e19446::t_cf0daeb13fe62b 45-46,51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd930639fdf00f573d9dd5d3eac20c340222f919",
+  "prompts": {},
+  "sessions": {
+    "s_c72db0d5e19446": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04ace32a4ffeTuD6XwU70cevbG",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

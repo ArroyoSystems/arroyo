@@ -1,0 +1,21 @@
+crates/arroyo-api/src/lib.rs
+  s_9ae75f405cbe64::t_0b6b97d2a54f95 154
+crates/arroyo-server-common/src/lib.rs
+  s_9ae75f405cbe64::t_204cda29b04676 359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8df762d5baabb58b1b7595f9c0959caafc9005b5",
+  "prompts": {},
+  "sessions": {
+    "s_9ae75f405cbe64": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08feadd80ffeZkj0ZjthKnCr38",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+crates/arroyo-rpc/src/config_cf.rs
+  s_3a2fa084876766::t_83c2953ca6403c 152-171
+crates/arroyo-rpc/src/config.rs
+  s_3a2fa084876766::t_2d164d559ccffa 454-457
+crates/arroyo-controller/src/states/leader_pausing.rs
+  s_3a2fa084876766::t_2c04c4dd9544ea 1-33
+crates/arroyo-controller/src/states/leader_running.rs
+  s_3a2fa084876766::t_ef2a793cc04f42 72-74
+  s_3a2fa084876766::t_dd1a569a6adc15 16,18
+  s_3a2fa084876766::t_e8a35955e2cd12 4,6
+  s_3a2fa084876766::t_15008b2c63013b 197-224
+crates/arroyo-controller/src/states/mod.rs
+  s_3a2fa084876766::t_c44c5505825e85 50
+  s_3a2fa084876766::t_8f51ae934614ae 23
+  s_3a2fa084876766::t_a9bfdaf31a22e7 1147-1151
+  s_3a2fa084876766::t_d397e26aec8767 57
+  s_3a2fa084876766::t_b58e1ddb1d86fd 360-375
+  s_3a2fa084876766::t_00d376603f7ebd 324
+crates/arroyo-rpc/default.toml
+  s_3a2fa084876766::t_c1059c21b9315e 116-119
+crates/arroyo-api/src/jobs.rs
+  s_3a2fa084876766::t_baeecb865c19ff 234-243
+crates/arroyo-controller/src/states/auto_pause_cf.rs
+  s_3a2fa084876766::t_3133a0bb08f311 1-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8c3a44703585a6c887f3faa3662c953e0b92fe8b",
+  "prompts": {},
+  "sessions": {
+    "s_3a2fa084876766": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05afbb53dffemzNMrgWF6ug4GS",
+        "model": "claude-opus-5"
+      },
+      "human_author": "aayushnair <aayush@cloudflare.com>"
+    }
+  }
+}

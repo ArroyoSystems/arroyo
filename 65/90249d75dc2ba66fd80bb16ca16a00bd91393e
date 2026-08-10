@@ -1,0 +1,27 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_48ab8122596cc9::t_fc5e58fdb50237 228
+  s_48ab8122596cc9::t_e03cdd8dcda2cb 262
+  s_48ab8122596cc9::t_3b5c3974fad15b 197-203,208,210,215,219,229-235,237-239,241,243,255,258,264-265,270,273,277,281,283,285,288,293,298-299,309,315-316,321
+  s_48ab8122596cc9::t_a7907e5c60c6e7 46
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_48ab8122596cc9::t_d79239c7b0e335 421,424,449,671,693,914
+  s_48ab8122596cc9::t_8d8cb683928c43 907
+  s_48ab8122596cc9::t_fa207801c863f3 28-30
+  s_48ab8122596cc9::t_2f9a2b724c8d90 927
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6590249d75dc2ba66fd80bb16ca16a00bd91393e",
+  "prompts": {},
+  "sessions": {
+    "s_48ab8122596cc9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0463c76fdffeEkN0S1vnjFYWrT",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

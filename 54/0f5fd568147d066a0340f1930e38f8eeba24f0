@@ -1,0 +1,24 @@
+docker/Dockerfile.cloudflare
+  s_8adc7fd3fc5830::t_f6ec2831b32dc6 55
+  s_8adc7fd3fc5830::t_6a1c2563303554 26,29
+  s_8adc7fd3fc5830::t_e3c5d99ad77492 4
+  s_8adc7fd3fc5830::t_f85141e97da189 25
+  s_8adc7fd3fc5830::t_f13c6166ce1002 3,10-13,16-18,47,52
+  s_8adc7fd3fc5830::t_305670e0a11261 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "540f5fd568147d066a0340f1930e38f8eeba24f0",
+  "prompts": {},
+  "sessions": {
+    "s_8adc7fd3fc5830": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_047d5de64ffeXkBg2RBNV2DKW6",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

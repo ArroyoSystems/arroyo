@@ -1,0 +1,19 @@
+k8s/arroyo-cloudflare/overlays/staging.yaml
+  s_7fdc4607321144::t_e90d797bc335e0 34,124
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "190747dd28ad40d0b52ed89e91ae8bbaf030c11d",
+  "prompts": {},
+  "sessions": {
+    "s_7fdc4607321144": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03921bd20ffeH9EwIIRUaTmqmI",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

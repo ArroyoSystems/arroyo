@@ -1,0 +1,22 @@
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_441e516a8219d8::t_d02bc0af78163e 302
+  s_441e516a8219d8::t_ad517c9fa3569d 374-376
+  s_441e516a8219d8::t_e1c0bd44715f7c 386,389,403,419
+  s_441e516a8219d8::t_c09b5547cb664a 356,363-364,377-378
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a762c41573898bcb41db02e2e0554acd1f9f5bf0",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

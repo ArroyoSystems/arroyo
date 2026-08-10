@@ -1,0 +1,19 @@
+crates/arroyo-controller/src/lib.rs
+  s_65e281a2d3fccb::t_2287aff18ba159 654
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8bf3ab73f1e2b8e8b6dc8f0e1952b5b6f81b5b7b",
+  "prompts": {},
+  "sessions": {
+    "s_65e281a2d3fccb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_055a91ddfffeP9laA5q2se1VDu",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

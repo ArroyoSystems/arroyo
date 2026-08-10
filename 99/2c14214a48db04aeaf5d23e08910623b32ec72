@@ -1,0 +1,27 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_1537a68366fd8e::t_c6c6d677028039 200,218,263,274,280
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_1537a68366fd8e::t_dc65753dc32884 6-8,23,25-26,33-48,63-71,88-96,100-101,104-107,152,157-176,195-196,200-204,209-210
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_1537a68366fd8e::t_0ac3e902ece406 29,107,112,297,355,379
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_1537a68366fd8e::t_8ae1da941d231d 97,109
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_1537a68366fd8e::t_db253317099832 380,550,816
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "992c14214a48db04aeaf5d23e08910623b32ec72",
+  "prompts": {},
+  "sessions": {
+    "s_1537a68366fd8e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05bd0a4d7ffeWSymqsrXwsdwAQ",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

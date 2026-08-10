@@ -1,0 +1,25 @@
+crates/arroyo-controller/src/states/leader_pausing.rs
+  s_3a2fa084876766::t_ea32d64d1d0819 1-3
+  s_3a2fa084876766::t_7c3a2399a8c108 4-6
+  s_3a2fa084876766::t_ca853881d5e869 10-12
+  s_3a2fa084876766::t_42f6d49bd48e9d 7-9
+  s_3a2fa084876766::t_645f4da18b42cf 13-15
+crates/arroyo-api/src/jobs.rs
+  s_3a2fa084876766::t_8559e75a8f22ea 445-447
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "71429293949cc3991352846c8fd897bb5f78e32e",
+  "prompts": {},
+  "sessions": {
+    "s_3a2fa084876766": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05afbb53dffemzNMrgWF6ug4GS",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}

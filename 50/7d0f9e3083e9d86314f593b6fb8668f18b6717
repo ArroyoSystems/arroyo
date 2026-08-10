@@ -1,0 +1,58 @@
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_441e516a8219d8::t_14953df406b5ec 1-22,940-963
+  s_441e516a8219d8::t_6ffb08854b4bf6 23-939
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_7c14c0dd85ccf8::t_c45eadbeac6feb 1-219
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_441e516a8219d8::t_6ffb08854b4bf6 285-395
+  s_441e516a8219d8::t_41023e234cddc8 1-284,396-588
+crates/arroyo-server-common/src/lib_cf.rs
+  s_441e516a8219d8::t_4b2f27fb0b9ce3 34-36
+  s_7c14c0dd85ccf8::t_6f6e89b4a3c98c 37-38,44-45,322,349,394,406-412,427-432,440-448,588
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_441e516a8219d8::t_aab04ca431b6d9 1-2,4-327
+  s_441e516a8219d8::t_4b2df7f91cb0f0 3
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_441e516a8219d8::t_863be40b10fb71 785-790
+  s_441e516a8219d8::t_620756c83d06b1 796,801-802,807,811,816
+  s_441e516a8219d8::t_bad65907ca6b68 705
+  s_441e516a8219d8::t_e441e1f28593ca 1-122,126,128-146,150,152-172,726-739,741-750,752-756,758-761,763-784,792-795,797-800,803-806,808-810,812-815,817-819
+  s_441e516a8219d8::t_e99e939703ab01 704,740
+  s_441e516a8219d8::t_9a8aa5f7a8a329 751
+  s_441e516a8219d8::t_de52929feb8f61 757,762
+  s_441e516a8219d8::t_1da0cb3877e9c6 491-495
+  s_441e516a8219d8::t_6ffb08854b4bf6 123-125,127,147-149,151,173-186,188-194,204-490,496-703,706-725,791
+  s_441e516a8219d8::t_82209e9d620cfb 187,195-203
+crates/arroyo-connectors/src/superbuffer/mod.rs
+  s_441e516a8219d8::t_6ffb08854b4bf6 177
+  s_441e516a8219d8::t_8d0500e8e94bc5 1-20,22-176,178-248
+  s_441e516a8219d8::t_96967eccf86f26 21
+crates/arroyo-connectors/src/lib.rs
+  s_7c14c0dd85ccf8::t_93424dd2d65d3a 36,66
+crates/arroyo-connectors/src/superbuffer/superbuffer.svg
+  s_441e516a8219d8::t_91518d129a9155 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "507d0f9e3083e9d86314f593b6fb8668f18b6717",
+  "prompts": {},
+  "sessions": {
+    "s_441e516a8219d8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09504f3dfffeKphcv0GtaGjj57",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    },
+    "s_7c14c0dd85ccf8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099a3b2b5ffeQJYo8y3Ei9Jxox",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

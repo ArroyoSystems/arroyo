@@ -1,0 +1,22 @@
+crates/arroyo-worker/src/job_controller/job_metrics.rs
+  s_3a2fa084876766::t_1a0ffc0dd817f8 311-313
+  s_3a2fa084876766::t_adc7bebe395ff1 314-317,320-368,370
+  s_3a2fa084876766::t_5113903d074ea1 369
+  s_3a2fa084876766::t_9d3f1eec0db01f 371
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "52dcdb7e2ab891ec90c39e168c38fe71fd689992",
+  "prompts": {},
+  "sessions": {
+    "s_3a2fa084876766": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05afbb53dffemzNMrgWF6ug4GS",
+        "model": "claude-opus-5"
+      },
+      "human_author": "aayushnair <aayush@cloudflare.com>"
+    }
+  }
+}

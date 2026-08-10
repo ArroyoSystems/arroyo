@@ -1,0 +1,22 @@
+crates/arroyo-api/src/cf_authentication.rs
+  s_63f798d0940e79::t_6afc5ec3ec3f21 22
+  s_63f798d0940e79::t_7fc58009088123 416
+  s_63f798d0940e79::t_d2badee01a86b9 68-70
+  s_63f798d0940e79::t_eb0680495bd81e 71-75
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dc435fd999c93a39a1ee3d176b70f4917c8d5126",
+  "prompts": {},
+  "sessions": {
+    "s_63f798d0940e79": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_07edf4618ffeO042Xiwlw3LLoj",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

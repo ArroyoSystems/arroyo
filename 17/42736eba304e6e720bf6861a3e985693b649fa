@@ -1,0 +1,19 @@
+crates/arroyo-worker/src/lib.rs
+  s_2c20e92cf38e00::t_43e92e7954b388 1434,1437-1439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1742736eba304e6e720bf6861a3e985693b649fa",
+  "prompts": {},
+  "sessions": {
+    "s_2c20e92cf38e00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_032b7a55fffeKCiQ1M8uxKhgOW",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

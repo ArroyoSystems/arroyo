@@ -1,0 +1,27 @@
+crates/arroyo-controller/src/states/mod.rs
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 301-302
+crates/arroyo-controller/src/alerts.rs
+  s_1f6ad99a3e9fe1::t_cecbb8f80fc816 177,188-204,207-209,211-221,224-232,272-273,275-309,311-326,328-353,364-367,408,412,414-420,422-423,425-433
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 2,7,16-17,26-31,34-35,44-45,63-67,70-76,105,107,111,115-121,129,131-135,145,205,403,405,409
+  s_1f6ad99a3e9fe1::t_8306793442f065 79-81
+  s_1f6ad99a3e9fe1::t_bfc8aee85dca71 222-223,421
+  s_1f6ad99a3e9fe1::t_f906e63926033d 178-187,310,354-363,424
+crates/arroyo-rpc/src/config.rs
+  s_1f6ad99a3e9fe1::t_babf6683cd6079 484-486
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b20c8aa793e68ae3a8a401e365c364c803097050",
+  "prompts": {},
+  "sessions": {
+    "s_1f6ad99a3e9fe1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0317af334ffezuzt9iuSHs6cEQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

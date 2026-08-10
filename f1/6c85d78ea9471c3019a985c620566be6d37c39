@@ -1,0 +1,19 @@
+.gitlab-ci.yml
+  s_3b5c8e8d8c0e13::t_ada3044b8bf731 109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f16c85d78ea9471c3019a985c620566be6d37c39",
+  "prompts": {},
+  "sessions": {
+    "s_3b5c8e8d8c0e13": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_08f185531ffeh1R6hz0PNQmkDU",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

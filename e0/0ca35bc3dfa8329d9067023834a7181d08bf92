@@ -1,0 +1,19 @@
+crates/arroyo-controller/src/states/leader_running.rs
+  s_2c20e92cf38e00::t_5df12b01cced1b 208,217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e00ca35bc3dfa8329d9067023834a7181d08bf92",
+  "prompts": {},
+  "sessions": {
+    "s_2c20e92cf38e00": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_032b7a55fffeKCiQ1M8uxKhgOW",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "aayushnair <aayush@cloudflare.com>"
+    }
+  }
+}

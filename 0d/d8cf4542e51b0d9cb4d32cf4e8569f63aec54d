@@ -1,0 +1,78 @@
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_1537a68366fd8e::t_f45b9ae7f8334e 180-182
+  s_1537a68366fd8e::t_54099d2d385ffe 179,415,423,446,448,670,692,913
+  s_1537a68366fd8e::t_7f1836a8985ae3 921,926-927
+  s_1537a68366fd8e::t_5061543e9d581b 584-586
+  s_1537a68366fd8e::t_9b14588e2052f3 411,464,519
+  s_1537a68366fd8e::t_2822fa41a72a72 413,421
+  s_1537a68366fd8e::t_32ca5248e166e5 906-911
+  s_1537a68366fd8e::t_adc3e9309bf9a0 587
+  s_1537a68366fd8e::t_7c6e38b1e92c48 412,420
+  s_1537a68366fd8e::t_a32ec2c95c4c35 14
+  s_1537a68366fd8e::t_1283dde837a2b8 380,550,816
+  s_1537a68366fd8e::t_fbe6a8b8ff5295 380,550,816
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_1537a68366fd8e::t_cbaa22a2a63f80 90
+  s_1537a68366fd8e::t_ff11a18fd9857b 491
+  s_1537a68366fd8e::t_194835941d29fe 356
+  s_1537a68366fd8e::t_215aeabfa37ba9 187-188
+  s_1537a68366fd8e::t_9c9a12332d6321 126-129
+  s_1537a68366fd8e::t_48ab5f62cc25f0 114
+  s_1537a68366fd8e::t_3b78a042fbf472 130-132,143,146
+  s_1537a68366fd8e::t_d7947e9bf10700 492-493
+  s_1537a68366fd8e::t_33635de436d20b 505,519
+  s_1537a68366fd8e::t_1283dde837a2b8 97,109
+  s_1537a68366fd8e::t_401cca9fb4d326 97
+  s_1537a68366fd8e::t_5e43fb2597a6ca 109
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_1537a68366fd8e::t_6525c65ec9fe64 32
+  s_1537a68366fd8e::t_8f928b82f109f6 218,222-223
+  s_1537a68366fd8e::t_84226ec020b875 226,234,249
+  s_1537a68366fd8e::t_e5f7d14910df45 225
+  s_1537a68366fd8e::t_688c95b5f05301 217
+  s_1537a68366fd8e::t_f5297c40a46a06 99
+  s_1537a68366fd8e::t_c7f9938c99e338 221
+  s_1537a68366fd8e::t_1283dde837a2b8 107,112,297,355,379
+  s_1537a68366fd8e::t_6017e098affc7d 112
+  s_1537a68366fd8e::t_4838c4a16ec948 107
+  s_1537a68366fd8e::t_916b7b9d1b8a88 379
+  s_1537a68366fd8e::t_f28e786492effc 355
+  s_1537a68366fd8e::t_882933da0fbee1 297
+  s_1537a68366fd8e::t_e467852a2a190a 29
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_1537a68366fd8e::t_5d96c55a3570a5 97
+  s_1537a68366fd8e::t_09b0a987600c21 139
+  s_1537a68366fd8e::t_3ed3529cf9dbad 18
+  s_1537a68366fd8e::t_7cd4de662358e1 174
+  s_1537a68366fd8e::t_3d9cca4002d7f7 43-44
+  s_1537a68366fd8e::t_cb4e03fd35ec03 1-5,16-17,23-42,45-55,59-61,67-72,76,83-96,98-138,140-156,158-173,175-177,180
+  s_1537a68366fd8e::t_2aa87ad0c61dd4 178
+  s_1537a68366fd8e::t_ca198d4f56bfc8 263
+  s_1537a68366fd8e::t_3fa3f55d0e28a5 274
+  s_1537a68366fd8e::t_d49863e2d61495 218
+  s_1537a68366fd8e::t_985b729528ac32 200
+  s_1537a68366fd8e::t_faa74a27963c9e 280
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_1537a68366fd8e::t_1283dde837a2b8 6-8,23,25-26,33-48,63-71,88-96,100-101,104-106,152,157-176,195-196,200-204,209-210
+  s_1537a68366fd8e::t_adf107f19165fb 6-8,23,33-37,39-41,43-48,63-71,88-96,100-101,104-106,152,157-176,195-196,200
+  s_1537a68366fd8e::t_58b003fd5129f6 25,38,42
+  s_1537a68366fd8e::t_8c2b4d77e4246b 26
+  s_1537a68366fd8e::t_8a83b0fa9ba9ce 201-203
+  s_1537a68366fd8e::t_ae236df2a1a4ec 107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0dd8cf4542e51b0d9cb4d32cf4e8569f63aec54d",
+  "prompts": {},
+  "sessions": {
+    "s_1537a68366fd8e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_05bd0a4d7ffeWSymqsrXwsdwAQ",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
