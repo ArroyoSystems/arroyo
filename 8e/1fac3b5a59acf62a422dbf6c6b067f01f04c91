@@ -1,0 +1,35 @@
+crates/arroyo-rpc/src/config.rs
+  s_1f6ad99a3e9fe1::t_009134465f67c2 475-480
+  s_1f6ad99a3e9fe1::t_da0a2d9727c387 460
+  s_1f6ad99a3e9fe1::t_90d7ae58e9bd5b 18,482-497
+  s_1f6ad99a3e9fe1::t_e3722ef3531e31 459,461-462,474,481
+  s_1f6ad99a3e9fe1::t_d413693a50d08a 498
+crates/arroyo-controller/src/alerts.rs
+  s_1f6ad99a3e9fe1::t_8e3446173f5edd 1-2,7
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 3-6,8-22,35,37-125,127-129,131-239
+  s_1f6ad99a3e9fe1::t_33249dae837a6e 23-34,36,126,130
+crates/arroyo-controller/src/lib.rs
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 54,225,663,698,789
+crates/arroyo-rpc/default.toml
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 125
+crates/arroyo-controller/src/states/mod.rs
+  s_1f6ad99a3e9fe1::t_4b9aa842821062 298-304,778-781,787,796-797,800-801,812,846,959,1166-1167
+  s_1f6ad99a3e9fe1::t_c8d4846d0c6764 591
+  s_1f6ad99a3e9fe1::t_a812a0f58f2988 32,997,1037,1067,1078,1087,1202,1225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8e1fac3b5a59acf62a422dbf6c6b067f01f04c91",
+  "prompts": {},
+  "sessions": {
+    "s_1f6ad99a3e9fe1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0317af334ffezuzt9iuSHs6cEQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

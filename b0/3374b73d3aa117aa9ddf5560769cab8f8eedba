@@ -1,0 +1,60 @@
+k8s/cdk8s/alerts.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 18,37
+k8s/cdk8s/api.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 34-35
+k8s/cdk8s/networking.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 35,42,49,60,157-158
+  s_9227b589ea698a::t_2eda898275dd03 71
+AGENTS.md
+  s_9227b589ea698a::t_da899705a54bc6 11
+k8s/cdk8s/NETWORKING.md
+  s_9227b589ea698a::t_fff05e33f896a9 2-6,11-20,22-29,34-37,40-46,48-56,64-67,70-77,80-105,107-111,115-222,224-225,227-228,230,232-240,242-244,250-261,263-293,296-310,313,317-320,322,324,326,331-334,338-339,353,370-388,391,396-397,400,406-416,418-427,429,431-454,456-458,460
+  s_9227b589ea698a::t_653a0adf12e5ad 323
+  s_9227b589ea698a::t_d75ba7191fa1ec 356-359,362-365,367-368,395
+  s_9227b589ea698a::t_12178c7f0f0a1d 1,7-10,21,30-33,38-39,57-63,112-114,241,245,248-249,311-312,315-316,321,325,327-330,336-337,340-352
+  s_9227b589ea698a::t_792c7d891111ef 47,68-69,106,335,354-355,360-361,366,369
+  s_9227b589ea698a::t_fec97c31f87c1d 78-79
+  s_9227b589ea698a::t_e290fc2b7fbe75 223,226,229,231,246-247,262,294-295,314,389-390,392-394,398-399,401-405,417,428,430,455,459
+CF_README.md
+  s_9227b589ea698a::t_da899705a54bc6 13,48-50
+k8s/arroyo-cloudflare/NETWORKING.md
+  s_9227b589ea698a::t_fec97c31f87c1d 1,3-4
+k8s/cdk8s/ingress.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 25,37,52,80
+k8s/cdk8s/config.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 195,244,260,275,344-345,416
+  s_9227b589ea698a::t_fec97c31f87c1d 132
+  s_9227b589ea698a::t_2fe49e9c4a996a 133
+k8s/arroyo-cloudflare/README.md
+  s_9227b589ea698a::t_fff05e33f896a9 117,151
+  s_9227b589ea698a::t_2eda898275dd03 3-6,282,303
+  s_9227b589ea698a::t_653a0adf12e5ad 20,48,51,65,67-72,118,123
+k8s/cdk8s/README.md
+  s_9227b589ea698a::t_da899705a54bc6 1-98,100-126,128,130-137,153-190,194-214,217-219,221-228
+  s_9227b589ea698a::t_fec97c31f87c1d 220
+  s_9227b589ea698a::t_792c7d891111ef 237-238,241-242,249-251
+  s_9227b589ea698a::t_2eda898275dd03 99,127,129,138-152,191-193,215-216,229-236
+  s_9227b589ea698a::t_d75ba7191fa1ec 239-240,243-248
+k8s/cdk8s/k8s-helpers.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 10-11
+k8s/cdk8s/secrets.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 15-16,29-30
+k8s/cdk8s/controller.ts
+  s_9227b589ea698a::t_c29fff6ed27f09 48,66,175,184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b03374b73d3aa117aa9ddf5560769cab8f8eedba",
+  "prompts": {},
+  "sessions": {
+    "s_9227b589ea698a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0272ea3ceffe6o3D3wy4jrMtW2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
