@@ -1,6 +1,6 @@
 use super::{
-    JobContext, State, StateError, Transition, fatal, leader_stop_if_desired_running,
-    scheduling::Scheduling,
+    JobContext, State, StateError, Transition, controller_job_failure,
+    leader_stop_if_desired_running, scheduling::Scheduling,
 };
 use crate::JobMessage;
 use crate::states::recovering::Recovering;
@@ -71,7 +71,11 @@ impl State for LeaderRestarting {
                         }
                         resp = ctx.leader_manager.as_mut().expect("leader manager not initialized").wait_for_state(JobState::JobStopped) => {
                             return if let Err(e) = resp {
-                                Err(fatal("failed while waiting for checkpoint-stop during restart",e))
+                                ctx.handle_job_failure(*self, controller_job_failure(
+                                    format!("failed while taking final checkpoint: {e}"),
+                                    rpc::ErrorDomain::Internal,
+                                    rpc::RetryHint::WithBackoff,
+                                )).await
                             } else {
                                 Ok(Transition::next(*self, Scheduling {}))
                             };
