@@ -1,0 +1,44 @@
+k8s/cdk8s/chart.test.ts
+  s_87d4a6631841b3::t_36481b0bed6916 20
+  s_87d4a6631841b3::t_849f52473b8d71 29-31,33,81-83,96,109,120,123-127,133,164
+  s_64531296af2a5a::t_f2ef26bf2d8218 131-132,134,136
+  s_64531296af2a5a::t_bfa0d5bd17cc04 149-151
+  s_87d4a6631841b3::t_2abbbd32c76161 121-122,128-130,135,137-140
+k8s/cdk8s/config.ts
+  s_2c3ca2901d7882::t_8f073a2b892dbf 527-529
+  s_2c3ca2901d7882::t_eb19dbf303ca4a 530-569
+  s_2c3ca2901d7882::t_c141b036801a34 570
+  s_2c3ca2901d7882::t_10867ba0899c2b 525-526
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "722a013f2391092aa2ec0b31b3f1742bd08b2279",
+  "prompts": {},
+  "sessions": {
+    "s_2c3ca2901d7882": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_01200ab16ffeYD6rsOMj576yVY",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    },
+    "s_64531296af2a5a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00e564400ffe5uWqxZK0ZF1J1z",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_87d4a6631841b3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_011f1382fffeCMUBo67fnLUFDg",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
