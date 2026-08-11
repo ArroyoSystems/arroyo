@@ -1,0 +1,56 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_4729dbec050de2::t_614dd4f0190014 211,220
+  s_4729dbec050de2::t_168bb42764fb8d 581
+  s_4729dbec050de2::t_a26e2c611bf21a 302,307
+  s_4729dbec050de2::t_fc5d56c896b3de 514-520
+  s_4729dbec050de2::t_43d28d450f5a8c 230,234
+  s_4729dbec050de2::t_6a9265a172032c 103,105
+  s_4729dbec050de2::t_ddb0e80c1c1afa 125-126
+  s_4729dbec050de2::t_573477d4c132e7 146
+  s_4729dbec050de2::t_9cc17e3ca2a01c 558-562
+  s_4729dbec050de2::t_87ebce5b4d4742 495-498
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_4729dbec050de2::t_f77a72fee237c0 141,205,263,344-346
+  s_4729dbec050de2::t_c7d8310f3f6d9f 173,188,201-202,212-213,226-228,239
+  s_4729dbec050de2::t_c6ab249c4567f9 3-5,7,25,46-47,52-54,56-57,61-62,68,71,75,77,89,126,129,132,135,138,148,153,170-171,174,186-187,197-198,200,203,210,217,220-222,224,246,249,255-256,259-261,268,271-276,280,283,302-304,333-335,353-358,372-377,381,384-392,400,414,421,424,433,436-437
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_4729dbec050de2::t_f77a72fee237c0 662
+  s_4729dbec050de2::t_25256f66cdb2f8 684,703
+  s_4729dbec050de2::t_34a4ff3bf8ab67 384,566,829
+  s_4729dbec050de2::t_ae8ec6b4fe38f1 914,926,934,939-940,943
+  s_4729dbec050de2::t_5db39fe2b3f37f 458,462,475,477
+  s_4729dbec050de2::t_eb8a2919a46dc6 165-166,196-197,214-215,238-239,260,270,292,298,315,338-339,356-357,661,677-678,707,731-732
+  s_4729dbec050de2::t_0213514dd442b6 255
+  s_4729dbec050de2::t_35dfbe735cec31 699
+  s_4729dbec050de2::t_8ab85945bdda6d 513,516,530,532
+  s_4729dbec050de2::t_78688bad42312a 29
+  s_4729dbec050de2::t_c5f67ea060dd24 287
+  s_4729dbec050de2::t_8325b2f96e576f 386,414,439
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_4729dbec050de2::t_34a4ff3bf8ab67 171-176
+  s_4729dbec050de2::t_2bbe50173fe826 236,243,256
+  s_4729dbec050de2::t_42eb9b394d9350 99
+  s_4729dbec050de2::t_36ba9f268bdc6e 216
+  s_4729dbec050de2::t_61c9209f7c5997 235
+  s_4729dbec050de2::t_82efaf4fd774b5 217,221-222,254,260
+  s_4729dbec050de2::t_00bde449083c95 267
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_4729dbec050de2::t_f77a72fee237c0 166
+  s_4729dbec050de2::t_64c07de6822490 165,167,170-172,174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ac92894cc492d852c8302f61cad0411f422003ba",
+  "prompts": {},
+  "sessions": {
+    "s_4729dbec050de2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_03092364dffeCHN4JbN9Ud25aT",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
