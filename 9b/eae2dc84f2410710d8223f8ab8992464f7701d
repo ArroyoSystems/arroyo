@@ -1,0 +1,53 @@
+crates/arroyo-connectors/src/filesystem/sink/v2/open_file.rs
+  s_96905c4630b8a8::t_43ee984495dd1b 330
+  s_96905c4630b8a8::t_686d5084ce576a 382
+  s_96905c4630b8a8::t_5a9e7b5eb64b8e 321
+  s_96905c4630b8a8::t_378635ead261b5 1012
+  s_96905c4630b8a8::t_dec1cd40277c0d 800
+  s_96905c4630b8a8::t_37ec68e326eb19 214
+  s_96905c4630b8a8::t_b1ead8c629a806 484
+  s_96905c4630b8a8::t_3e90c1f581155b 225,241
+  s_96905c4630b8a8::t_353eb2099bd106 250
+crates/arroyo-connectors/src/filesystem/sink/v2/uploads.rs
+  s_96905c4630b8a8::t_e03692d80051fa 144
+  s_96905c4630b8a8::t_752c4b9e1c6c82 13
+  s_96905c4630b8a8::t_af973f5b2a58fb 98,213-215,226-237,243-246
+  s_96905c4630b8a8::t_4703941a305186 15
+  s_96905c4630b8a8::t_cb5a23eef3c21b 224,239-242
+  s_96905c4630b8a8::t_0d8298dec89008 79-82,84-87,106
+  s_96905c4630b8a8::t_c3e24614eb13ce 141,143,145-148,197
+  s_96905c4630b8a8::t_0b650b7b9c3317 238
+  s_96905c4630b8a8::t_3276fc7f3e0901 83
+  s_96905c4630b8a8::t_29395ab09dd1c1 75,77-78,88-93,107-112
+  s_96905c4630b8a8::t_4f594333d52b4f 149-163,201-204
+  s_96905c4630b8a8::t_cfad94fb939442 94-97
+  s_96905c4630b8a8::t_9e746bb73b2773 113-115
+  s_96905c4630b8a8::t_f4b2aca2891844 164-165
+  s_96905c4630b8a8::t_5a2a3f84449381 205-207,210-212
+crates/arroyo-connectors/src/filesystem/sink/v2/mod.rs
+  s_96905c4630b8a8::t_c17b73217f74f7 273
+  s_96905c4630b8a8::t_b6e7ba2363e9b8 462
+  s_96905c4630b8a8::t_801794455553e7 776
+  s_96905c4630b8a8::t_b326191bf21aeb 242
+  s_96905c4630b8a8::t_5cb9b269886ed3 216
+  s_96905c4630b8a8::t_76a3b8dc1045ed 337
+  s_96905c4630b8a8::t_bb95bf692a2e11 487
+  s_96905c4630b8a8::t_2ae1c15353f0ad 536
+  s_96905c4630b8a8::t_30cc6326d1ad35 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9beae2dc84f2410710d8223f8ab8992464f7701d",
+  "prompts": {},
+  "sessions": {
+    "s_96905c4630b8a8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_012175f61ffe0gOeR0fvQ1rGxW",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
