@@ -815,8 +815,11 @@ fn try_handle_set_variable(
     statement: &Statement,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<bool> {
-    if let Statement::SetSessionParam(sqlparser::ast::SetSessionParamKind::Generic(
-        sqlparser::ast::SetSessionParamGeneric { names, value },
+    if let Statement::Set(sqlparser::ast::Set::SetSessionParam(
+        sqlparser::ast::SetSessionParamKind::Generic(sqlparser::ast::SetSessionParamGeneric {
+            names,
+            value,
+        }),
     )) = statement
     {
         if names.len() != 1 {
