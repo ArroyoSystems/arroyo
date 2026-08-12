@@ -4,7 +4,7 @@ version = "0.16.0-dev"
 edition = "2024"
 
 [dependencies]
-progenitor-client = { git = "https://github.com/oxidecomputer/progenitor" }
+progenitor-client = "0.11"
 reqwest = { workspace = true, features = ["json", "stream"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
