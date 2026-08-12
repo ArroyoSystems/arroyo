@@ -16,6 +16,7 @@ use arroyo_rpc::grpc::api;
 use arroyo_rpc::{MetadataField, OperatorConfig};
 use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
 use async_trait::async_trait;
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
@@ -199,6 +200,7 @@ impl OperatorConstructor for LookupJoinConstructor {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let lookup_schema: ArroyoSchema = config.lookup_schema.unwrap().try_into()?;
 
+        let task_context = SessionContext::new().task_ctx();
         let exprs = config
             .key_exprs
             .iter()
@@ -206,7 +208,7 @@ impl OperatorConstructor for LookupJoinConstructor {
                 let expr = PhysicalExprNode::decode(&mut e.left_expr.as_slice())?;
                 Ok(parse_physical_expr(
                     &expr,
-                    registry.as_ref(),
+                    &task_context,
                     &input_schema.schema,
                     &DefaultPhysicalExtensionCodec {},
                 )?)

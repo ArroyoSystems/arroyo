@@ -25,6 +25,7 @@ use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
 };
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
+use datafusion::execution::TaskContext;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use std::borrow::Cow;
 use std::{
@@ -38,7 +39,6 @@ use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 use std::time::Duration;
@@ -409,7 +409,7 @@ impl ActiveSession {
         initial_timestamp: SystemTime,
         sender: UnboundedSender<RecordBatch>,
     ) -> Result<Self> {
-        aggregation_plan.reset()?;
+        let aggregation_plan = aggregation_plan.reset_state()?;
         let result_exec = aggregation_plan.execute(0, SessionContext::new().task_ctx())?;
         Ok(Self {
             data_start: initial_timestamp,
@@ -721,9 +721,9 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
+        let task_context = SessionContext::new().task_ctx();
         let final_execution_plan = final_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
+            &task_context,
             &codec,
         )?;
 

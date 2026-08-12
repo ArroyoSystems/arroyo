@@ -14,6 +14,7 @@ use arroyo_state::global_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark, from_nanos, to_millis};
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
@@ -71,9 +72,10 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
     ) -> anyhow::Result<ConstructedOperator> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
+        let task_context = SessionContext::new().task_ctx();
         let expression = parse_physical_expr(
             &expression,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;

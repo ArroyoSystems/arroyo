@@ -13,10 +13,9 @@ use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::internal_err;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
+use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
-use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
+use datafusion::physical_expr::{PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::{ExecutionPlan, displayable};
 use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
 use datafusion_proto::physical_plan::{
@@ -109,10 +108,11 @@ impl OperatorConstructor for ProjectionConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let output_schema: ArroyoSchema = config.output_schema.unwrap().try_into()?;
+        let task_context = SessionContext::new().task_ctx();
 
         let exprs: anyhow::Result<_> = config
             .exprs
@@ -120,7 +120,7 @@ impl OperatorConstructor for ProjectionConstructor {
             .map(|expr| {
                 Ok(parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice())?,
-                    registry.as_ref(),
+                    &task_context,
                     &input_schema.schema,
                     &DefaultPhysicalExtensionCodec {},
                 )?)
@@ -249,7 +249,7 @@ pub struct StatelessPhysicalExecutor {
 }
 
 impl StatelessPhysicalExecutor {
-    pub fn new(mut proto: &[u8], registry: &Registry) -> anyhow::Result<Self> {
+    pub fn new(mut proto: &[u8], _registry: &Registry) -> anyhow::Result<Self> {
         let batch = Arc::new(RwLock::default());
 
         let plan = PhysicalPlanNode::decode(&mut proto).unwrap();
@@ -257,13 +257,13 @@ impl StatelessPhysicalExecutor {
             context: DecodingContext::SingleLockedBatch(batch.clone()),
         };
 
-        let plan =
-            plan.try_into_physical_plan(registry, &RuntimeEnvBuilder::new().build()?, &codec)?;
+        let task_context = SessionContext::new().task_ctx();
+        let plan = plan.try_into_physical_plan(&task_context, &codec)?;
 
         Ok(Self {
             batch,
             plan,
-            task_context: SessionContext::new().task_ctx(),
+            task_context,
         })
     }
 
@@ -272,7 +272,7 @@ impl StatelessPhysicalExecutor {
             let mut writer = self.batch.write().unwrap();
             *writer = Some(batch);
         }
-        self.plan.reset().expect("reset execution plan");
+        self.plan = self.plan.clone().reset_state().expect("reset execution plan");
         self.plan
             .execute(0, self.task_context.clone())
             .unwrap_or_else(|e| {
@@ -299,7 +299,7 @@ pub fn decode_aggregate(
     schema: &SchemaRef,
     name: &str,
     expr: &PhysicalExprNode,
-    registry: &dyn FunctionRegistry,
+    task_context: &TaskContext,
 ) -> DFResult<Arc<AggregateFunctionExpr>> {
     let codec = &DefaultPhysicalExtensionCodec {};
     let expr_type = expr
@@ -312,13 +312,13 @@ pub fn decode_aggregate(
             let input_phy_expr: Vec<Arc<dyn PhysicalExpr>> = agg_node
                 .expr
                 .iter()
-                .map(|e| parse_physical_expr(e, registry, schema, codec))
+                .map(|e| parse_physical_expr(e, task_context, schema, codec))
                 .collect::<DFResult<Vec<_>>>()?;
-            let ordering_req: LexOrdering = agg_node
+            let ordering_req: Vec<PhysicalSortExpr> = agg_node
                 .ordering_req
                 .iter()
-                .map(|e| parse_physical_sort_expr(e, registry, schema, codec))
-                .collect::<DFResult<LexOrdering>>()?;
+                .map(|e| parse_physical_sort_expr(e, task_context, schema, codec))
+                .collect::<DFResult<Vec<_>>>()?;
             agg_node
                 .aggregate_function
                 .as_ref()
@@ -326,7 +326,7 @@ pub fn decode_aggregate(
                     AggregateFunction::UserDefinedAggrFunction(udaf_name) => {
                         let agg_udf = match &agg_node.fun_definition {
                             Some(buf) => codec.try_decode_udaf(udaf_name, buf)?,
-                            None => registry.udaf(udaf_name)?,
+                            None => task_context.udaf(udaf_name)?,
                         };
 
                         AggregateExprBuilder::new(agg_udf, input_phy_expr)

@@ -19,7 +19,6 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos};
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
@@ -251,9 +250,9 @@ impl OperatorConstructor for WindowFunctionConstructor {
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
+        let task_context = SessionContext::new().task_ctx();
         let window_exec = window_exec.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
+            &task_context,
             &codec,
         )?;
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(

@@ -17,6 +17,8 @@ use arroyo_types::{CheckpointBarrier, SignalMessage, Watermark};
 use arroyo_udf_host::AsyncUdfDylib;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion::execution::context::SessionContext;
+use datafusion::execution::TaskContext;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::from_proto::parse_physical_expr;
@@ -37,7 +39,7 @@ pub struct AsyncUdfOperator {
     allowed_in_flight: u32,
     timeout: Duration,
     config: api::AsyncUdfOperator,
-    registry: Arc<Registry>,
+    task_context: Arc<TaskContext>,
     input_exprs: Vec<Arc<dyn PhysicalExpr>>,
     final_exprs: Vec<Arc<dyn PhysicalExpr>>,
     next_id: u64, // i.e. inputs received so far, should start at 0
@@ -94,7 +96,7 @@ impl OperatorConstructor for AsyncUdfConstructor {
                 allowed_in_flight: config.max_concurrency,
                 timeout: Duration::from_micros(config.timeout_micros),
                 config,
-                registry,
+                task_context: SessionContext::new().task_ctx(),
                 input_exprs: vec![],
                 final_exprs: vec![],
                 next_id: 0,
@@ -199,7 +201,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &self.task_context,
                     &input_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )
@@ -214,7 +216,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &self.task_context,
                     &post_udf_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )

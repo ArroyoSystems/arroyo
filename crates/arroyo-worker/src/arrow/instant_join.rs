@@ -16,7 +16,7 @@ use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time};
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::TaskContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -43,6 +43,7 @@ pub struct InstantJoin {
     left_receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     right_receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
     join_exec: Arc<dyn ExecutionPlan>,
+    task_context: Arc<TaskContext>,
 }
 
 struct InstantComputeHolder {
@@ -89,11 +90,11 @@ impl InstantJoin {
             let (right_sender, right_receiver) = unbounded_channel();
             self.left_receiver.write().unwrap().replace(left_receiver);
             self.right_receiver.write().unwrap().replace(right_receiver);
-            self.join_exec.reset()?;
+            self.join_exec = self.join_exec.clone().reset_state()?;
 
             let new_exec = self
                 .join_exec
-                .execute(0, SessionContext::new().task_ctx())?;
+                .execute(0, self.task_context.clone())?;
             let next_batch_future = NextBatchFuture::new(time, new_exec);
             self.futures.lock().await.push(next_batch_future.clone());
             let exec = InstantComputeHolder {
@@ -393,9 +394,9 @@ impl OperatorConstructor for InstantJoinConstructor {
                 right: right_receiver.clone(),
             },
         };
+        let task_context = SessionContext::new().task_ctx();
         let join_exec = join_physical_plan_node.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
+            &task_context,
             &codec,
         )?;
 
@@ -407,6 +408,7 @@ impl OperatorConstructor for InstantJoinConstructor {
             left_receiver,
             right_receiver,
             join_exec,
+            task_context,
         })))
     }
 }

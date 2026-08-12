@@ -13,7 +13,7 @@ use arroyo_rpc::{
 };
 use arroyo_state::timestamp_table_config;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::TaskContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -36,6 +36,7 @@ pub struct JoinWithExpiration {
     left_passer: Arc<RwLock<Option<RecordBatch>>>,
     right_passer: Arc<RwLock<Option<RecordBatch>>>,
     join_execution_plan: Arc<dyn ExecutionPlan>,
+    task_context: Arc<TaskContext>,
 }
 
 impl JoinWithExpiration {
@@ -117,10 +118,10 @@ impl JoinWithExpiration {
             self.right_passer.write().unwrap().replace(right);
             self.left_passer.write().unwrap().replace(left);
         }
-        self.join_execution_plan.reset().unwrap();
+        self.join_execution_plan = self.join_execution_plan.clone().reset_state().unwrap();
         let mut records = self
             .join_execution_plan
-            .execute(0, SessionContext::new().task_ctx())
+            .execute(0, self.task_context.clone())
             .expect("successfully computed?");
         while let Some(batch) = records.next().await {
             collector.collect(batch?).await?;
@@ -224,10 +225,10 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
                 right: right_passer.clone(),
             },
         };
+        let task_context = SessionContext::new().task_ctx();
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
         let join_execution_plan = join_physical_plan_node.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
+            &task_context,
             &codec,
         )?;
 
@@ -258,6 +259,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
                 left_passer,
                 right_passer,
                 join_execution_plan,
+                task_context,
             },
         )))
     }
