@@ -78,7 +78,7 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
 use datafusion::prelude::col;
-use sqlparser::ast::{OneOrManyWithParens, Statement};
+use sqlparser::ast::Statement;
 use sqlparser::dialect::ArroyoDialect;
 use sqlparser::parser::{Parser, ParserError};
 use std::any::Any;
@@ -815,26 +815,27 @@ fn try_handle_set_variable(
     statement: &Statement,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<bool> {
-    if let Statement::SetVariable {
-        variables, value, ..
-    } = statement
+    if let Statement::SetSessionParam(sqlparser::ast::SetSessionParamKind::Generic(
+        sqlparser::ast::SetSessionParamGeneric { names, value },
+    )) = statement
     {
-        let OneOrManyWithParens::One(opt) = variables else {
+        if names.len() != 1 {
             return plan_err!("invalid syntax for `SET` call");
-        };
+        }
 
-        if opt.to_string() != "updating_ttl" {
+        let opt = &names[0];
+        if opt != "updating_ttl" {
             return plan_err!(
                 "invalid option '{}'; supported options are 'updating_ttl'",
                 opt
             );
         }
 
-        if value.len() != 1 {
-            return plan_err!("invalid `SET updating_ttl` call; expected exactly one expression");
-        }
-
-        schema_provider.planning_options.ttl = duration_from_sql(value[0].clone())?;
+        // Parse the value as a SQL expression
+        let expr = Parser::new(&ArroyoDialect {})
+            .try_with_sql(value)?
+            .parse_expr()?;
+        schema_provider.planning_options.ttl = duration_from_sql(expr)?;
 
         return Ok(true);
     }
