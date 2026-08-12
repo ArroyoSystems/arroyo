@@ -11,8 +11,8 @@ use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue, Spans, TableReference,
-    not_impl_err, plan_err,
+    Column, DataFusionError, JoinConstraint, JoinType, NullEquality, Result, ScalarValue, Spans,
+    TableReference, not_impl_err, plan_err,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
@@ -332,7 +332,7 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             join_type,
             join_constraint: JoinConstraint::On,
             schema: _,
-            null_equals_null: false,
+            null_equality: NullEquality::NullEqualsNothing,
         } = join
         else {
             return not_impl_err!("can't handle join constraint other than ON");
@@ -359,7 +359,7 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             on,
             join_type,
             join_constraint: JoinConstraint::On,
-            null_equals_null: false,
+            null_equality: NullEquality::NullEqualsNothing,
             filter,
         });
 

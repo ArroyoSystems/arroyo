@@ -35,7 +35,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: clippy, rustfmt
-          toolchain: 1.95
+          toolchain: 1.94
       - uses: actions/cache@v4
         with:
           path: |

@@ -13,7 +13,7 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 bytes = { workspace = true }
 tracing = { workspace = true }
 
-aws-credential-types = "1.2.0"
+aws-credential-types = "=1.2.13"
 aws-config = { workspace = true }
 rand = { workspace = true }
 object_store = { workspace = true, features = ["aws", "gcp", "azure"] }
