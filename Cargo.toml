@@ -119,7 +119,7 @@ split-debuginfo = "unpacked"
 [patch.crates-io]
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 
-sqlparser = { git = "https://github.com/wi11dey/sqlparser-rs", branch = "0.59.0/arroyo" }
+sqlparser = { git = "https://github.com/arw2019/datafusion-sqlparser-rs", branch = "0.59.0/arroyo-new" }
 
 # DataFusion with Arroyo sqlparser compatibility
 datafusion = { git = "https://github.com/arw2019/arrow-datafusion", branch = "51.0.0/arroyo" }
