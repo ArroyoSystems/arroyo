@@ -214,7 +214,7 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let left_passer = Arc::new(RwLock::new(None));
         let right_passer = Arc::new(RwLock::new(None));

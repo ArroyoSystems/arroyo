@@ -114,7 +114,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config

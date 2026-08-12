@@ -194,7 +194,7 @@ impl OperatorConstructor for LookupJoinConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let join_type = config.join_type();
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;

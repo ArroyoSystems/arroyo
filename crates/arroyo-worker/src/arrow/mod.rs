@@ -13,7 +13,7 @@ use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::internal_err;
 use datafusion::execution::context::SessionContext;
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
+use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion::physical_expr::{PhysicalExpr, PhysicalSortExpr};
 use datafusion::physical_plan::{ExecutionPlan, displayable};

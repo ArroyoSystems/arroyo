@@ -374,7 +374,7 @@ impl OperatorConstructor for InstantJoinConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
 

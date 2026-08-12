@@ -1092,7 +1092,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                     &input_schema.schema,
                     name,
                     expr,
-                    registry.as_ref(),
+                    &task_context,
                 )?)
             })
             .map_ok(|agg| {

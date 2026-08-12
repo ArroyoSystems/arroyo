@@ -25,7 +25,6 @@ use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
 };
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
-use datafusion::execution::TaskContext;
 use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
 use std::borrow::Cow;
 use std::{
@@ -707,7 +706,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let window_field = Arc::new(Field::new(
             config.window_field_name,

@@ -238,7 +238,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let window_exec = PhysicalPlanNode::decode(&mut config.window_function_plan.as_slice())?;
         let input_schema = Arc::new(ArroyoSchema::try_from(
