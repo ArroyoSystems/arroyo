@@ -15,8 +15,8 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time};
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::context::SessionContext;
 use datafusion::execution::TaskContext;
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -92,9 +92,7 @@ impl InstantJoin {
             self.right_receiver.write().unwrap().replace(right_receiver);
             self.join_exec = self.join_exec.clone().reset_state()?;
 
-            let new_exec = self
-                .join_exec
-                .execute(0, self.task_context.clone())?;
+            let new_exec = self.join_exec.execute(0, self.task_context.clone())?;
             let next_batch_future = NextBatchFuture::new(time, new_exec);
             self.futures.lock().await.push(next_batch_future.clone());
             let exec = InstantComputeHolder {
@@ -395,10 +393,7 @@ impl OperatorConstructor for InstantJoinConstructor {
             },
         };
         let task_context = SessionContext::new().task_ctx();
-        let join_exec = join_physical_plan_node.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let join_exec = join_physical_plan_node.try_into_physical_plan(&task_context, &codec)?;
 
         Ok(ConstructedOperator::from_operator(Box::new(InstantJoin {
             left_input_schema,

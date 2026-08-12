@@ -722,10 +722,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         };
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
         let task_context = SessionContext::new().task_ctx();
-        let final_execution_plan = final_plan.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let final_execution_plan = final_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let input_schema: ArroyoSchema = config
             .input_schema

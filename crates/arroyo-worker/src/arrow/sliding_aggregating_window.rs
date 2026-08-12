@@ -478,10 +478,8 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         let partial_aggregation_plan =
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
 
-        let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let partial_aggregation_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = config
             .partial_schema
@@ -492,16 +490,12 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         let final_codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
         };
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &task_context,
-            &final_codec,
-        )?;
+        let finish_execution_plan =
+            finish_plan.try_into_physical_plan(&task_context, &final_codec)?;
 
         let final_projection = PhysicalPlanNode::decode(&mut config.final_projection.as_slice())?;
-        let final_projection = final_projection.try_into_physical_plan(
-            &task_context,
-            &final_codec,
-        )?;
+        let final_projection =
+            final_projection.try_into_physical_plan(&task_context, &final_codec)?;
 
         Ok(ConstructedOperator::from_operator(Box::new(
             SlidingAggregatingWindowFunc {
@@ -654,7 +648,11 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                self.partial_aggregation_plan = self.partial_aggregation_plan.clone().reset_state().expect("reset plan");
+                self.partial_aggregation_plan = self
+                    .partial_aggregation_plan
+                    .clone()
+                    .reset_state()
+                    .expect("reset plan");
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, self.task_context.clone())

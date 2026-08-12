@@ -143,10 +143,8 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
         // this is behind a RwLock and will have a new channel swapped in before computation is initialized
         // for each bin.
-        let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let partial_aggregation_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = config
             .partial_schema
@@ -160,10 +158,8 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         };
 
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            &task_context,
-            &final_codec,
-        )?;
+        let finish_execution_plan =
+            finish_plan.try_into_physical_plan(&task_context, &final_codec)?;
         let finish_projection = config
             .final_projection
             .map(|proto| PhysicalPlanNode::decode(&mut proto.as_slice()))
@@ -171,10 +167,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
 
         let final_projection_plan = finish_projection
             .map(|finish_projection| {
-                finish_projection.try_into_physical_plan(
-                    &task_context,
-                    &final_codec,
-                )
+                finish_projection.try_into_physical_plan(&task_context, &final_codec)
             })
             .transpose()?;
 
@@ -299,7 +292,8 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                self.partial_aggregation_plan = self.partial_aggregation_plan.clone().reset_state().unwrap();
+                self.partial_aggregation_plan =
+                    self.partial_aggregation_plan.clone().reset_state().unwrap();
                 let new_exec = self
                     .partial_aggregation_plan
                     .execute(0, self.task_context.clone())

@@ -272,7 +272,11 @@ impl StatelessPhysicalExecutor {
             let mut writer = self.batch.write().unwrap();
             *writer = Some(batch);
         }
-        self.plan = self.plan.clone().reset_state().expect("reset execution plan");
+        self.plan = self
+            .plan
+            .clone()
+            .reset_state()
+            .expect("reset execution plan");
         self.plan
             .execute(0, self.task_context.clone())
             .unwrap_or_else(|e| {

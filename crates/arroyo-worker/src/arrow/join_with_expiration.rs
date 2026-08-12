@@ -12,8 +12,8 @@ use arroyo_rpc::{
     grpc::{api, rpc::TableConfig},
 };
 use arroyo_state::timestamp_table_config;
-use datafusion::execution::context::SessionContext;
 use datafusion::execution::TaskContext;
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -227,10 +227,8 @@ impl OperatorConstructor for JoinWithExpirationConstructor {
         };
         let task_context = SessionContext::new().task_ctx();
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
-        let join_execution_plan = join_physical_plan_node.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let join_execution_plan =
+            join_physical_plan_node.try_into_physical_plan(&task_context, &codec)?;
 
         let left_input_schema: ArroyoSchema = config.left_schema.unwrap().try_into()?;
         let right_input_schema: ArroyoSchema = config.right_schema.unwrap().try_into()?;

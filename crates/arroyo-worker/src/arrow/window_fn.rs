@@ -251,10 +251,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
         let task_context = SessionContext::new().task_ctx();
-        let window_exec = window_exec.try_into_physical_plan(
-            &task_context,
-            &codec,
-        )?;
+        let window_exec = window_exec.try_into_physical_plan(&task_context, &codec)?;
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(
             input_schema.schema.clone(),
         )?);
