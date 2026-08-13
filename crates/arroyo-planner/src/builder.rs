@@ -65,7 +65,7 @@ impl<'a> PlanToGraphVisitor<'a> {
 }
 
 pub(crate) struct Planner<'a> {
-    schema_provider: &'a ArroyoSchemaProvider,
+    _schema_provider: &'a ArroyoSchemaProvider,
     planner: DefaultPhysicalPlanner,
     session_state: &'a SessionState,
 }
@@ -79,7 +79,7 @@ impl<'a> Planner<'a> {
             ArroyoExtensionPlanner {},
         )]);
         Self {
-            schema_provider,
+            _schema_provider: schema_provider,
             planner,
             session_state,
         }
