@@ -9,7 +9,7 @@ use deltalake::aws::storage::S3StorageBackend;
 use deltalake::{
     DeltaTable, DeltaTableBuilder, StructType,
     kernel::{Action, Add},
-    logstore::PeekCommit,
+    logstore::{LogStore, get_actions},
     operations::create::CreateBuilder,
     protocol::SaveMode,
 };
@@ -138,19 +138,24 @@ async fn check_existing_files(
         .map(|file| file.filename.to_string())
         .collect();
 
-    let mut version_to_check = last_version;
+    let mut version_to_check = last_version + 1;
 
-    while let PeekCommit::New(version, actions) =
-        table.log_store().peek_next_commit(version_to_check).await?
-    {
-        for action in actions {
-            if let Action::Add(add) = action
-                && files.contains(&add.path)
-            {
-                return Ok(Some(version));
+    loop {
+        let commit_bytes = table.log_store().read_commit_entry(version_to_check).await?;
+        match commit_bytes {
+            Some(bytes) => {
+                let actions = get_actions(version_to_check, &bytes)?;
+                for action in actions {
+                    if let Action::Add(add) = action
+                        && files.contains(&add.path)
+                    {
+                        return Ok(Some(version_to_check));
+                    }
+                }
+                version_to_check += 1;
             }
+            None => break,
         }
-        version_to_check = version;
     }
     Ok(None)
 }
