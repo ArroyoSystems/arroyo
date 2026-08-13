@@ -182,7 +182,8 @@ impl ThreadedUdfInterpreter {
                 0 => Err(anyhow!("The supplied code does not contain a UDF (UDF functions must be annotated with @udf)").into()),
                 1 => {
                     let udf = udfs.get_item(0)?;
-                    let name: &Bound<PyString> = udf.getattr("__name__")?.cast().unwrap();
+                    let name_attr = udf.getattr("__name__")?;
+                    let name: &Bound<PyString> = name_attr.cast().unwrap();
                     let name = name.to_string();
                     let (args, ret) = extract_type_info(&udfs.get_item(0).unwrap())?;
                     Ok((Arc::new(name), Arc::new(args), Arc::new(ret)))
