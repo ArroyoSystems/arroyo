@@ -157,20 +157,22 @@ impl BufferDecoder {
             } => {
                 *buffered_since = Instant::now();
                 *buffered_count = 0;
-                Some(match bad_data {
+                match bad_data {
                     BadData::Fail { .. } => decoder
                         .flush()
                         .map_err(|e| {
                             SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
                         })
-                        .transpose()?
-                        .map(|batch| (batch.columns().to_vec(), None)),
+                        .transpose()
+                        .map(|opt| opt.map(|batch| (batch.columns().to_vec(), None))),
                     BadData::Drop { .. } => {
                         // In Arrow 57, type validation moved from decode() to flush().
                         // In Drop mode, we treat flush errors as empty results since we can't
                         // recover partial valid records from a batch with any invalid records.
                         match decoder.flush() {
-                            Ok(opt) => opt.map(|batch| (batch.columns().to_vec(), None)),
+                            Ok(opt) => {
+                                opt.map(|batch| Ok((batch.columns().to_vec(), None)))
+                            }
                             Err(e) => {
                                 log_event!(
                                     "user_error",
@@ -180,11 +182,12 @@ impl BufferDecoder {
                                         "details": format!("JSON does not match schema: {e:?}"),
                                     }
                                 );
-                                return None;
+                                // Return None to indicate no batch (entire batch dropped)
+                                None
                             }
                         }
                     }
-                })
+                }
             }
         }
     }
