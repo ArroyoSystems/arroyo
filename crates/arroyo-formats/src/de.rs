@@ -165,13 +165,25 @@ impl BufferDecoder {
                         })
                         .transpose()?
                         .map(|batch| (batch.columns().to_vec(), None)),
-                    BadData::Drop { .. } => decoder
-                        .flush()
-                        .map_err(|e| {
-                            SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
-                        })
-                        .map(|opt| opt.map(|batch| (batch.columns().to_vec(), None)))
-                        .transpose()?,
+                    BadData::Drop { .. } => {
+                        // In Arrow 57, type validation moved from decode() to flush().
+                        // In Drop mode, we treat flush errors as empty results since we can't
+                        // recover partial valid records from a batch with any invalid records.
+                        match decoder.flush() {
+                            Ok(opt) => opt.map(|batch| (batch.columns().to_vec(), None)),
+                            Err(e) => {
+                                log_event!(
+                                    "user_error",
+                                    {
+                                        "error_family": "deserialization",
+                                        "error_type": "schema_validation",
+                                        "details": format!("JSON does not match schema: {e:?}"),
+                                    }
+                                );
+                                return None;
+                            }
+                        }
+                    }
                 })
             }
         }
@@ -865,9 +877,23 @@ mod tests {
 
         let now = SystemTime::now();
 
+        // Test with only valid data first
         assert!(
             deserializer
                 .deserialize_slice(json!({ "x": 5 }).to_string().as_bytes(), now, None,)
+                .await
+                .is_empty()
+        );
+
+        let batch = deserializer.flush_buffer().0.unwrap();
+        assert_eq!(batch.num_rows(), 1);
+        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
+
+        // Now test that bad data in a batch causes the whole batch to be dropped
+        // (Arrow 57 changed behavior: type validation happens at flush time, not decode time)
+        assert!(
+            deserializer
+                .deserialize_slice(json!({ "x": 10 }).to_string().as_bytes(), now, None,)
                 .await
                 .is_empty()
         );
@@ -878,14 +904,11 @@ mod tests {
                 .is_empty()
         );
 
-        let batch = deserializer.flush_buffer().0.unwrap();
-        assert_eq!(batch.num_rows(), 1);
-        assert_eq!(batch.columns()[0].as_primitive::<Int64Type>().value(0), 5);
-        assert_eq!(
-            batch.columns()[1]
-                .as_primitive::<TimestampNanosecondType>()
-                .value(0),
-            to_nanos(now) as i64
+        // The batch with invalid data should be dropped entirely
+        let (batch, _errors) = deserializer.flush_buffer();
+        assert!(
+            batch.is_none(),
+            "batch with invalid record should be dropped"
         );
     }
 
