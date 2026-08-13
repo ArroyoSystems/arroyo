@@ -1,0 +1,19 @@
+crates/arroyo/src/main.rs
+  s_57805bfb4e11dd::t_0f4a08607cca24 172-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "89ed5f66c88f01fef44745bd037e99a2ede8a21f",
+  "prompts": {},
+  "sessions": {
+    "s_57805bfb4e11dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0053db72fffe0DXe5yrRZrTFy1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

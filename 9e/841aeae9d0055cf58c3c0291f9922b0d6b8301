@@ -1,0 +1,19 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_57805bfb4e11dd::t_6e97587f9995fa 220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9e841aeae9d0055cf58c3c0291f9922b0d6b8301",
+  "prompts": {},
+  "sessions": {
+    "s_57805bfb4e11dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0053db72fffe0DXe5yrRZrTFy1",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
