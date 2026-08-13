@@ -574,7 +574,7 @@ mod tests {
 
     use parquet::arrow::arrow_writer::ArrowWriter;
     use parquet::basic::Compression;
-    use parquet::file::metadata::FileMetaData;
+    use parquet::file::metadata::ParquetMetaData;
     use parquet::file::properties::WriterProperties;
 
     use crate::filesystem::config::{IcebergPartitioningField, Transform};
@@ -589,7 +589,7 @@ mod tests {
             .unwrap()
     }
 
-    fn write_parquet() -> FileMetaData {
+    fn write_parquet() -> ParquetMetaData {
         let arrow_schema = ArrowSchema::new(vec![
             Field::new("id", DataType::Int64, false),
             Field::new("price", DataType::Int32, true),
