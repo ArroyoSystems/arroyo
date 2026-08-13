@@ -141,7 +141,10 @@ async fn check_existing_files(
     let mut version_to_check = last_version + 1;
 
     loop {
-        let commit_bytes = table.log_store().read_commit_entry(version_to_check).await?;
+        let commit_bytes = table
+            .log_store()
+            .read_commit_entry(version_to_check)
+            .await?;
         match commit_bytes {
             Some(bytes) => {
                 let actions = get_actions(version_to_check, &bytes)?;
