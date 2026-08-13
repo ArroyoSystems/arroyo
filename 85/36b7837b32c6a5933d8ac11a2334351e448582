@@ -1,0 +1,23 @@
+crates/arroyo-worker/src/lib.rs
+  s_e53902a92b0e7b::t_ac5f62bf539fbc 1523,1530
+  s_e53902a92b0e7b::t_278e491c417ed5 58
+  s_e53902a92b0e7b::t_3891acf57010a2 1507-1512,1519,1546-1558
+  s_e53902a92b0e7b::t_e47d343b90fc0d 1514
+  s_e53902a92b0e7b::t_1ab9f8f296ec17 379-387
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8536b7837b32c6a5933d8ac11a2334351e448582",
+  "prompts": {},
+  "sessions": {
+    "s_e53902a92b0e7b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00f94621bffeEgBbRkWlUYm6iz",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
