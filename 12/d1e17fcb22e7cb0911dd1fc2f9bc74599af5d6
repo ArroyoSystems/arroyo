@@ -1,0 +1,46 @@
+k8s/cdk8s/main.test.ts
+  s_33ece7bc88146b::t_2fc7e85adb05c9 22,31
+  s_33ece7bc88146b::t_915eeb2413b82d 23-26
+  s_33ece7bc88146b::t_a19cd6c1e5fcd8 39,41-43
+  s_33ece7bc88146b::t_66ccdcada3b653 5
+  s_33ece7bc88146b::t_3d59a44b98c076 36-38,40,44
+  s_33ece7bc88146b::t_b83232f0f16db1 6-11
+  s_33ece7bc88146b::t_47cf69996c861e 14
+k8s/cdk8s/README.md
+  s_33ece7bc88146b::t_d2afb5fe01c382 23
+  s_33ece7bc88146b::t_c1fc183a9a94cb 71-72
+  s_33ece7bc88146b::t_68f63eef4ff44c 77-94
+k8s/cdk8s/main.ts
+  s_33ece7bc88146b::t_186f50e0cd4257 1,28,31,33-34,36-37
+  s_33ece7bc88146b::t_997b9672272887 6-10,24,29-30,32
+  s_33ece7bc88146b::t_8bb63ede8be7f8 35
+  s_33ece7bc88146b::t_b4f67fe35af171 11-18
+AGENTS.md
+  s_33ece7bc88146b::t_d3cc5dfb7e3998 40
+CF_README.md
+  s_33ece7bc88146b::t_9b318a0975ec35 24,41,43
+justfile
+  s_33ece7bc88146b::t_0a93fa94e45ac0 20,23
+k8s/cdk8s/dist/arroyo/.filesyncbot
+  s_33ece7bc88146b::t_436ccadd04bc3f 1-4
+k8s/cdk8s/package-lock.json
+  s_33ece7bc88146b::t_2f9b91f294dbeb 12,28-45,1720-1725,3035-3043,3555-3566
+k8s/cdk8s/package.json
+  s_33ece7bc88146b::t_6ee552f582bd93 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "12d1e17fcb22e7cb0911dd1fc2f9bc74599af5d6",
+  "prompts": {},
+  "sessions": {
+    "s_33ece7bc88146b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0030ddeacffeL1jXW70kZ1kNXt",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Braxton Schafer <bschafer@cloudflare.com>"
+    }
+  }
+}
