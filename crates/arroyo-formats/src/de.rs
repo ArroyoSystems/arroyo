@@ -170,9 +170,7 @@ impl BufferDecoder {
                         // In Drop mode, we treat flush errors as empty results since we can't
                         // recover partial valid records from a batch with any invalid records.
                         match decoder.flush() {
-                            Ok(opt) => {
-                                opt.map(|batch| Ok((batch.columns().to_vec(), None)))
-                            }
+                            Ok(opt) => opt.map(|batch| Ok((batch.columns().to_vec(), None))),
                             Err(e) => {
                                 log_event!(
                                     "user_error",
