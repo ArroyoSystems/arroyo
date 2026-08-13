@@ -574,6 +574,7 @@ mod tests {
 
     use parquet::arrow::arrow_writer::ArrowWriter;
     use parquet::basic::Compression;
+    use parquet::file::metadata::FileMetaData;
     use parquet::file::properties::WriterProperties;
 
     use crate::filesystem::config::{IcebergPartitioningField, Transform};
