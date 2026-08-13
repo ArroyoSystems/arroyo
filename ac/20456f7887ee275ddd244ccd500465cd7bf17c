@@ -1,0 +1,35 @@
+justfile
+  s_63546b4de89cf2::t_a5cdd2401a5970 4,14-15,17,19-20,22-23
+AGENTS.md
+  s_63546b4de89cf2::t_a5cdd2401a5970 40
+k8s/cdk8s/main.ts
+  s_63546b4de89cf2::t_a5cdd2401a5970 3,5-11
+k8s/cdk8s/README.md
+  s_63546b4de89cf2::t_a5cdd2401a5970 49-50,56,61-62,224-225
+.gitlab-ci.yml
+  s_63546b4de89cf2::t_e268f40746dd8b 68,70-71,73-76,79
+  s_63546b4de89cf2::t_0cdde08ccfdef0 77-78
+  s_63546b4de89cf2::t_d059f36910a1e1 80-82
+CF_README.md
+  s_63546b4de89cf2::t_a5cdd2401a5970 18,24,28-30,41,43
+k8s/cdk8s/main.test.ts
+  s_63546b4de89cf2::t_a5cdd2401a5970 8-10,12-14,16-21,27-30
+k8s/cdk8s/package.json
+  s_63546b4de89cf2::t_a5cdd2401a5970 12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ac20456f7887ee275ddd244ccd500465cd7bf17c",
+  "prompts": {},
+  "sessions": {
+    "s_63546b4de89cf2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00821868affebsqzFV522L9YqC",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}

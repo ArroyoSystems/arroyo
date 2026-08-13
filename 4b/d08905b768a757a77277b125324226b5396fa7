@@ -1,0 +1,21 @@
+AGENTS.md
+  s_e8584713221180::t_bdc594aec9932e 40-44
+k8s/cdk8s/README.md
+  s_e8584713221180::t_cdeac65b6af6c1 69-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4bd08905b768a757a77277b125324226b5396fa7",
+  "prompts": {},
+  "sessions": {
+    "s_e8584713221180": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00809b485ffeTZK34frdEKtbGd",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
