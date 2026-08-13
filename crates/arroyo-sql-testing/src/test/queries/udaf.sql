@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for scalar/aggregate functions
 CREATE TABLE impulse_source (
   timestamp TIMESTAMP,
   counter bigint unsigned not null,

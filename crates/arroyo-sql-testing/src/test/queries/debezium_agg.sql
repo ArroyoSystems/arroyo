@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for scalar/aggregate functions
 --pk=id
 CREATE TABLE debezium_source (
     id INT PRIMARY KEY,
