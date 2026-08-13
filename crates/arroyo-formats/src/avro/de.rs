@@ -277,11 +277,7 @@ mod tests {
         assert!(errors.is_empty(), "deserialize errors: {:?}", errors);
 
         let (batch, flush_errors) = deserializer.flush_buffer();
-        assert!(
-            flush_errors.is_empty(),
-            "flush errors: {:?}",
-            flush_errors
-        );
+        assert!(flush_errors.is_empty(), "flush errors: {:?}", flush_errors);
         let batch = batch.expect("expected batch after successful flush");
 
         record_batch_to_vec(
