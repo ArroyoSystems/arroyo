@@ -149,7 +149,10 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     );
 
     if let ApiAuthMode::StaticApiKey { api_key } = &config.api.auth_mode {
-        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        #[allow(deprecated)]
+        {
+            app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        }
     };
 
     let tls_config =
