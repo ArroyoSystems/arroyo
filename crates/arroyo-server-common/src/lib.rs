@@ -366,7 +366,10 @@ fn admin_router(
     }
 
     if let ApiAuthMode::StaticApiKey { api_key } = auth_mode {
-        protected = protected.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        #[allow(deprecated)]
+        {
+            protected = protected.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        }
     };
 
     // /status is always reachable without auth (e.g. for liveness probes).
