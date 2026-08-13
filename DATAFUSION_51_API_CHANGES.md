@@ -136,3 +136,30 @@ AccumulatorType::Sliding => agg.state_fields()?
 ### arroyo-worker/src/arrow/window_fn.rs
 - Fixed `try_into_physical_plan` to 2-arg version
 - Removed `RuntimeEnvBuilder` import
+
+### arroyo-connectors/src/filesystem/sink/iceberg/schema.rs
+- Fixed deprecated `UnionFields::new()` to `UnionFields::try_new()`
+
+### arroyo-openapi/Cargo.toml
+- Changed `progenitor-client` from git to crates.io version `"0.11"` to fix reqwest 0.12 vs 0.13 conflict
+
+### Cargo.toml (workspace) & arroyo-storage/Cargo.toml
+- Updated `aws-config` from `=1.8.0` to `1.10` and `aws-credential-types` from `=1.2.13` to `1.3`
+- Fixes `aws-runtime 1.7.1` type inference bug by pulling in `aws-runtime 1.9.1`
+
+---
+
+## Future Exploration: Avoiding Forced DataFusion Upgrades
+
+The current challenge is that DataFusion versions are tightly coupled to Arrow versions:
+- DataFusion 48 requires Arrow 55
+- DataFusion 51 requires Arrow 57
+
+When eddie-executor needs a newer Arrow version for batch processing, Arroyo (which depends on DataFusion for streaming SQL) is forced to upgrade DataFusion as well, resulting in breaking API changes.
+
+**Potential solution:** Could we decouple batch and streaming code by housing Arroyo support in a separate repository from eddie-executor? This would allow:
+- Batch code (eddie-executor) to upgrade Arrow independently
+- Streaming code (Arroyo) to stay on its own DataFusion/Arrow version cycle
+- Avoid forcing streaming API migrations when only batch needs newer Arrow features
+
+This warrants further exploration to understand the tradeoffs around code organization, shared dependencies, and maintenance burden.
