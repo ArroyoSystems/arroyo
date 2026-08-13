@@ -1,0 +1,19 @@
+.gitlab-ci.yml
+  s_63546b4de89cf2::t_6c717581188fb3 81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "00ac562a68623eec975be5b6f45b6e0974344d61",
+  "prompts": {},
+  "sessions": {
+    "s_63546b4de89cf2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_00821868affebsqzFV522L9YqC",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
