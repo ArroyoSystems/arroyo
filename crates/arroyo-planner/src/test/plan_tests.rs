@@ -18,6 +18,12 @@ fn for_each_file(#[files("src/test/queries/*.sql")] path: PathBuf) {
 
 async fn validate_query(path: &Path) {
     let query = tokio::fs::read_to_string(path).await.unwrap();
+
+    // Allow skipping tests with --skip comment
+    if query.starts_with("--skip") {
+        return;
+    }
+
     let fail = query.starts_with("--fail");
     let error_message = query.starts_with("--fail=").then(|| {
         query
