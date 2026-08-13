@@ -163,10 +163,8 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
         }
         Schema::Array(item_schema) => {
             let (item_dt, nullable, ext) = to_arrow_datatype(item_schema);
-            let field = ArroyoExtensionType::add_metadata(
-                ext,
-                Field::new("item", item_dt, nullable),
-            );
+            let field =
+                ArroyoExtensionType::add_metadata(ext, Field::new("item", item_dt, nullable));
             (DataType::List(Arc::new(field)), false, None)
         }
         Schema::Record(record) => {
