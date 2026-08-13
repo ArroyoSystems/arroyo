@@ -7,22 +7,15 @@ use pyo3::{Bound, PyAny};
 
 pub fn extract_type_info(udf: &Bound<PyAny>) -> anyhow::Result<(Vec<NullableType>, NullableType)> {
     let attr = udf.getattr("__annotations__")?;
-    let annotations: &Bound<PyDict> = attr.downcast().map_err(|e| {
-        anyhow!(
-            "__annotations__ object is not a dictionary: {}",
-            e.to_string()
-        )
-    })?;
+    let annotations: &Bound<PyDict> = attr
+        .cast()
+        .map_err(|e| anyhow!("__annotations__ object is not a dictionary: {}", e))?;
 
     // Iterate over annotations dictionary
     let (ok, err): (Vec<_>, Vec<_>) = annotations
         .iter()
         .map(|(k, v)| {
-            python_type_to_arrow(
-                k.downcast::<PyString>().unwrap().to_str().unwrap(),
-                &v,
-                false,
-            )
+            python_type_to_arrow(k.cast::<PyString>().unwrap().to_str().unwrap(), &v, false)
         })
         .partition(|e| e.is_ok());
 
@@ -53,7 +46,7 @@ fn python_type_to_arrow(
     let name = py_type
         .getattr("__name__")
         .map_err(|e| anyhow!("Could not get name of type for argument {var_name}: {e}"))?
-        .downcast::<PyString>()
+        .cast::<PyString>()
         .map_err(|_| anyhow!("Argument type was not a string"))?
         .to_string();
 
@@ -63,7 +56,7 @@ fn python_type_to_arrow(
             &py_type
                 .getattr("__args__")
                 .map_err(|_| anyhow!("Optional type does not have arguments"))?
-                .downcast::<PyTuple>()
+                .cast::<PyTuple>()
                 .map_err(|e| anyhow!("__args__ is not a tuple: {e}"))?
                 .get_item(0)?,
             true,
@@ -85,6 +78,7 @@ fn python_type_to_arrow(
 #[cfg(test)]
 mod test {
     use crate::PythonUDF;
+    use datafusion::config::ConfigOptions;
     use datafusion::logical_expr::{
         ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, TypeSignature,
     };
@@ -163,6 +157,7 @@ def my_add(x: int, y: float) -> float:
                 false,
             )
             .into(),
+            config_options: Arc::new(ConfigOptions::default()),
         };
 
         let result = udf.invoke_with_args(args).unwrap();

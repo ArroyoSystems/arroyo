@@ -30,7 +30,7 @@ impl ThreadedUdfInterpreter {
                 let (name, arg_types, ret) = match Self::parse(&interpreter, &body) {
                     Ok(p) => p,
                     Err(e) => {
-                        parse_tx.send(Err(anyhow!("{}", e.to_string()))).unwrap();
+                        parse_tx.send(Err(anyhow!("{}", e))).unwrap();
                         return;
                     }
                 };
@@ -111,7 +111,7 @@ impl ThreadedUdfInterpreter {
             .with_gil(|py| {
                 let function_name = CString::new(name.as_bytes()).unwrap();
                 let function = py.eval(function_name.as_c_str(), None, None).unwrap();
-                let function = function.downcast::<PyFunction>().unwrap();
+                let function: &Bound<PyFunction> = function.cast().unwrap();
 
                 let size = args.first().map(|e| e.len()).unwrap_or(0);
 
@@ -176,14 +176,14 @@ impl ThreadedUdfInterpreter {
             py.run(body.as_c_str(), None, None)?;
 
             let udfs = lib.call_method0( "get_udfs")?;
-            let udfs: &Bound<PyList> = udfs.downcast().unwrap();
+            let udfs: &Bound<PyList> = udfs.cast().unwrap();
 
             match udfs.len() {
                 0 => Err(anyhow!("The supplied code does not contain a UDF (UDF functions must be annotated with @udf)").into()),
                 1 => {
                     let udf = udfs.get_item(0)?;
-                    let name = udf.getattr("__name__")?.downcast::<PyString>().unwrap()
-                        .to_string();
+                    let name: &Bound<PyString> = udf.getattr("__name__")?.cast().unwrap();
+                    let name = name.to_string();
                     let (args, ret) = extract_type_info(&udfs.get_item(0).unwrap())?;
                     Ok((Arc::new(name), Arc::new(args), Arc::new(ret)))
                 }
