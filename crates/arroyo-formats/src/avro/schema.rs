@@ -128,7 +128,7 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
     match schema {
         Schema::Null => (DataType::Null, false, None),
         Schema::Boolean => (DataType::Boolean, false, None),
-        Schema::Int | Schema::TimeMillis => (DataType::Int32, false, None),
+        Schema::Int | Schema::TimeMillis | Schema::Date => (DataType::Int32, false, None),
         Schema::Long => (DataType::Int64, false, None),
         Schema::TimeMicros => (DataType::Time64(TimeUnit::Microsecond), false, None),
         Schema::TimestampMillis | Schema::LocalTimestampMillis => (
