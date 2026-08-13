@@ -533,7 +533,7 @@ dependencies = [
  "petgraph",
  "postgres",
  "postgres-types",
- "prost 0.14.4",
+ "prost",
  "refinery",
  "rusqlite",
  "rust-embed",
@@ -611,7 +611,7 @@ dependencies = [
  "num-bigint",
  "object_store",
  "parquet",
- "prost 0.14.4",
+ "prost",
  "rabbitmq-stream-client",
  "rand 0.9.5",
  "rdkafka",
@@ -669,7 +669,7 @@ dependencies = [
  "postgres",
  "postgres-types",
  "prometheus",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.5",
  "refinery",
  "regex",
@@ -697,7 +697,7 @@ dependencies = [
  "datafusion-proto",
  "itertools 0.14.0",
  "petgraph",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -720,7 +720,7 @@ dependencies = [
  "base64 0.22.1",
  "integer-encoding 4.1.0",
  "memchr",
- "prost 0.14.4",
+ "prost",
  "prost-build",
  "prost-reflect",
  "regex",
@@ -795,7 +795,7 @@ dependencies = [
  "datafusion",
  "dlopen2",
  "futures",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -828,7 +828,7 @@ dependencies = [
  "glob",
  "itertools 0.14.0",
  "petgraph",
- "prost 0.14.4",
+ "prost",
  "rstest 0.25.0",
  "serde",
  "serde_json",
@@ -870,7 +870,7 @@ dependencies = [
  "nanoid",
  "object_store",
  "percent-encoding",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.5",
  "regex",
  "reqwest",
@@ -985,7 +985,7 @@ dependencies = [
  "once_cell",
  "parquet",
  "prometheus",
- "prost 0.14.4",
+ "prost",
  "serde",
  "serde_json",
  "tokio",
@@ -1001,7 +1001,7 @@ dependencies = [
  "arroyo-types",
  "async-trait",
  "futures",
- "prost 0.14.4",
+ "prost",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -1137,7 +1137,7 @@ dependencies = [
  "ordered-float 3.9.2",
  "petgraph",
  "prometheus",
- "prost 0.14.4",
+ "prost",
  "rand 0.9.5",
  "serde",
  "serde_json",
@@ -3897,7 +3897,7 @@ dependencies = [
  "datafusion-physical-plan",
  "datafusion-proto-common",
  "object_store",
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
@@ -3907,7 +3907,7 @@ source = "git+https://github.com/arw2019/arrow-datafusion?branch=51.0.0%2Farroyo
 dependencies = [
  "arrow",
  "datafusion-common",
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
@@ -6157,15 +6157,15 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jemalloc_pprof"
-version = "0.7.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5622af6d21ff86ed7797ef98e11b8f302da25ec69a7db9f6cde8e2e1c8df9992"
+checksum = "0bb2dfa20a68824f4c8c1aa271617d0ee0d9b707a866d56b7d7ee39c60c235a8"
 dependencies = [
  "anyhow",
  "libc",
  "mappings",
  "once_cell",
- "pprof_util 0.7.0",
+ "pprof_util",
  "tempfile",
  "tikv-jemalloc-ctl",
  "tokio",
@@ -6702,7 +6702,7 @@ dependencies = [
  "anyhow",
  "libc",
  "once_cell",
- "pprof_util 0.8.2",
+ "pprof_util",
  "tracing",
 ]
 
@@ -7892,19 +7892,6 @@ dependencies = [
 
 [[package]]
 name = "pprof_util"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fa015c78eed2130951e22c58d2095849391e73817ab2e74f71b0b9f63dd8416"
-dependencies = [
- "anyhow",
- "flate2",
- "num",
- "paste",
- "prost 0.13.5",
-]
-
-[[package]]
-name = "pprof_util"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eea0cc524de808a6d98d192a3d99fe95617031ad4a52ec0a0f987ef4432e8fe1"
@@ -7913,7 +7900,7 @@ dependencies = [
  "flate2",
  "num",
  "paste",
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
@@ -8119,22 +8106,12 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
-dependencies = [
- "bytes",
- "prost-derive 0.13.5",
-]
-
-[[package]]
-name = "prost"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "528ac67416ff8646872a3c02cad9cc4ee5dc9f9540c9b10771855c95cb2e5ae1"
 dependencies = [
  "bytes",
- "prost-derive 0.14.4",
+ "prost-derive",
 ]
 
 [[package]]
@@ -8149,26 +8126,13 @@ dependencies = [
  "multimap",
  "petgraph",
  "prettyplease",
- "prost 0.14.4",
+ "prost",
  "prost-types",
  "pulldown-cmark 0.13.4",
  "pulldown-cmark-to-cmark",
  "regex",
  "syn 2.0.119",
  "tempfile",
-]
-
-[[package]]
-name = "prost-derive"
-version = "0.13.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
-dependencies = [
- "anyhow",
- "itertools 0.14.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -8190,7 +8154,7 @@ version = "0.16.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01b80ea363c31af2de2b92e3c07ed1156628f7838c4afb4df75ee78a37fedbd1"
 dependencies = [
- "prost 0.14.4",
+ "prost",
  "prost-types",
 ]
 
@@ -8200,7 +8164,7 @@ version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
 dependencies = [
- "prost 0.14.4",
+ "prost",
 ]
 
 [[package]]
@@ -10449,9 +10413,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-ctl"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "661f1f6a57b3a36dc9174a2c10f19513b4866816e13425d3e418b11cc37bc24c"
+checksum = "3a184c43b8ab2f41df2733b55556e3f5f632f4aeaa205b1bb018f574b7f5f142"
 dependencies = [
  "libc",
  "paste",
@@ -10460,9 +10424,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-sys"
-version = "0.6.1+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+version = "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd8aa5b2ab86a2cefa406d889139c162cbb230092f7d1d7cbc1716405d852a3b"
+checksum = "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0"
 dependencies = [
  "cc",
  "libc",
@@ -10470,9 +10434,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemallocator"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0359b4327f954e0567e69fb191cf1436617748813819c94b8cd4a431422d053a"
+checksum = "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",
@@ -10873,7 +10837,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50849f68853be452acf590cde0b146665b8d507b3b8af17261df47e02c209ea0"
 dependencies = [
  "bytes",
- "prost 0.14.4",
+ "prost",
  "tonic",
 ]
 
