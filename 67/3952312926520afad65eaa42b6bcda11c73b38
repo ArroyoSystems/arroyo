@@ -1,0 +1,22 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_fetch.rs
+  s_91edd09901f0e7::t_430b9dfb534191 16,61-62,69,75,115
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_91edd09901f0e7::t_430b9dfb534191 15,651,656,718,723,945-946,1139-1140,1142,1145,1162
+  s_91edd09901f0e7::t_365d8743652163 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "673952312926520afad65eaa42b6bcda11c73b38",
+  "prompts": {},
+  "sessions": {
+    "s_91edd09901f0e7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ffffad7baffeYrl6uI0wuGdyTD",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
