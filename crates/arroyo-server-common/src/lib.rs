@@ -268,7 +268,7 @@ impl EventLogger for AnalyticsEventLogger {
                     .send()
                     .await
                 {
-                    debug!("Failed to record event: {}", e);
+                    debug!("Failed to record event: {:#}", anyhow::Error::new(e));
                 }
             });
         }

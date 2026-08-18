@@ -1004,6 +1004,7 @@ dependencies = [
 name = "arroyo-storage"
 version = "0.16.0-dev"
 dependencies = [
+ "anyhow",
  "arroyo-rpc",
  "arroyo-types",
  "async-trait",
