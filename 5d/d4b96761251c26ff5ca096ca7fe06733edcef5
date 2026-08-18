@@ -1,0 +1,19 @@
+crates/arroyo-server-common/src/lib_cf.rs
+  s_07ab6252cf4907::t_c8939af09c19ff 225,436
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5dd4b96761251c26ff5ca096ca7fe06733edcef5",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
