@@ -2,6 +2,7 @@ crates/arroyo-connectors/src/superbuffer/source/state.rs
   s_07ab6252cf4907::t_03778622d3bd72 15-17,279,290,419-421,466-481,518
 crates/arroyo-connectors/src/superbuffer/source/mod.rs
   s_07ab6252cf4907::t_03778622d3bd72 545,575,623
+  s_07ab6252cf4907::t_de4c86804a5c94 544
 ---
 {
   "schema_version": "authorship/3.0.0",
