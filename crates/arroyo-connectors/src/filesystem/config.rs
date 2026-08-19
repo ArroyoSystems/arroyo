@@ -910,7 +910,7 @@ impl IcebergPartitioning {
                                 width
                             );
                         }
-                        transforms::fns::ice_bucket(col(&f.field), lit(width))
+                        transforms::fns::ice_truncate(col(&f.field), lit(width as i32))
                     }
                     Transform::Year => transforms::fns::ice_year(col(&f.field)),
                     Transform::Month => transforms::fns::ice_month(col(&f.field)),

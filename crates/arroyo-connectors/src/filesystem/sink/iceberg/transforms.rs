@@ -3,7 +3,7 @@
 
 use crate::filesystem::config::Transform;
 use arrow::array::{
-    Array, ArrayRef, PrimitiveArray, StringArray, as_primitive_array, downcast_array,
+    Array, ArrayRef, BinaryArray, PrimitiveArray, StringArray, as_primitive_array, downcast_array,
 };
 use arrow::buffer::ScalarBuffer;
 use arrow::compute::{DatePart, binary, cast, date_part, unary};
@@ -25,6 +25,19 @@ static YEARS_BEFORE_UNIX_EPOCH: i32 = 1970;
 static MICROS_IN_HOUR: i64 = 3_600_000_000;
 static MICROS_IN_DAY: i64 = 86_400_000_000;
 
+#[inline]
+fn truncate_str(value: &str, width: usize) -> &str {
+    match value.char_indices().nth(width) {
+        Some((index, _)) => &value[..index],
+        None => value,
+    }
+}
+
+#[inline]
+fn truncate_binary(value: &[u8], width: usize) -> &[u8] {
+    &value[..value.len().min(width)]
+}
+
 /// Applies an Iceberg partition transform to an Arrow array
 ///
 /// # Arguments
@@ -44,6 +57,8 @@ static MICROS_IN_DAY: i64 = 86_400_000_000;
 /// * Int16 - Truncate value
 /// * Int32 - Truncate value
 /// * Int64 - Truncate value
+/// * Utf8 - Truncate value to a number of characters
+/// * Binary - Truncate value to a number of bytes
 /// * Int32 - Use hash of value to repart it between bucket
 /// * Int64 - Use hash of value to repart it between bucket
 /// * Date32 - Use hash of value to repart it between bucket
@@ -122,6 +137,18 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 as_primitive_array::<Int64Type>(&array),
                 |i| i - i.rem_euclid(width as i64),
             )))
+        }
+        (DataType::Utf8, Transform::Truncate { arg0: width }) => {
+            let local_array = downcast_array::<StringArray>(&array);
+            Ok(Arc::new(StringArray::from_iter(local_array.iter().map(
+                |value| value.map(|value| truncate_str(value, width as usize)),
+            ))))
+        }
+        (DataType::Binary, Transform::Truncate { arg0: width }) => {
+            let local_array = downcast_array::<BinaryArray>(&array);
+            Ok(Arc::new(BinaryArray::from_iter(local_array.iter().map(
+                |value| value.map(|value| truncate_binary(value, width as usize)),
+            ))))
         }
         (DataType::Int32, Transform::Bucket { arg0: n }) => {
             Ok(Arc::<PrimitiveArray<Int32Type>>::new(unary(
@@ -264,9 +291,11 @@ fn truncate_return_type(arg_types: &[DataType]) -> DFResult<DataType> {
         return Ok(DataType::Null);
     };
     match lhs {
-        DataType::Int16 | DataType::Int32 | DataType::Int64 => Ok(lhs.clone()),
+        DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Utf8 | DataType::Binary => {
+            Ok(lhs.clone())
+        }
         other => Err(exec_datafusion_err!(
-            "ice_truncate expects Int16/Int32/Int64 as first arg, got {other:?}"
+            "ice_truncate expects Int16/Int32/Int64/Utf8/Binary as first arg, got {other:?}"
         )),
     }
 }
@@ -334,12 +363,14 @@ make_transform_udf!(
     IceTruncate,
     ice_truncate,
     truncate_return_type,
-    // two args: (Int16|Int32|Int64, Int32 m)
+    // two args: (Int16|Int32|Int64|Utf8|Binary, Int32 m)
     Signature::new(
         TypeSignature::OneOf(vec![
             TypeSignature::Exact(vec![DataType::Int16, DataType::Int32]),
             TypeSignature::Exact(vec![DataType::Int32, DataType::Int32]),
-            TypeSignature::Exact(vec![DataType::Int64, DataType::Int32])
+            TypeSignature::Exact(vec![DataType::Int64, DataType::Int32]),
+            TypeSignature::Exact(vec![DataType::Utf8, DataType::Int32]),
+            TypeSignature::Exact(vec![DataType::Binary, DataType::Int32]),
         ],),
         Volatility::Immutable
     ),
@@ -589,6 +620,42 @@ mod tests {
             Some(2000),  // 2348 - 2348 % 1000 = 2348 - 348 = 2000
             Some(-2000), // -1567 - (-1567 % 1000) = -1567 - (-567) = -1567 + 567 = -1000, but rem_euclid gives -1567 - 433 = -2000
             Some(0),     // 500 - 500 % 1000 = 500 - 500 = 0
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_utf8_truncate_transform() {
+        let array = Arc::new(arrow::array::StringArray::from(vec![
+            Some("hello"),
+            Some("whataaaa"),
+            Some("a"),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, Transform::Truncate { arg0: 3 }).unwrap();
+        let expected = Arc::new(arrow::array::StringArray::from(vec![
+            Some("hel"),
+            Some("wha"),
+            Some("a"),
+            None,
+        ])) as ArrayRef;
+        assert_eq!(&expected, &result);
+    }
+
+    #[test]
+    fn test_binary_truncate_transform() {
+        let array = Arc::new(BinaryArray::from(vec![
+            Some(&b"iceberg"[..]),
+            Some(&b"ab"[..]),
+            Some(&[0xff, 0x00, 0x01, 0x02][..]),
+            None,
+        ])) as ArrayRef;
+        let result = transform_arrow(array, Transform::Truncate { arg0: 3 }).unwrap();
+        let expected = Arc::new(BinaryArray::from(vec![
+            Some(&b"ice"[..]),
+            Some(&b"ab"[..]),
+            Some(&[0xff, 0x00, 0x01][..]),
             None,
         ])) as ArrayRef;
         assert_eq!(&expected, &result);
