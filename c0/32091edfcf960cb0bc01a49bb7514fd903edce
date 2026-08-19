@@ -1,0 +1,36 @@
+crates/arroyo-rpc/src/config_cf.rs
+  s_07ab6252cf4907::t_603e0de9664f37 102-131
+crates/arroyo-server-common/src/lib_cf.rs
+  s_07ab6252cf4907::t_1f78827cc93e2e 5,21,31
+  s_07ab6252cf4907::t_5504504075ddc3 430
+  s_07ab6252cf4907::t_a3fb6fc9cff4f7 983
+  s_07ab6252cf4907::t_d5cbc120933fb6 320-338,341-342,344-346,348-363,366-370,372-385,387,389,391-401,403-422,424-426,428-429,431-435,437-463,465-467,474-475
+  s_07ab6252cf4907::t_159393f56a47b3 347
+  s_07ab6252cf4907::t_c7c95324be087b 427
+  s_07ab6252cf4907::t_9c09530b487526 464
+  s_07ab6252cf4907::t_64df802151565a 436
+  s_07ab6252cf4907::t_914a4927fe3311 479,503-504,509-519,530-545,555,564-566
+  s_07ab6252cf4907::t_12ac27ebf6b0c5 339-340,343,365,386,390
+  s_07ab6252cf4907::t_140d5109c499ec 364,371,388,402,423
+  s_07ab6252cf4907::t_ca401de41890e4 754-756,764-768,773-774
+  s_07ab6252cf4907::t_1d34490ceaaaff 22
+  s_07ab6252cf4907::t_d26566fa756cfe 614
+  s_07ab6252cf4907::t_e7542a2afe2229 569
+  s_07ab6252cf4907::t_d1d5b07e039a86 567-568,925-982,984-1170
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c032091edfcf960cb0bc01a49bb7514fd903edce",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
