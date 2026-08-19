@@ -31,7 +31,7 @@ use arroyo_formats::ser::ArrowSerializer;
 use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
-use arroyo_rpc::public_ids::{IdTypes, generate_id};
+use arroyo_rpc::public_ids::{IdTypes, generate_id, validate_public_id};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{OperatorConfig, error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
@@ -316,6 +316,7 @@ pub(crate) async fn create_pipeline_int(
     }
 
     let pub_id = pub_id.unwrap_or_else(|| generate_id(IdTypes::Pipeline));
+    validate_pipeline_id(&pub_id)?;
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -634,6 +635,10 @@ pub async fn put_pipeline(
     WithRejection(Json(pipeline_post), _): WithRejection<Json<PipelinePost>, ApiError>,
 ) -> Result<Json<Pipeline>, ErrorResp> {
     create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
+}
+
+fn validate_pipeline_id(id: &str) -> Result<(), ErrorResp> {
+    validate_public_id(id).map_err(|reason| bad_request(format!("invalid pipeline id: {reason}")))
 }
 
 async fn create_pipeline_inner(
