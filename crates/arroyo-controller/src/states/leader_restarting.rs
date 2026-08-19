@@ -53,8 +53,16 @@ impl State for LeaderRestarting {
                         msg = ctx.rx.recv() => {
                             match msg {
                                 Some(JobMessage::ConfigUpdate(c)) => {
-                                    leader_stop_if_desired_running!(self, c, ctx);
+                                    if c.restart_mode == RestartMode::force {
+                                        return Ok(Transition::next(
+                                            *self,
+                                            LeaderRestarting {
+                                                mode: RestartMode::force,
+                                            },
+                                        ));
+                                    }
 
+                                    leader_stop_if_desired_running!(self, c, ctx);
                                 }
                                 Some(msg) => {
                                     warn!(
