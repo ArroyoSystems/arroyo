@@ -34,8 +34,8 @@ const MAXIMUM_SINGLE_PART_SIZE: u64 = 2 * 1024 * 1024;
 #[serde(rename_all = "snake_case")]
 #[schemars(title = "File System Sink Version")]
 pub enum SinkVersion {
-    #[default]
     V1,
+    #[default]
     V2,
 }
 
