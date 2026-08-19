@@ -1,0 +1,27 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_7668b9cff743e0::t_7ff77d39009f40 279,290
+  s_7668b9cff743e0::t_f739baf1bfade7 417-419
+  s_7668b9cff743e0::t_c3ee25a1af44a7 464-479
+  s_7668b9cff743e0::t_89288b39517d6e 515
+  s_7668b9cff743e0::t_371a4e9cbdceda 15-17
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_7668b9cff743e0::t_e3f59c4645a1c8 544
+  s_7668b9cff743e0::t_ee4e6dbf1d76e9 584
+  s_7668b9cff743e0::t_6dc73b1a8b1728 632
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b7091c62dc30a45d3e5c9ff5c9da3528b53f3fab",
+  "prompts": {},
+  "sessions": {
+    "s_7668b9cff743e0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe5df7043ffe9Ko6JhizUSnhKE",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
