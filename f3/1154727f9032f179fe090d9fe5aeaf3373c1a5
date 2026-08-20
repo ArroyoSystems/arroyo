@@ -1,0 +1,71 @@
+crates/arroyo-connectors/src/superbuffer/source/frame_read.rs
+  s_c68aee801ebf8a::t_132c358877a5a2 3,5-6,20-22,25,27-29,33,37-40,42-44,46,52,63-66,94-95,138-142,144,181
+  s_c68aee801ebf8a::t_d657427b01c962 16,31,34-35
+  s_c68aee801ebf8a::t_5fe819786ee93c 41,45
+  s_c68aee801ebf8a::t_0773d5957d9ac8 1,4,14,18,36,50-51,143,145,147,149,152,154-156,160,162-166,168,170,172,174,176,178-180
+  s_c68aee801ebf8a::t_5aac12ff3eb6c3 8
+  s_c68aee801ebf8a::t_8c0b03eaeb9325 157,171,177
+  s_c68aee801ebf8a::t_65248c4f98e872 17
+  s_c68aee801ebf8a::t_95f8107778e45f 19
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_c68aee801ebf8a::t_d51a3f193122ed 179
+  s_c68aee801ebf8a::t_ffb5bd6730149c 99
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_c68aee801ebf8a::t_6051dc301d8968 826,834
+  s_c68aee801ebf8a::t_5327409e7e7c25 1053-1060
+  s_c68aee801ebf8a::t_591178beb15adc 395,407
+  s_c68aee801ebf8a::t_85ef47371a6511 1158
+  s_c68aee801ebf8a::t_9c94dc8e619394 810
+  s_c68aee801ebf8a::t_dec3f56fe29d98 297-298,305
+  s_c68aee801ebf8a::t_25b6b564842341 1061
+  s_c68aee801ebf8a::t_a077267d0d50be 1139-1140,1150-1153,1156,1160-1161,1163-1172,1177-1178
+  s_c68aee801ebf8a::t_148676c9eed280 438,647-648,650-653,655-656,660-665,667,678
+  s_c68aee801ebf8a::t_c0047041ba2f6b 172-173,177
+  s_c68aee801ebf8a::t_81adbd5587f4c9 348
+  s_c68aee801ebf8a::t_fb4db4358f8b92 466-469,471,480,483,489,495-497
+  s_c68aee801ebf8a::t_9a49c269c46511 902,910
+  s_c68aee801ebf8a::t_258ebf7366d68a 423-424,427,429-431,435-437
+  s_c68aee801ebf8a::t_a86e9f2dda3b97 1013
+  s_c68aee801ebf8a::t_cb5b07d3f4d68b 341,349
+  s_c68aee801ebf8a::t_2e3428115500c7 857
+  s_c68aee801ebf8a::t_99d19b601a97d0 223
+  s_c68aee801ebf8a::t_a25d98e11bf4cd 35
+  s_c68aee801ebf8a::t_a63c1e1a6c4795 224-225,328-331,338-339,342,344-347,350-351,511-513,520-521,533,540,668,796,806,811-812,822,827,829-830,832,835,837-838,846-849,855,858-885,891-893,897-898,900-901,903,905-907,911-912,982-1012,1147-1149
+  s_c68aee801ebf8a::t_f055203039eece 790-793
+  s_c68aee801ebf8a::t_ef67f939099897 26-28
+  s_c68aee801ebf8a::t_7f41e04a01bac4 31
+Cargo.lock
+  s_c68aee801ebf8a::t_a0913b5e2b1669 10638
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_c68aee801ebf8a::t_4570aaa1f73592 26-27
+  s_c68aee801ebf8a::t_229cfc2b8c2977 118-120,126-127,185,189-194,201-212,327,461-473
+  s_c68aee801ebf8a::t_1e5c34764c679f 181,186-188,200
+  s_c68aee801ebf8a::t_cb926549d24ad0 57-61
+  s_c68aee801ebf8a::t_ccf406f650294b 16-17
+  s_c68aee801ebf8a::t_a15ae51ff8ee94 121
+  s_c68aee801ebf8a::t_3cd63cf74f4baa 89
+  s_c68aee801ebf8a::t_2668836cd1153c 247-250
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_c68aee801ebf8a::t_94dea79304fe62 31,40
+  s_c68aee801ebf8a::t_c6e86598094df7 36
+  s_c68aee801ebf8a::t_46a8aa797030fa 533
+  s_c68aee801ebf8a::t_a9501da3999f79 229-230,233,236
+  s_c68aee801ebf8a::t_7434ebfc930025 525-532
+  s_c68aee801ebf8a::t_5330329f5e28b3 561-574
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f31154727f9032f179fe090d9fe5aeaf3373c1a5",
+  "prompts": {},
+  "sessions": {
+    "s_c68aee801ebf8a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe15dfbfbffeRUbyE70Hcb2maT",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}
