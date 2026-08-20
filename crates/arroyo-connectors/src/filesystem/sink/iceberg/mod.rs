@@ -15,8 +15,8 @@ use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
-use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
+use iceberg::{Catalog, CatalogBuilder, ErrorKind, TableCreation, TableIdent};
+use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
 use itertools::Itertools;
 use regex::Regex;
 use reqwest::Client;
@@ -186,16 +186,13 @@ impl IcebergTable {
                     }
                 }
 
-                let config = RestCatalogConfig::builder()
-                    .uri(rest.url.clone())
-                    .warehouse_opt(rest.warehouse.clone())
-                    .props(props)
-                    .client(Some(
-                        Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?,
-                    ))
-                    .build();
-
-                let catalog = RestCatalog::new(config);
+                props.insert("uri".to_string(), rest.url.clone());
+                if let Some(warehouse) = &rest.warehouse {
+                    props.insert("warehouse".to_string(), warehouse.clone());
+                }
+                let builder = RestCatalogBuilder::default()
+                    .with_client(Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?);
+                let catalog = futures::executor::block_on(builder.load("arroyo", props))?;
 
                 let table_ident = TableIdent::from_strs(
                     sink.namespace
@@ -300,7 +297,7 @@ impl IcebergTable {
     ) -> Result<StorageProvider, DataflowError> {
         let storage_options = self.storage_options.clone();
         let table = self.load_or_create(task_info, schema).await?;
-        let (_, mut config) = table.file_io().clone().into_builder().into_parts();
+        let (_, mut config, _) = table.file_io().clone().into_builder().into_parts();
 
         let mut our_config = HashMap::new();
         for (from, to) in CONFIG_MAPPINGS {

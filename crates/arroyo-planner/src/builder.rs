@@ -13,7 +13,6 @@ use datafusion::common::{
     DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference, plan_err,
 };
 use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
@@ -161,11 +160,9 @@ impl<'a> Planner<'a> {
             .ok_or_else(|| DataFusionError::Plan("missing input".to_string()))?;
 
         // need to convert to ExecutionPlan to get the partial schema.
-        let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            self.schema_provider,
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &codec,
-        )?;
+        let task_ctx = self.session_state.task_ctx();
+        let partial_aggregation_exec_plan =
+            partial_aggregation_plan.try_into_physical_plan(task_ctx.as_ref(), &codec)?;
 
         let partial_schema = partial_aggregation_exec_plan.schema();
         let final_input_table_provider =
@@ -244,7 +241,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         physical_inputs: &[Arc<dyn ExecutionPlan>],
         _session_state: &SessionState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
-        let schema = node.schema().as_ref().into();
+        let schema = node.schema().as_arrow().clone();
         if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into()
             && arroyo_extension.transparent()
         {

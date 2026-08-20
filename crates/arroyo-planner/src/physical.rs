@@ -58,7 +58,7 @@ use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct WindowFunctionUdf {
     signature: Signature,
 }
@@ -213,7 +213,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         &self,
         buf: &[u8],
         inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
-        _registry: &dyn datafusion::execution::FunctionRegistry,
+        _registry: &TaskContext,
     ) -> datafusion::common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
         let exec: ArroyoExecNode = Message::decode(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {err}")))?;
@@ -301,7 +301,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                     vec![],
                     Arc::new(schema),
                     UnnestOptions::default(),
-                )))
+                )?))
             }
             Node::DebeziumDecode(debezium) => {
                 let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
@@ -467,8 +467,8 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         Ok(Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> Result<()> {
-        Ok(())
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 
     fn properties(&self) -> &PlanProperties {
@@ -560,8 +560,8 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> Result<()> {
-        Ok(())
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 }
 
@@ -638,8 +638,8 @@ impl ExecutionPlan for RecordBatchVecReader {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> Result<()> {
-        Ok(())
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 }
 
@@ -712,8 +712,8 @@ impl ExecutionPlan for ArroyoMemExec {
         Ok(datafusion::common::Statistics::new_unknown(&self.schema))
     }
 
-    fn reset(&self) -> Result<()> {
-        Ok(())
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 }
 
@@ -831,8 +831,8 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         )?))
     }
 
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 }
 
@@ -1084,8 +1084,8 @@ impl ExecutionPlan for ToDebeziumExec {
         }))
     }
 
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
+    fn reset_state(self: Arc<Self>) -> Result<Arc<dyn ExecutionPlan>> {
+        Ok(self)
     }
 }
 
