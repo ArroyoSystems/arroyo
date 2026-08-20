@@ -3,6 +3,7 @@ use arrow::array::{
     Array, ArrayRef, BinaryArray, BinaryBuilder, Int32Array, StringArray, UInt64Array,
 };
 use arrow::datatypes::{DataType, Field};
+use datafusion::config::ConfigOptions;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl};
 use std::sync::Arc;
 
@@ -60,6 +61,7 @@ fn test_udf() {
         arg_fields: vec![],
         number_rows: 3,
         return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+        config_options: Arc::new(ConfigOptions::default()),
     };
 
     let result = sync_udf.invoke_with_args(args).unwrap();
@@ -89,6 +91,7 @@ fn test_optional_arg() {
         arg_fields: vec![],
         number_rows: 1,
         return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+        config_options: Arc::new(ConfigOptions::default()),
     };
 
     let result = sync_udf.invoke_with_args(args).unwrap();

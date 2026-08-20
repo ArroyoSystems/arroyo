@@ -27,6 +27,7 @@ use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD, updating_meta_fields};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, SignalMessage, to_nanos};
 use datafusion::common::{Result as DFResult, ScalarValue};
+use datafusion::execution::context::SessionContext;
 use datafusion::physical_plan::udaf::AggregateFunctionExpr;
 use datafusion::physical_plan::{Accumulator, PhysicalExpr};
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
@@ -167,7 +168,7 @@ impl IncrementalState {
                 )?;
                 let mut acc = expr.create_accumulator()?;
                 acc.update_batch(&input)?;
-                acc.evaluate_mut()
+                acc.evaluate()
             }
         }
     }
@@ -182,7 +183,7 @@ enum AccumulatorType {
 impl AccumulatorType {
     fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<FieldRef>> {
         Ok(match self {
-            AccumulatorType::Sliding => agg.sliding_state_fields()?,
+            AccumulatorType::Sliding => agg.state_fields()?,
             // state for batch tables is handled separately
             AccumulatorType::Batch => vec![],
         })
@@ -1038,7 +1039,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let ttl = Duration::from_micros(if config.ttl_micros == 0 {
             warn!("ttl was not set for updating aggregate");
@@ -1052,9 +1053,10 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
         let mut schema_without_metadata = SchemaBuilder::from((*final_schema.schema).clone());
         schema_without_metadata.remove(final_schema.schema.index_of(UPDATING_META_FIELD).unwrap());
 
+        let task_context = SessionContext::new().task_ctx();
         let metadata_expr = parse_physical_expr(
             &PhysicalExprNode::decode(&mut config.metadata_expr.as_slice())?,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;
@@ -1090,7 +1092,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                     &input_schema.schema,
                     name,
                     expr,
-                    registry.as_ref(),
+                    &task_context,
                 )?)
             })
             .map_ok(|agg| {

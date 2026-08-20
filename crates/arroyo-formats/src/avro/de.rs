@@ -274,9 +274,11 @@ mod tests {
         let errors = deserializer
             .deserialize_slice(message, SystemTime::now(), None)
             .await;
-        assert!(errors.is_empty());
+        assert!(errors.is_empty(), "deserialize errors: {:?}", errors);
 
-        let batch = deserializer.flush_buffer().0.unwrap();
+        let (batch, flush_errors) = deserializer.flush_buffer();
+        assert!(flush_errors.is_empty(), "flush errors: {:?}", flush_errors);
+        let batch = batch.expect("expected batch after successful flush");
 
         record_batch_to_vec(
             &batch,

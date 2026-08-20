@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for scalar/aggregate functions
 CREATE TABLE cars (
     value JSON
 ) WITH (

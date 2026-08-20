@@ -52,7 +52,7 @@ fn annotate_field(field: &Field, next_id: &mut i32) -> Field {
                 .map(|(_, f)| annotate_field(f, next_id))
                 .collect();
             let type_ids: Vec<i8> = fields.iter().map(|(id, _)| id).collect();
-            let uf = UnionFields::new(type_ids, new_fields_vec);
+            let uf = UnionFields::try_new(type_ids, new_fields_vec).expect("valid union fields");
             DataType::Union(uf, *mode)
         }
         other => other.clone(),
@@ -151,7 +151,7 @@ fn update_field_id(
                 .map(|(_, f)| update_field_id(f, Some(&field_name), iceberg, false))
                 .try_collect()?;
             let type_ids: Vec<i8> = fields.iter().map(|(id, _)| id).collect();
-            let uf = UnionFields::new(type_ids, new_fields_vec);
+            let uf = UnionFields::try_new(type_ids, new_fields_vec).expect("valid union fields");
             DataType::Union(uf, *mode)
         }
         other => other.clone(),

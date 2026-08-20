@@ -29,7 +29,7 @@ use std::{
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::TaskContext;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
@@ -59,6 +59,7 @@ pub struct TumblingAggregatingWindowFunc<K: Copy> {
     final_batches_passer: Arc<RwLock<Vec<RecordBatch>>>,
     futures: Arc<Mutex<FuturesUnordered<NextBatchFuture<K>>>>,
     execs: BTreeMap<K, BinComputingHolder<K>>,
+    task_context: Arc<TaskContext>,
 }
 
 impl<K: Copy> TumblingAggregatingWindowFunc<K> {
@@ -113,17 +114,18 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
     fn with_config(
         &self,
         config: Self::ConfigT,
-        registry: Arc<Registry>,
+        _registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
             .ok_or_else(|| anyhow!("requires input schema"))?
             .try_into()?;
+        let task_context = SessionContext::new().task_ctx();
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
         let binning_function = parse_physical_expr(
             &binning_function,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;
@@ -141,11 +143,8 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         // deserialize partial aggregation into execution plan with an UnboundedBatchStream source.
         // this is behind a RwLock and will have a new channel swapped in before computation is initialized
         // for each bin.
-        let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
-            &codec,
-        )?;
+        let partial_aggregation_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = config
             .partial_schema
@@ -159,11 +158,8 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
         };
 
         // deserialize the finish plan to read directly from a Vec<RecordBatch> behind a RWLock.
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &final_codec,
-        )?;
+        let finish_execution_plan =
+            finish_plan.try_into_physical_plan(&task_context, &final_codec)?;
         let finish_projection = config
             .final_projection
             .map(|proto| PhysicalPlanNode::decode(&mut proto.as_slice()))
@@ -171,11 +167,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
 
         let final_projection_plan = finish_projection
             .map(|finish_projection| {
-                finish_projection.try_into_physical_plan(
-                    registry.as_ref(),
-                    &RuntimeEnvBuilder::new().build().unwrap(),
-                    &final_codec,
-                )
+                finish_projection.try_into_physical_plan(&task_context, &final_codec)
             })
             .transpose()?;
 
@@ -195,6 +187,7 @@ impl OperatorConstructor for TumblingAggregateWindowConstructor {
                 final_batches_passer,
                 futures: Arc::new(Mutex::new(FuturesUnordered::new())),
                 execs: BTreeMap::new(),
+                task_context,
             },
         )))
     }
@@ -299,10 +292,11 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                self.partial_aggregation_plan.reset().unwrap();
+                self.partial_aggregation_plan =
+                    self.partial_aggregation_plan.clone().reset_state().unwrap();
                 let new_exec = self
                     .partial_aggregation_plan
-                    .execute(0, SessionContext::new().task_ctx())
+                    .execute(0, self.task_context.clone())
                     .unwrap();
                 let next_batch_future = NextBatchFuture::new(bin_start, new_exec);
                 self.futures.lock().await.push(next_batch_future.clone());
@@ -350,12 +344,14 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                         let finished_batches = mem::take(&mut exec.finished_batches);
                         *batches = finished_batches;
                     }
-                    self.finish_execution_plan
-                        .reset()
+                    self.finish_execution_plan = self
+                        .finish_execution_plan
+                        .clone()
+                        .reset_state()
                         .expect("reset execution plan");
                     let mut final_exec = self
                         .finish_execution_plan
-                        .execute(0, SessionContext::new().task_ctx())?;
+                        .execute(0, self.task_context.clone())?;
                     let mut aggregate_results = vec![];
                     while let Some(batch) = final_exec.next().await {
                         let batch = batch?;
@@ -370,14 +366,14 @@ impl ArrowOperator for TumblingAggregatingWindowFunc<SystemTime> {
                             collector.collect(with_timestamp).await?;
                         }
                     }
-                    if let Some(final_projection) = self.final_projection.as_ref() {
+                    if let Some(final_projection) = self.final_projection.as_mut() {
                         {
                             let mut batches = self.final_batches_passer.write().unwrap();
                             *batches = aggregate_results;
                         }
-                        final_projection.reset()?;
+                        *final_projection = final_projection.clone().reset_state()?;
                         let mut final_projection_exec =
-                            final_projection.execute(0, SessionContext::new().task_ctx())?;
+                            final_projection.execute(0, self.task_context.clone())?;
                         while let Some(batch) = final_projection_exec.next().await {
                             let batch = batch?;
                             collector.collect(batch).await?;

@@ -52,9 +52,7 @@ impl PollingHTTPConnector {
             req = req.body(body.clone());
         }
 
-        let req = req
-            .build()
-            .map_err(|e| anyhow!("invalid request: {}", e.to_string()))?;
+        let req = req.build().map_err(|e| anyhow!("invalid request: {}", e))?;
 
         Ok(req)
     }

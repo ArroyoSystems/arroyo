@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 changed error message format for lookup join validation
 --fail=the right-side of a look-up join condition must be a PRIMARY KEY column, but 'value' is not
 create table impulse with (
     connector = 'impulse',

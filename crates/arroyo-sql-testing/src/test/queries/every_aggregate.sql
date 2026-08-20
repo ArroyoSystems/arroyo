@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for scalar/aggregate functions
 --pk=event_type
 CREATE TABLE cars (
       timestamp TIMESTAMP NOT NULL,

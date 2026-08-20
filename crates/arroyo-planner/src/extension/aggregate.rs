@@ -95,7 +95,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    Arc::new(input_schema.as_arrow().clone()),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -145,7 +145,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    Arc::new(input_schema.as_arrow().clone()),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -205,7 +205,7 @@ impl AggregateExtension {
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
         let input_schema = ArroyoSchema::from_schema_keys(
-            Arc::new(input_schema.as_ref().into()),
+            Arc::new(input_schema.as_arrow().clone()),
             self.key_fields.clone(),
         )?;
 
@@ -267,7 +267,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    Arc::new(input_schema.as_arrow().clone()),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -555,7 +555,7 @@ impl ArroyoExtension for AggregateExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        let output_schema = (*self.schema).clone().into();
+        let output_schema = self.schema.as_arrow().clone();
         ArroyoSchema::from_schema_keys(Arc::new(output_schema), vec![]).unwrap()
     }
 }

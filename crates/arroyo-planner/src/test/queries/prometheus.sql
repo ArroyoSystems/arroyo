@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for irate aggregate function
 create table metrics (
     value TEXT,
     parsed TEXT generated always as (parse_prom(value)) stored

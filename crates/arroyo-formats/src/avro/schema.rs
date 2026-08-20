@@ -100,7 +100,9 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         }
         DataType::Union(_, _) => unimplemented!("unions are not supported"),
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
-        DataType::Decimal128(precision, scale) => {
+        DataType::Decimal32(precision, scale)
+        | DataType::Decimal64(precision, scale)
+        | DataType::Decimal128(precision, scale) => {
             return json!({
                 "type": "bytes",
                 "logicalType": "decimal",
@@ -126,7 +128,7 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
     match schema {
         Schema::Null => (DataType::Null, false, None),
         Schema::Boolean => (DataType::Boolean, false, None),
-        Schema::Int | Schema::TimeMillis => (DataType::Int32, false, None),
+        Schema::Int | Schema::TimeMillis | Schema::Date => (DataType::Int32, false, None),
         Schema::Long => (DataType::Int64, false, None),
         Schema::TimeMicros => (DataType::Time64(TimeUnit::Microsecond), false, None),
         Schema::TimestampMillis | Schema::LocalTimestampMillis => (
@@ -158,6 +160,12 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
             } else {
                 (DataType::Utf8, false, Some(ArroyoExtensionType::JSON))
             }
+        }
+        Schema::Array(array_schema) => {
+            let (item_dt, nullable, ext) = to_arrow_datatype(&array_schema.items);
+            let field =
+                ArroyoExtensionType::add_metadata(ext, Field::new("item", item_dt, nullable));
+            (DataType::List(Arc::new(field)), false, None)
         }
         Schema::Record(record) => {
             let fields = record

@@ -2,7 +2,9 @@
 use anyhow::{Context, anyhow, bail};
 use arrow::buffer::MutableBuffer;
 use arrow::ipc::reader::read_record_batch;
-use arrow::ipc::writer::{DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions};
+use arrow::ipc::writer::{
+    CompressionContext, DictionaryTracker, EncodedData, IpcDataGenerator, IpcWriteOptions,
+};
 use arrow_array::RecordBatch;
 use arrow_schema::{ArrowError, SchemaRef};
 use arroyo_types::ArrowMessage;
@@ -393,8 +395,14 @@ impl OutNetworkLink {
                             ArrowMessage::Data(data) => {
                                 let (_, encoded_message) = {
                                     let mut dictionary_tracker = dictionary_tracker.lock().await;
-                                    IpcDataGenerator {}.encoded_batch(&data, &mut dictionary_tracker, &write_options)
-                                      .expect("failed to encode batch")
+                                    IpcDataGenerator {}
+                                        .encode(
+                                            &data,
+                                            &mut dictionary_tracker,
+                                            &write_options,
+                                            &mut CompressionContext::default(),
+                                        )
+                                        .expect("failed to encode batch")
                                 };
                                 write_message_and_header(&mut Pin::new(&mut self.stream), quad, encoded_message).await.unwrap();
                             }

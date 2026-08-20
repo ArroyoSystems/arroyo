@@ -87,7 +87,7 @@ impl ArroyoExtension for LookupJoin {
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> datafusion::common::Result<NodeWithIncomingEdges> {
-        let schema = ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into()))?;
+        let schema = ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_arrow().clone()))?;
         let lookup_schema = ArroyoSchema::from_schema_unkeyed(add_timestamp_field_arrow(
             self.connector.physical_schema(),
         ))?;

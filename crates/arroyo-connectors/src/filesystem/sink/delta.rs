@@ -1,5 +1,5 @@
 use super::FinishedFile;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use arrow::datatypes::Schema;
 use arroyo_storage::{BackendConfig, R2Config, S3Config, StorageProvider};
 use arroyo_types::to_millis;
@@ -9,9 +9,9 @@ use deltalake::aws::storage::S3StorageBackend;
 use deltalake::{
     DeltaTable, DeltaTableBuilder, StructType,
     kernel::{Action, Add},
+    logstore::{LogStore, get_actions},
     operations::create::CreateBuilder,
     protocol::SaveMode,
-    table::PeekCommit,
 };
 
 use deltalake::kernel::transaction::CommitBuilder;
@@ -87,7 +87,10 @@ pub(crate) async fn load_or_create_table(
         BackendConfig::Local(_) => (storage_provider.get_backing_store(), "/".to_string()),
     };
 
-    let mut delta = DeltaTableBuilder::from_uri(&url)
+    let table_url = Url::parse(&url).or_else(|_| {
+        Url::from_directory_path(&url).map_err(|_| anyhow!("invalid Delta table URL: {url}"))
+    })?;
+    let mut delta = DeltaTableBuilder::from_url(table_url)?
         .with_storage_backend(backing_store, Url::parse(storage_provider.canonical_url())?)
         .build()?;
 
@@ -135,19 +138,27 @@ async fn check_existing_files(
         .map(|file| file.filename.to_string())
         .collect();
 
-    let mut version_to_check = last_version;
+    let mut version_to_check = last_version + 1;
 
-    while let PeekCommit::New(version, actions) =
-        table.log_store().peek_next_commit(version_to_check).await?
-    {
-        for action in actions {
-            if let Action::Add(add) = action
-                && files.contains(&add.path)
-            {
-                return Ok(Some(version));
+    loop {
+        let commit_bytes = table
+            .log_store()
+            .read_commit_entry(version_to_check)
+            .await?;
+        match commit_bytes {
+            Some(bytes) => {
+                let actions = get_actions(version_to_check, &bytes)?;
+                for action in actions {
+                    if let Action::Add(add) = action
+                        && files.contains(&add.path)
+                    {
+                        return Ok(Some(version_to_check));
+                    }
+                }
+                version_to_check += 1;
             }
+            None => break,
         }
-        version_to_check = version;
     }
     Ok(None)
 }

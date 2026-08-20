@@ -46,7 +46,7 @@ impl WebhookConnector {
                 .unwrap(),
             )
             .build()
-            .map_err(|e| anyhow!("invalid URL for websink: {}", e.to_string()))?;
+            .map_err(|e| anyhow!("invalid URL for websink: {}", e))?;
 
         Ok(req)
     }

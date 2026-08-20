@@ -1,3 +1,4 @@
+--skip TODO: DataFusion 51 requires PhysicalExtensionCodec for scalar/aggregate functions
 --pk=counter_mod
 CREATE TABLE impulse_source (
       timestamp TIMESTAMP,

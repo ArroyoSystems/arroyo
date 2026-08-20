@@ -90,7 +90,7 @@ impl ArroyoExtension for RemoteTableExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_keys(Arc::new(self.schema.as_ref().into()), vec![]).unwrap()
+        ArroyoSchema::from_schema_keys(Arc::new(self.schema.as_arrow().clone()), vec![]).unwrap()
     }
 }
 

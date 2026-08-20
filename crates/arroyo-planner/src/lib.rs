@@ -53,6 +53,7 @@ use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 
 use crate::functions::{is_json_union, serialize_outgoing_json};
 use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
@@ -77,7 +78,7 @@ use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::optimizer::Analyzer;
 use datafusion::prelude::col;
-use sqlparser::ast::{OneOrManyWithParens, Statement};
+use sqlparser::ast::Statement;
 use sqlparser::dialect::ArroyoDialect;
 use sqlparser::parser::{Parser, ParserError};
 use std::any::Any;
@@ -163,6 +164,21 @@ struct PlaceholderUdf {
     name: String,
     signature: Signature,
     return_type: Arc<dyn Fn(&[DataType]) -> Result<DataType> + Send + Sync + 'static>,
+}
+
+impl PartialEq for PlaceholderUdf {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.signature == other.signature
+    }
+}
+
+impl Eq for PlaceholderUdf {}
+
+impl Hash for PlaceholderUdf {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+    }
 }
 
 impl Debug for PlaceholderUdf {
@@ -480,6 +496,14 @@ impl FunctionRegistry for ArroyoSchemaProvider {
         self.udf_defs.keys().map(|k| k.to_string()).collect()
     }
 
+    fn udafs(&self) -> HashSet<String> {
+        self.aggregate_functions.keys().cloned().collect()
+    }
+
+    fn udwfs(&self) -> HashSet<String> {
+        self.window_functions.keys().cloned().collect()
+    }
+
     fn udf(&self, name: &str) -> Result<Arc<ScalarUDF>> {
         if let Some(f) = self.functions.get(name) {
             Ok(Arc::clone(f))
@@ -791,26 +815,30 @@ fn try_handle_set_variable(
     statement: &Statement,
     schema_provider: &mut ArroyoSchemaProvider,
 ) -> Result<bool> {
-    if let Statement::SetVariable {
-        variables, value, ..
-    } = statement
+    if let Statement::Set(sqlparser::ast::Set::SetSessionParam(
+        sqlparser::ast::SetSessionParamKind::Generic(sqlparser::ast::SetSessionParamGeneric {
+            names,
+            value,
+        }),
+    )) = statement
     {
-        let OneOrManyWithParens::One(opt) = variables else {
+        if names.len() != 1 {
             return plan_err!("invalid syntax for `SET` call");
-        };
+        }
 
-        if opt.to_string() != "updating_ttl" {
+        let opt = &names[0];
+        if opt != "updating_ttl" {
             return plan_err!(
                 "invalid option '{}'; supported options are 'updating_ttl'",
                 opt
             );
         }
 
-        if value.len() != 1 {
-            return plan_err!("invalid `SET updating_ttl` call; expected exactly one expression");
-        }
-
-        schema_provider.planning_options.ttl = duration_from_sql(value[0].clone())?;
+        // Parse the value as a SQL expression
+        let expr = Parser::new(&ArroyoDialect {})
+            .try_with_sql(value)?
+            .parse_expr()?;
+        schema_provider.planning_options.ttl = duration_from_sql(expr)?;
 
         return Ok(true);
     }
