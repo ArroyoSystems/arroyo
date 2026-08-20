@@ -1,0 +1,44 @@
+crates/arroyo-connectors/src/superbuffer/source/checkpoint.rs
+  s_60de9f20253a6c::t_64e416505e3620 1-82,86-262
+  s_60de9f20253a6c::t_91272e67d85900 83-85
+crates/arroyo-connectors/src/superbuffer/source/partition_discovery.rs
+  s_60de9f20253a6c::t_b1009231db9678 1-22,27-43,46-67,70-407
+  s_60de9f20253a6c::t_bda6795f887305 44-45,68-69
+  s_60de9f20253a6c::t_91272e67d85900 23-26
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_60de9f20253a6c::t_ccbc953a4ba940 31-32,34-37,756,802
+  s_60de9f20253a6c::t_455701313ac7f0 39
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_60de9f20253a6c::t_64e416505e3620 9,18,54-67,69-104
+  s_60de9f20253a6c::t_91272e67d85900 1,68
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_60de9f20253a6c::t_ccbc953a4ba940 6,13,16
+  s_60de9f20253a6c::t_b1009231db9678 8,14
+crates/arroyo-connectors/src/superbuffer/mod.rs
+  s_60de9f20253a6c::t_e68e18f0161697 17
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_60de9f20253a6c::t_91272e67d85900 1-2
+  s_60de9f20253a6c::t_455701313ac7f0 10
+  s_60de9f20253a6c::t_e68e18f0161697 3-9,11-219
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_60de9f20253a6c::t_ccbc953a4ba940 4
+  s_60de9f20253a6c::t_455701313ac7f0 20
+  s_60de9f20253a6c::t_e68e18f0161697 8
+  s_60de9f20253a6c::t_797c1d2e926313 7,10-11,23-24,29,32,34-38,40,161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "514195802eccd3d37cb7ee3bde650ff5378a36e9",
+  "prompts": {},
+  "sessions": {
+    "s_60de9f20253a6c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdfaeb877ffes3YMTI7RKn6D6n",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
