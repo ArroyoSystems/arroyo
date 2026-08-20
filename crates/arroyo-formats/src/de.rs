@@ -207,13 +207,20 @@ impl BufferDecoder {
                 *buffered_since = Instant::now();
                 *buffered_count = 0;
                 Some(match bad_data {
-                    BadData::Fail { .. } => decoder
-                        .flush()
-                        .map_err(|e| {
-                            SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
-                        })
-                        .transpose()?
-                        .map(|batch| (batch.columns().to_vec(), None)),
+                    BadData::Fail { .. } => match decoder.flush_with_bad_data() {
+                        Ok(Some((batch, _mask, _invalid_records, validation_errors))) => {
+                            if let Some(error) = validation_errors.first() {
+                                Err(SourceError::bad_data(format!(
+                                    "JSON does not match schema: {}",
+                                    format_validation_error(error)
+                                )))
+                            } else {
+                                Ok((batch.columns().to_vec(), None))
+                            }
+                        }
+                        Ok(None) => return None,
+                        Err(_) => Err(SourceError::bad_data("failed to decode JSON")),
+                    },
                     BadData::Drop { .. } => decoder
                         .flush_with_bad_data()
                         .map_err(|e| {
@@ -255,7 +262,7 @@ impl BufferDecoder {
             } => {
                 decoder
                     .decode(msg)
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
+                    .map_err(|_| SourceError::bad_data("invalid JSON"))?;
 
                 *buffered_count += 1;
 
@@ -945,6 +952,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_data_fail() {
         let mut deserializer = setup_deserializer(BadData::Fail {});
+        let secret = "sensitive@example.com";
 
         assert!(
             deserializer
@@ -959,7 +967,7 @@ mod tests {
         assert!(
             deserializer
                 .deserialize_slice(
-                    json!({ "x": "hello" }).to_string().as_bytes(),
+                    json!({ "x": secret }).to_string().as_bytes(),
                     SystemTime::now(),
                     None,
                 )
@@ -969,7 +977,37 @@ mod tests {
 
         let err = deserializer.flush_buffer().1.remove(0);
 
-        assert!(matches!(err, DataflowError::DataError { .. }));
+        let DataflowError::DataError { details, count } = err else {
+            panic!("expected bad-data error");
+        };
+        assert_eq!(count, 1);
+        assert!(details.contains("field 'x': expected Int64, got string (length: 21)"));
+        assert!(!details.contains(secret));
+        assert!(!details.contains("JsonError"));
+    }
+
+    #[tokio::test]
+    async fn test_bad_data_fail_redacts_invalid_json() {
+        let mut deserializer = setup_deserializer(BadData::Fail {});
+        let secret = "sensitive-value";
+
+        let mut errors = deserializer
+            .deserialize_slice(
+                format!(r#"{{"x":"{secret}""#).as_bytes(),
+                SystemTime::now(),
+                None,
+            )
+            .await;
+        errors.extend(deserializer.flush_buffer().1);
+
+        assert!(!errors.is_empty());
+        for error in errors {
+            let DataflowError::DataError { details, .. } = error else {
+                panic!("expected bad-data error");
+            };
+            assert!(!details.contains(secret));
+            assert!(!details.contains("JsonError"));
+        }
     }
 
     #[tokio::test]

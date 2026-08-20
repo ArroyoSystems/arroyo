@@ -25,6 +25,7 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
             <Td>{formatDate(BigInt(m.created_at))}</Td>
             <Td>{m.operator_id}</Td>
             <Td>{m.task_index?.toString()}</Td>
+            <Td>{m.error_domain ?? '—'}</Td>
             <Td>{m.message}</Td>
             <Td>{m.details}</Td>
           </Tr>
@@ -41,6 +42,7 @@ const OperatorErrors: React.FC<OperatorErrorsProps> = ({ operatorErrors }) => {
             <Th>Time</Th>
             <Th>Operator</Th>
             <Th>Task Index</Th>
+            <Th>Domain</Th>
             <Th>Message</Th>
             <Th>Details</Th>
           </Tr>

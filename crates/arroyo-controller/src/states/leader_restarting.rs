@@ -88,6 +88,7 @@ impl State for LeaderRestarting {
                                 message: "timed out while taking final checkpoint".to_string(),
                                 error_domain: rpc::ErrorDomain::Internal as i32,
                                 retry_hint: rpc::RetryHint::WithBackoff as i32,
+                                details: String::new(),
                             }).await;
                         }
                     }

@@ -186,6 +186,7 @@ impl State for LeaderRunning {
                                         message: "job unexpectedly in Initializing state, should be running".to_string(),
                                         error_domain: ErrorDomain::Internal as i32,
                                         retry_hint: RetryHint::WithBackoff as i32,
+                                        details: String::new(),
                                     }).await;
                                 }
                                 rpc::JobState::JobRunning => {

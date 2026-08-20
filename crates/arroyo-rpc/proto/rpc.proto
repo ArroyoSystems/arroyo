@@ -295,6 +295,7 @@ message JobFailure {
   string message = 4;
   ErrorDomain error_domain = 5;
   RetryHint retry_hint = 6;
+  string details = 7;
 }
 
 message JobStatus {
