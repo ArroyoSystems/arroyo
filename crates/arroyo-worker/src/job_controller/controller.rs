@@ -501,6 +501,7 @@ impl WorkerJobController {
                                 message: err.to_string(),
                                 error_domain: rpc::ErrorDomain::Internal.into(),
                                 retry_hint: rpc::RetryHint::WithBackoff.into(),
+                                details: String::new(),
                             })
                             .await?;
                             return Ok(());

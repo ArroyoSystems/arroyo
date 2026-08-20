@@ -212,7 +212,7 @@ fn classify_datafusion_error(err: &DataFusionError) -> (ErrorDomain, RetryHint) 
 
 impl From<DataflowError> for TaskError {
     fn from(value: DataflowError) -> Self {
-        let message = value.to_string();
+        let mut message = value.to_string();
         let (domain, retry_hint, details) = match value {
             DataflowError::ConnectorError {
                 domain,
@@ -233,12 +233,11 @@ impl From<DataflowError> for TaskError {
             DataflowError::ExternalError(_) => {
                 (ErrorDomain::External, RetryHint::WithBackoff, None)
             }
-            DataflowError::DataError { details, count } => (
-                ErrorDomain::External,
-                RetryHint::WithBackoff,
-                Some(format!("count: {count}, details: {details}")),
-            ),
-            DataflowError::UnknownError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
+            DataflowError::DataError { details, count } => {
+                message = format!("error deserializing data ({count} times)");
+                (ErrorDomain::External, RetryHint::NoRetry, Some(details))
+            }
+            DataflowError::UnknownError(_) => (ErrorDomain::External, RetryHint::WithBackoff, None),
             DataflowError::WithOperator { error, operator_id } => {
                 let mut inner: TaskError = (*error).into();
                 inner.operator_id = Some(operator_id);

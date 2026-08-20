@@ -522,6 +522,7 @@ pub fn controller_job_failure(
         message: message.into(),
         error_domain: error_domain as i32,
         retry_hint: retry_hint as i32,
+        details: String::new(),
     }
 }
 
@@ -603,8 +604,8 @@ impl JobContext<'_> {
             &event.operator_id,
             &(event.subtask_idx as i64),
             &LogLevel::error,
-            &"task failed",
             &event.reason,
+            &event.details,
             &event.error_domain.as_str(),
             &event.retry_hint.as_str(),
         )
@@ -672,8 +673,8 @@ impl JobContext<'_> {
                 operator_id,
                 &(subtask_index as i64),
                 &LogLevel::error,
-                &"job failed",
                 &failure.message,
+                &failure.details,
                 &error_domain.as_str(),
                 &retry_hint.as_str(),
             )
