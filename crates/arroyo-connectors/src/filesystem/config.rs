@@ -24,7 +24,6 @@ use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
 const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
-const MAXIMUM_SINGLE_PART_SIZE: u64 = 2 * 1024 * 1024;
 
 /// Which version of the FileSystemSink to use
 #[derive(
@@ -117,8 +116,7 @@ pub struct MultipartConfig {
     /// Minimum multipart size
     #[schemars(
         title = "Minimum multipart size",
-        description = "Files smaller than this will be written as a single put rather than a multipart upload (only available on v2)",
-        range(max = MAXIMUM_SINGLE_PART_SIZE)
+        description = "Files smaller than this will be written as a single put rather than a multipart upload (only available on v2)"
     )]
     pub minimum_multipart_size: Option<u64>,
 }
