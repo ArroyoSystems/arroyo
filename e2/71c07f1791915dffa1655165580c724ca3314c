@@ -1,0 +1,54 @@
+crates/arroyo-connectors/src/superbuffer/source/checkpoint.rs
+  s_60de9f20253a6c::t_b50db8c8d2a799 5,39-48,63-64,90-94,96,100,137,225-237
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_60de9f20253a6c::t_b73b759622a319 344,375-376,390-391
+  s_60de9f20253a6c::t_9bc74df0d3a36b 820-822,830-840,845,1093-1094
+  s_60de9f20253a6c::t_b2adc99431c389 13,15
+  s_60de9f20253a6c::t_c67dd82ea01f54 658,666,681,688-689
+  s_60de9f20253a6c::t_f28fed8c7a6df5 542-545,548,551,573-574,587-590,592,594-598
+  s_60de9f20253a6c::t_cabaa23ea076de 846,932-966,974,990,992,1006,1077,1082,1085,1088-1089,1096,1100-1101,1131-1132,1134,1141,1167,1169-1170
+  s_60de9f20253a6c::t_b6b1326918c982 783,801
+  s_60de9f20253a6c::t_4a9c4d604b4375 416,418,424-428,446,450-454,480-481,486
+  s_60de9f20253a6c::t_43c1136af4d9ec 7,350-352,359-361,788,841-844,1081
+  s_60de9f20253a6c::t_fc4e6a312ad7c6 177,202,216,234,253-258,262,281,288,294,303,321
+  s_60de9f20253a6c::t_9f9aebf7298f02 847
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_60de9f20253a6c::t_43c1136af4d9ec 67-77,79,88-96,98-107,117,122-132,155-157,312-330
+  s_60de9f20253a6c::t_7d158fbf308270 5-7
+  s_60de9f20253a6c::t_9dc2f37a9a8aac 158-159,161-170,185,190-197,201,212-221,234-236,261-266
+  s_60de9f20253a6c::t_e7b403dc5599dd 337-339,343,367,373,375,379,381,385,387,400,421,423-426,429,432-433,435,437,464
+  s_60de9f20253a6c::t_cb75b5ed148b55 273-277,280-311
+  s_60de9f20253a6c::t_32b4ec5ca7a824 10,29,45
+  s_60de9f20253a6c::t_777b8232bdcde2 62,86,113,133,142
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_60de9f20253a6c::t_14f379e39160e5 9,96-100
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_60de9f20253a6c::t_41483e70d03257 274
+  s_60de9f20253a6c::t_d80a3a23080a7f 359,363,373,375,396,398,405
+  s_60de9f20253a6c::t_2c3857c96005b3 29,31,81,86,94,99,133-134,137-139,145,151
+  s_60de9f20253a6c::t_2d98972421e7eb 156,168,176,180,195,202,207-213,216-217,233
+  s_60de9f20253a6c::t_7d158fbf308270 5
+  s_60de9f20253a6c::t_43c1136af4d9ec 92
+  s_60de9f20253a6c::t_9b6282edf32d82 247-249,256-257,264-265,269-273,275-276,282-284,286-289,291-292,295,297-298,302-304,306-308,312-314,318-319,321,325-326,331,333-335,342,345
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_60de9f20253a6c::t_6da6dc4711b8eb 1,3,8-11,13-30,32-70,72-99,107-151,156-169,172-189,192,195
+  s_60de9f20253a6c::t_41483e70d03257 100-106
+  s_60de9f20253a6c::t_72af9312492d39 6-7
+  s_60de9f20253a6c::t_8f4a1f48a56f8e 4-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e271c07f1791915dffa1655165580c724ca3314c",
+  "prompts": {},
+  "sessions": {
+    "s_60de9f20253a6c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdfaeb877ffes3YMTI7RKn6D6n",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
