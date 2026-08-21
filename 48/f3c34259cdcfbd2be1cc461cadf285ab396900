@@ -1,0 +1,29 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_60de9f20253a6c::t_1f763fe3f3ce39 6,65,68,85,88-89,440-441
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_60de9f20253a6c::t_1f763fe3f3ce39 8,129-130,135,142-143,148
+  s_60de9f20253a6c::t_87630c4555c9f6 421,436,447,489,496,503,507
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_60de9f20253a6c::t_29509ac05ddac1 42
+  s_60de9f20253a6c::t_1f763fe3f3ce39 3,17,26,34,43,50,63,66,127-131
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_60de9f20253a6c::t_1f763fe3f3ce39 117,133
+crates/arroyo-connectors/src/superbuffer/source/checkpoint.rs
+  s_60de9f20253a6c::t_1f763fe3f3ce39 19,24-25,32-47,53-54,147,153-156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "48f3c34259cdcfbd2be1cc461cadf285ab396900",
+  "prompts": {},
+  "sessions": {
+    "s_60de9f20253a6c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdfaeb877ffes3YMTI7RKn6D6n",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
