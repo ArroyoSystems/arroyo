@@ -36,7 +36,7 @@ jobs:
         with:
           components: clippy, rustfmt
           toolchain: 1.95
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6.1.0
         with:
           path: |
             ~/.cargo/bin/
