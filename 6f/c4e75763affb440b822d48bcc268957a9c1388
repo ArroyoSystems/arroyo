@@ -1,0 +1,21 @@
+crates/arroyo-connectors/src/filesystem/sink/v2/mod.rs
+  s_5c8aa395ba9427::t_a86bd32c6f7118 505-508
+  s_5c8aa395ba9427::t_1038467ae92ba7 47-52
+  s_5c8aa395ba9427::t_50d055b6f161c3 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6fc4e75763affb440b822d48bcc268957a9c1388",
+  "prompts": {},
+  "sessions": {
+    "s_5c8aa395ba9427": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4033421ffeRA24RJLd7dDfci",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
