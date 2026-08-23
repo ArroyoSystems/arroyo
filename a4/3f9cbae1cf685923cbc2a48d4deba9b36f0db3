@@ -1,0 +1,44 @@
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_5c8aa395ba9427::t_158ade3fa78ebe 77-78
+  s_5c8aa395ba9427::t_7128667bb38f2a 35
+  s_5c8aa395ba9427::t_b351622faae129 34,76,79-82,84-91,94-96,112-116,136,141-149,230,259-268,289-291
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_5c8aa395ba9427::t_0a50cbfdfdf91a 10-12,197-280,449-461
+  s_5c8aa395ba9427::t_49dc4fc07b625c 462
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_5c8aa395ba9427::t_e7c1a453d9f551 560-562,564,568,649-693,781-792
+  s_5c8aa395ba9427::t_158ade3fa78ebe 9,18-20,233-234,290,355
+  s_5c8aa395ba9427::t_96ace8c40eb50f 579-595,597-611,613-621,623-645
+  s_5c8aa395ba9427::t_744d4607b3b495 6-7,11-12,14,32,45,49-77,167-170,172,185-232,235-277,282,340,345-350,353-354,393-396,406-420,646,793
+  s_5c8aa395ba9427::t_902e8a7e26e430 421
+  s_5c8aa395ba9427::t_8288687776384a 647-648
+  s_5c8aa395ba9427::t_f65a6cfbe31b97 794
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_5c8aa395ba9427::t_4a95231bbd5581 57-59,136-137,158
+crates/arroyo-connectors/src/superbuffer/source/checkpoint.rs
+  s_5c8aa395ba9427::t_cded334c2f0d05 19,104,115,146,157,171-172,188-189,191-195,203-204,217
+  s_5c8aa395ba9427::t_19a339fe476f9b 6,10,101,105,116,118-137,139-145,147,158-170
+  s_5c8aa395ba9427::t_f0c4ef8a3a72f0 77,106-107,138,148-149,173-185,187,200-201
+  s_5c8aa395ba9427::t_6e207a3dc8d454 108-114,150-156,190,196,198-199,202,205-211
+  s_5c8aa395ba9427::t_d5200ed1883ad4 102-103
+  s_5c8aa395ba9427::t_689557c16a7b88 117
+crates/arroyo-operator/src/context.rs
+  s_5c8aa395ba9427::t_179a02678625f0 423
+  s_5c8aa395ba9427::t_c5ce3597ae5768 407-418,420-421,424-433,439-443,485-490
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a43f9cbae1cf685923cbc2a48d4deba9b36f0db3",
+  "prompts": {},
+  "sessions": {
+    "s_5c8aa395ba9427": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4033421ffeRA24RJLd7dDfci",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
