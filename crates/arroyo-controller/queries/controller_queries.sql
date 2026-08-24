@@ -1,4 +1,4 @@
---! all_jobs : Job(ttl_micros?, state?, start_time?, finish_time?, tasks?, failure_message?, failure_domain?, run_id?, pipeline_path?, wasm_path?, ignore_state_before_epoch?)
+--! all_jobs : Job(ttl_micros?, state?, start_time?, finish_time?, tasks?, failure_message?, failure_domain?, run_id?, pipeline_path?, wasm_path?)
 SELECT
     c.id as id,
     c.organization_id as org_id,
@@ -21,7 +21,6 @@ SELECT
     c.restart_nonce as config_restart_nonce,
     s.restart_nonce as status_restart_nonce,
     restart_mode,
-    ignore_state_before_epoch,
     state_context,
     env_vars,
     scheduler_config
@@ -46,56 +45,6 @@ WHERE id = :job_id;
 
 --! get_program : PipelineRow(state_url?)
 SELECT program, pub_id as pipeline_id, proto_version, state_url, tags FROM pipelines WHERE id = :id;
-
---! mark_checkpoints_compacted
-UPDATE checkpoints
-    set state = 'compacted'
-WHERE job_id = :job_id AND epoch < :epoch;
-
---! drop_old_checkpoint_rows
-DELETE FROM checkpoints
-WHERE job_id = :job_id AND epoch < :epoch;
-
---! create_checkpoint
-INSERT INTO checkpoints
-(pub_id, organization_id, job_id, state_backend, epoch, min_epoch, start_time, is_stopping)
-VALUES (:pub_id, :organization_id, :job_id, :state_backend, :epoch, :min_epoch, :start_time, :is_stopping);
-
---! update_checkpoint (finish_time?)
-UPDATE checkpoints
-SET
-    operators = :operators,
-    finish_time = :finish_time,
-    state = :state,
-    event_spans = :event_spans
-WHERE pub_id = :pub_id;
-
---! commit_checkpoint
-UPDATE checkpoints
-SET
-    finish_time = :finish_time,
-    state = 'ready',
-    event_spans = :event_spans
-WHERE pub_id = :pub_id;
-
---! mark_compacting
-UPDATE checkpoints
-SET
-    state = 'compacting'
-WHERE job_id = :job_id AND epoch >= :min_epoch AND epoch < :epoch;
-
---! mark_failed
-UPDATE checkpoints
-SET
-    state = 'failed'
-WHERE job_id = :job_id AND epoch >= :epoch;
-
---! last_successful_checkpoint
-SELECT pub_id, epoch, min_epoch, state = 'committing' as needs_commits
-FROM checkpoints
-WHERE job_id = :job_id AND (state = 'ready' or state = 'committing')
-ORDER BY epoch DESC
-LIMIT 1;
 
 --! create_job_log_message
 INSERT INTO job_log_messages (pub_id, job_id, operator_id, task_index, log_level, message, details, error_domain, retry_hint)

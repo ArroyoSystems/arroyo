@@ -52,7 +52,7 @@ use crate::rest_utils::{
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
-use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
@@ -873,9 +873,7 @@ pub async fn restart_pipeline(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    if req.ignore_state.unwrap_or(false)
-        && matches!(config().job_controller, JobControllerMode::Worker)
-    {
+    if req.ignore_state.unwrap_or(false) {
         jobs::replace_job_without_state(&state.database, &id, &auth_data).await?;
 
         let db = state.database.client().await?;
@@ -898,24 +896,11 @@ pub async fn restart_pipeline(
         RestartMode::safe
     };
 
-    // If user wants to ignore state, query max checkpoint epoch and compute threshold
-    let ignore_before_epoch = if req.ignore_state.unwrap_or(false) {
-        api_queries::fetch_max_checkpoint_epoch(&db, &job_id, &auth_data.organization_id)
-            .await?
-            .into_iter()
-            .next()
-            .and_then(|r| r.max_epoch)
-            .map(|max_epoch| max_epoch + 1)
-    } else {
-        None
-    };
-
     let res = api_queries::execute_restart_job(
         &db,
         &OffsetDateTime::now_utc(),
         &auth_data.user_id,
         &mode,
-        &ignore_before_epoch,
         &job_id,
         &auth_data.organization_id,
     )

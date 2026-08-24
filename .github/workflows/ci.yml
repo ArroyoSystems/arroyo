@@ -158,10 +158,8 @@ jobs:
             return "${status}"
           }
 
-          run_integ controller-postgres ARROYO__DATABASE__TYPE=postgres
-          run_integ controller-sqlite ARROYO__DATABASE__TYPE=sqlite
-          run_integ leader-postgres ARROYO__DATABASE__TYPE=postgres ARROYO__JOB_CONTROLLER=worker
-          run_integ leader-sqlite ARROYO__DATABASE__TYPE=sqlite ARROYO__JOB_CONTROLLER=worker
+          run_integ postgres ARROYO__DATABASE__TYPE=postgres
+          run_integ sqlite ARROYO__DATABASE__TYPE=sqlite
 
   build-console:
     runs-on: ubuntu-latest

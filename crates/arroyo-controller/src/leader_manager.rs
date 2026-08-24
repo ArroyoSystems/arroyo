@@ -223,7 +223,7 @@ where
                             job_id = %ctx.config.id,
                             pipeline_id = *ctx.pipeline_info.pipeline_id,
                             ?msg,
-                            "unexpected job message in leader leader mode"
+                            "unexpected job message while controlling worker leader"
                         );
                     }
                     None => {

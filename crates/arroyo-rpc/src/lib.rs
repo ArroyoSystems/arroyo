@@ -1079,15 +1079,8 @@ pub async fn job_controller_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
     addr: String,
-    is_worker_job_controller: bool,
 ) -> Result<job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
-    let their_tls = if is_worker_job_controller {
-        &config().worker.tls
-    } else {
-        &config().controller.tls
-    };
-
-    let channel = connect_grpc(our_name, addr, our_tls, their_tls, None).await?;
+    let channel = connect_grpc(our_name, addr, our_tls, &config().worker.tls, None).await?;
     Ok(job_controller_grpc_client::JobControllerGrpcClient::new(
         channel,
     ))

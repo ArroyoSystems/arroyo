@@ -1,7 +1,7 @@
-use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
+use crate::queries::api_queries::{DbLogMessage, DbPipelineJob};
 use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, CheckpointType, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
+    Checkpoint, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
@@ -29,7 +29,7 @@ use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
     BearerAuth, ErrorResp, PipelineJobCheckpointPath, PipelineJobPath, authenticate, bad_request,
-    conflict, internal_server_error, log_and_map, not_found, paginate_results,
+    conflict, internal_server_error, log_and_map, not_found, paginate_results, service_unavailable,
     validate_pagination_params,
 };
 use crate::types::public::LogLevel;
@@ -219,7 +219,7 @@ fn replaceable_job(jobs: Vec<(String, String)>) -> Result<String, ErrorResp> {
 
 /// Replaces a pipeline's job with a new one with the same configuration but a different job id
 ///
-/// This is used to implement start/restart without state in leader mode.
+/// This is used to implement start/restart without restoring checkpoint state.
 pub(crate) async fn replace_job_without_state(
     db: &DatabaseSource,
     pipeline_pub_id: &str,
@@ -431,38 +431,29 @@ pub async fn get_job_checkpoints(
     .next()
     .ok_or_else(|| not_found("Job"))?;
 
-    let state_context: Option<StateContext> = job
+    let leader = job
         .state_context
         .map(serde_json::from_value)
         .transpose()
         .with_context(|| format!("converting state context for job {}", job_pub_id))
-        .map_err(log_and_map)?;
+        .map_err(log_and_map)?
+        .and_then(|ctx: StateContext| ctx.leader)
+        .ok_or_else(|| service_unavailable("job leader"))?;
 
-    let checkpoints = if let Some(state_context) = state_context
-        && let Some(leader) = state_context.leader
-    {
-        fetch_from_leader(leader, move |mut client, generation| async move {
-            client
-                .get_job_checkpoints(GetJobCheckpointsReq {
-                    job_id: job.id,
-                    generation,
-                })
-                .await
-        })
-        .await?
-        .into_inner()
-        .checkpoints
-        .into_iter()
-        .map(Checkpoint::from)
-        .collect()
-    } else {
-        api_queries::fetch_get_job_checkpoints(&db, &job_pub_id, &auth_data.organization_id)
+    let checkpoints = fetch_from_leader(leader, move |mut client, generation| async move {
+        client
+            .get_job_checkpoints(GetJobCheckpointsReq {
+                job_id: job.id,
+                generation,
+            })
             .await
-            .map_err(log_and_map)?
-            .into_iter()
-            .filter_map(|m| m.try_into().ok())
-            .collect()
-    };
+    })
+    .await?
+    .into_inner()
+    .checkpoints
+    .into_iter()
+    .map(Checkpoint::from)
+    .collect();
 
     Ok(Json(CheckpointCollection { data: checkpoints }))
 }
@@ -504,50 +495,27 @@ pub async fn get_checkpoint_details(
     .next()
     .ok_or_else(|| not_found("Job"))?;
 
-    let state_context: Option<StateContext> = job
+    let leader = job
         .state_context
         .map(serde_json::from_value)
         .transpose()
         .with_context(|| format!("converting state context for job {}", job_pub_id))
-        .map_err(log_and_map)?;
-
-    let operators = if let Some(state_context) = state_context
-        && let Some(leader) = state_context.leader
-    {
-        fetch_from_leader(leader, move |mut client, generation| async move {
-            client
-                .get_checkpoint_details(GetCheckpointDetailsReq {
-                    job_id: job.id,
-                    generation,
-                    epoch: epoch as u64,
-                })
-                .await
-        })
-        .await?
-        .into_inner()
-        .operators
-    } else {
-        let checkpoint_details = api_queries::fetch_get_checkpoint_details(
-            &db,
-            &job_pub_id,
-            &auth_data.organization_id,
-            &(epoch as i32),
-        )
-        .await
         .map_err(log_and_map)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            not_found(&format!(
-                "Checkpoint with epoch {epoch} for job '{job_pub_id}'"
-            ))
-        })?;
+        .and_then(|ctx: StateContext| ctx.leader)
+        .ok_or_else(|| service_unavailable("job leader"))?;
 
-        checkpoint_details
-            .operators
-            .map(|o| serde_json::from_value(o).unwrap())
-            .unwrap_or_else(HashMap::<String, OperatorCheckpointDetail>::new)
-    };
+    let operators = fetch_from_leader(leader, move |mut client, generation| async move {
+        client
+            .get_checkpoint_details(GetCheckpointDetailsReq {
+                job_id: job.id,
+                generation,
+                epoch: epoch as u64,
+            })
+            .await
+    })
+    .await?
+    .into_inner()
+    .operators;
 
     let operators = operator_checkpoint_groups(operators);
 
@@ -670,23 +638,6 @@ pub async fn get_jobs(
     }))
 }
 
-impl TryFrom<DbCheckpoint> for Checkpoint {
-    type Error = anyhow::Error;
-
-    fn try_from(val: DbCheckpoint) -> anyhow::Result<Self> {
-        let events: Vec<JobCheckpointSpan> = serde_json::from_value(val.event_spans)?;
-
-        Ok(Checkpoint {
-            epoch: val.epoch as u64,
-            backend: val.state_backend,
-            checkpoint_type: CheckpointType::from_is_stopping(val.is_stopping),
-            start_time: to_micros(val.start_time),
-            finish_time: val.finish_time.map(to_micros),
-            events: events.into_iter().map(|e| e.into()).collect(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,7 +678,6 @@ mod tests {
                     pipeline_id INTEGER NOT NULL,
                     restart_nonce INTEGER DEFAULT 0 NOT NULL,
                     restart_mode TEXT DEFAULT 'safe' NOT NULL,
-                    ignore_state_before_epoch INTEGER,
                     env_vars TEXT DEFAULT '{}' NOT NULL,
                     scheduler_config TEXT DEFAULT '{}' NOT NULL
                 );
@@ -755,10 +705,10 @@ mod tests {
                 INSERT INTO job_configs
                     (id, organization_id, pipeline_name, created_by, updated_by, ttl_micros, stop,
                      parallelism_overrides, checkpoint_interval_micros, pipeline_id, restart_nonce,
-                     restart_mode, ignore_state_before_epoch, env_vars, scheduler_config)
+                     restart_mode, env_vars, scheduler_config)
                     VALUES
                     ('job_old', 'org_1', 'pipeline', 'user_1', 'user_1', 123, 'immediate',
-                     '{\"1\": 4}', 5000000, 1, 3, 'force', 42,
+                     '{\"1\": 4}', 5000000, 1, 3, 'force',
                      '{\"ENV\": \"value\"}', '{\"scheduler\": true}');
                 INSERT INTO checkpoints (job_id) VALUES ('job_old');
                 INSERT INTO job_log_messages (job_id) VALUES ('job_old');",
@@ -789,19 +739,10 @@ mod tests {
         };
         let connection = connection.lock().unwrap();
 
-        let job: (
-            String,
-            String,
-            i64,
-            String,
-            String,
-            Option<i64>,
-            String,
-            String,
-        ) = connection
+        let job: (String, String, i64, String, String, String, String) = connection
             .query_row(
                 "SELECT id, stop, restart_nonce, restart_mode, updated_by,
-                        ignore_state_before_epoch, env_vars, scheduler_config
+                        env_vars, scheduler_config
                  FROM job_configs",
                 [],
                 |row| {
@@ -813,7 +754,6 @@ mod tests {
                         row.get(4)?,
                         row.get(5)?,
                         row.get(6)?,
-                        row.get(7)?,
                     ))
                 },
             )
@@ -826,7 +766,6 @@ mod tests {
                 0,
                 "safe".to_string(),
                 "user_2".to_string(),
-                None,
                 "{\"ENV\": \"value\"}".to_string(),
                 "{\"scheduler\": true}".to_string(),
             )

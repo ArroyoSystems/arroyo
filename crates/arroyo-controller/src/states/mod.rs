@@ -14,10 +14,8 @@ use tracing::{debug, error, info, warn};
 use anyhow::{Result, anyhow};
 use cornucopia_async::DatabaseSource;
 
-use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
 use self::failing::Failing;
-use self::finishing::Finishing;
 use self::leader_checkpoint_stopping::LeaderCheckpointStopping;
 use self::leader_finishing::LeaderFinishing;
 use self::leader_rescaling::LeaderRescaling;
@@ -25,31 +23,24 @@ use self::leader_restarting::LeaderRestarting;
 use self::leader_running::LeaderRunning;
 use self::leader_stopping::LeaderStopping;
 use self::recovering::Recovering;
-use self::rescaling::Rescaling;
-use self::running::Running;
 use self::scheduling::Scheduling;
 use self::stopping::Stopping;
-use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
 use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::JobFailure;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
-use arroyo_worker::job_controller::job_metrics::JobMetrics;
 use prost::Message;
 
-pub(crate) mod checkpoint_stopping;
 pub(crate) mod compiling;
 pub(crate) mod failing;
-pub(crate) mod finishing;
 pub(crate) mod leader_checkpoint_stopping;
 pub(crate) mod leader_finishing;
 pub(crate) mod leader_rescaling;
@@ -57,9 +48,6 @@ pub(crate) mod leader_restarting;
 pub(crate) mod leader_running;
 pub(crate) mod leader_stopping;
 pub(crate) mod recovering;
-pub(crate) mod rescaling;
-pub(crate) mod restarting;
-pub(crate) mod running;
 pub(crate) mod scheduling;
 pub(crate) mod stopping;
 
@@ -198,19 +186,6 @@ impl TransitionTo<Compiling> for Scheduling {}
 
 impl TransitionTo<Scheduling> for Compiling {}
 
-impl TransitionTo<Running> for Scheduling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            // set the start time and clear the finish time, but only if this is an initial start
-            // and not a recovery
-            if ctx.status.start_time.is_none() || ctx.status.finish_time.is_some() {
-                ctx.status.start_time = Some(OffsetDateTime::now_utc());
-                ctx.status.finish_time = None;
-            }
-        })
-    }
-}
-
 impl TransitionTo<LeaderRunning> for Scheduling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -222,20 +197,8 @@ impl TransitionTo<LeaderRunning> for Scheduling {
     }
 }
 
-impl TransitionTo<CheckpointStopping> for Running {}
-impl TransitionTo<Stopping> for Running {}
-impl TransitionTo<Stopping> for LeaderRunning {}
 impl TransitionTo<Stopping> for Scheduling {}
 impl TransitionTo<Stopping> for Compiling {}
-impl TransitionTo<Stopping> for Rescaling {}
-impl TransitionTo<Finishing> for Running {}
-impl TransitionTo<Recovering> for Running {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.restarts += 1;
-        })
-    }
-}
 impl TransitionTo<Recovering> for LeaderRunning {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -251,10 +214,6 @@ impl TransitionTo<Recovering> for Scheduling {
     }
 }
 
-impl TransitionTo<Rescaling> for Running {}
-
-impl TransitionTo<Scheduling> for Rescaling {}
-
 impl TransitionTo<Compiling> for Recovering {}
 impl TransitionTo<Compiling> for Failed {
     fn update_status(&self) -> TransitionFn {
@@ -266,13 +225,11 @@ impl TransitionTo<Compiling> for Failed {
     }
 }
 
-impl TransitionTo<Failing> for Running {}
 impl TransitionTo<Failing> for Scheduling {}
 impl TransitionTo<Failed> for Failing {}
 
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
-    ctx.job_controller = None;
     ctx.leader_manager = None;
     ctx.status.state_context.leader = None;
 }
@@ -303,7 +260,6 @@ impl TransitionTo<Stopped> for LeaderStopping {
 
 impl TransitionTo<LeaderStopping> for LeaderStopping {}
 
-impl TransitionTo<Stopping> for LeaderStopping {}
 impl TransitionTo<Recovering> for LeaderStopping {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -313,7 +269,6 @@ impl TransitionTo<Recovering> for LeaderStopping {
 }
 
 impl TransitionTo<LeaderStopping> for LeaderCheckpointStopping {}
-impl TransitionTo<Stopping> for LeaderCheckpointStopping {}
 impl TransitionTo<Stopped> for LeaderCheckpointStopping {
     fn update_status(&self) -> TransitionFn {
         Box::new(done_transition)
@@ -340,7 +295,6 @@ impl TransitionTo<Recovering> for LeaderFinishing {
     }
 }
 impl TransitionTo<LeaderStopping> for LeaderFinishing {}
-impl TransitionTo<Stopping> for LeaderFinishing {}
 
 impl TransitionTo<LeaderCheckpointStopping> for LeaderRestarting {}
 impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
@@ -366,100 +320,16 @@ impl TransitionTo<Recovering> for LeaderRescaling {
 }
 impl TransitionTo<LeaderStopping> for LeaderRescaling {}
 
-impl TransitionTo<Stopping> for CheckpointStopping {}
-impl TransitionTo<Stopped> for CheckpointStopping {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(done_transition)
-    }
-}
-
-impl TransitionTo<Finished> for Finishing {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(done_transition)
-    }
-}
-
-impl TransitionTo<Restarting> for Running {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.restart_nonce = ctx.config.restart_nonce;
-        })
-    }
-}
-impl TransitionTo<Restarting> for Restarting {}
-impl TransitionTo<Scheduling> for Restarting {}
-impl TransitionTo<Stopping> for Restarting {}
-impl TransitionTo<CheckpointStopping> for Restarting {}
-
-// Macro to handle stopping behavior from a running state, where we want to
-// support checkpoint stopping
-macro_rules! stop_if_desired_running {
-    ($self: ident, $config: expr) => {
-        use crate::states::checkpoint_stopping::CheckpointStopping;
-        use crate::states::stopping::StopBehavior;
-        use crate::states::stopping::Stopping;
-        use crate::types::public::StopMode;
-        use arroyo_rpc::grpc::rpc;
-        match $config.stop_mode {
-            StopMode::checkpoint => {
-                return Ok(Transition::next(*$self, CheckpointStopping {}));
-            }
-            StopMode::graceful => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Graceful),
-                    },
-                ));
-            }
-            StopMode::immediate => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Immediate),
-                    },
-                ));
-            }
-            StopMode::force => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopWorkers,
-                    },
-                ));
-            }
-            StopMode::none => {
-                // do nothing
-            }
-        }
-    };
-}
-
 // macro to handle stopping behavior from a state where the job is not current running
 // (like compiling / scheduling / etc.). in this case, there's nothing active to checkpoint
 // so we just move to stopping all cases
 macro_rules! stop_if_desired_non_running {
     ($self: ident, $config: expr) => {
-        use crate::states::stopping::StopBehavior;
         use crate::states::stopping::Stopping;
         use crate::types::public::StopMode;
-        use arroyo_rpc::grpc;
         match $config.stop_mode {
-            StopMode::checkpoint | StopMode::graceful | StopMode::immediate => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(grpc::rpc::StopMode::Immediate),
-                    },
-                ));
-            }
-            StopMode::force => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopWorkers,
-                    },
-                ));
+            StopMode::checkpoint | StopMode::graceful | StopMode::immediate | StopMode::force => {
+                return Ok(Transition::next(*$self, Stopping {}));
             }
             StopMode::none => {
                 // do nothing
@@ -526,11 +396,9 @@ pub fn controller_job_failure(
     }
 }
 
-use crate::job_controller::leader_manager::LeaderManager;
-use crate::states::restarting::Restarting;
+use crate::leader_manager::LeaderManager;
 pub(crate) use leader_stop_if_desired_running;
 pub(crate) use stop_if_desired_non_running;
-pub(crate) use stop_if_desired_running;
 
 pub struct JobContext<'a> {
     pub config: JobConfig,
@@ -541,25 +409,18 @@ pub struct JobContext<'a> {
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
     pub retries_attempted: usize,
-    pub job_controller: Option<JobController>,
     pub leader_manager: Option<LeaderManager>,
     pub last_transitioned_at: Instant,
-    pub metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 }
 
 impl JobContext<'_> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
-        if !matches!(
-            msg,
-            JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat { .. })
-        ) {
-            warn!(
-                job_id = %self.config.id,
-                pipeline_id = *self.pipeline_info.pipeline_id,
-                "unhandled job message {:?}",
-                msg
-            );
-        }
+        warn!(
+            job_id = %self.config.id,
+            pipeline_id = *self.pipeline_info.pipeline_id,
+            "unhandled job message {:?}",
+            msg
+        );
         Ok(())
     }
 
@@ -576,63 +437,6 @@ impl JobContext<'_> {
             domain: ErrorDomain::Internal,
             source,
             retries: retries.saturating_sub(self.retries_attempted),
-        }
-    }
-
-    pub async fn handle_task_error<T: State + TransitionTo<Recovering>>(
-        &self,
-        state: Box<T>,
-        event: TaskFailedEvent,
-    ) -> Result<Transition, StateError> {
-        error!(
-            job_id = %self.config.id.as_str(),
-            pipeline_id = *self.pipeline_info.pipeline_id,
-            task_id = event.task_id,
-            operator_subtask = event.subtask_idx,
-            operator_id = event.operator_id,
-            error_domain = event.error_domain.as_str(),
-            retry_hint = event.retry_hint.as_str(),
-            message = "task failed",
-            reason = event.reason,
-        );
-
-        let client = self.db.client().await.unwrap();
-        if let Err(db_err) = queries::controller_queries::execute_create_job_log_message(
-            &client,
-            &generate_id(IdTypes::JobLogMessage),
-            &self.config.id.as_str(),
-            &event.operator_id,
-            &(event.subtask_idx as i64),
-            &LogLevel::error,
-            &event.reason,
-            &event.details,
-            &event.error_domain.as_str(),
-            &event.retry_hint.as_str(),
-        )
-        .await
-        {
-            warn!(
-                job_id = %self.config.id,
-                pipeline_id = *self.pipeline_info.pipeline_id,
-                "Failed to log task failure to database: {:?}",
-                db_err
-            );
-        }
-
-        match event.retry_hint {
-            errors::RetryHint::NoRetry => Err(StateError::FatalError {
-                source: anyhow!("task failed: {}", event.reason),
-                message: event.reason,
-                domain: event.error_domain,
-            }),
-            errors::RetryHint::WithBackoff => Ok(Transition::next(
-                *state,
-                Recovering {
-                    source: anyhow!("task failed: {}", event.reason),
-                    reason: event.reason,
-                    domain: event.error_domain,
-                },
-            )),
         }
     }
 
@@ -936,7 +740,6 @@ async fn run_to_completion(
     db: DatabaseSource,
     mut rx: Receiver<JobMessage>,
     scheduler: Arc<dyn Scheduler>,
-    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
     let job_config = job_config_and_status.read().unwrap().0.clone();
 
@@ -972,10 +775,8 @@ async fn run_to_completion(
         scheduler,
         rx: &mut rx,
         retries_attempted: 0,
-        job_controller: None,
         leader_manager,
         last_transitioned_at: Instant::now(),
-        metrics,
     };
 
     loop {
@@ -1002,7 +803,6 @@ pub struct StateMachine {
     tx: Option<Sender<JobMessage>>,
     config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pub(crate) state: Arc<RwLock<String>>,
-    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
     scheduler: Arc<dyn Scheduler>,
 }
@@ -1014,13 +814,11 @@ impl StateMachine {
         db: DatabaseSource,
         scheduler: Arc<dyn Scheduler>,
         shutdown_guard: ShutdownGuard,
-        metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     ) -> Self {
         let mut this = Self {
             tx: None,
             config: Arc::new(RwLock::new((config, AppliedStatus::NotApplied))),
             state: Arc::new(RwLock::new(status.state.clone())),
-            metrics,
             db,
             scheduler,
         };
@@ -1086,18 +884,16 @@ impl StateMachine {
             return;
         }
 
-        let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
-
         // TODO: This seems pretty error-prone and easy to miss adding when we add states
         let initial_state: Option<Box<dyn State>> = match status.state.as_str() {
             "Created" => Some(Box::new(Created {})),
             "Stopped" => Some(Box::new(Stopped {})),
             "Finished" => Some(Box::new(Finished {})),
             "Failed" => Some(Box::new(Failed {})),
-            "Running" if leader_mode => Some(Box::new(LeaderRunning {
+            "Running" => Some(Box::new(LeaderRunning {
                 started: Instant::now(),
             })),
-            "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" | "Restarting" => {
+            "Compiling" | "Scheduling" | "Recovering" | "Rescaling" | "Restarting" => {
                 Some(Box::new(Compiling {}))
             }
             "Failing" => {
@@ -1131,7 +927,6 @@ impl StateMachine {
                 let config = self.config.clone();
                 let db = self.db.clone();
                 let scheduler = self.scheduler.clone();
-                let metrics = self.metrics.clone();
                 let pipeline_id = config.read().unwrap().0.pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
                     Ok(Some((program, pipeline_info))) => {
@@ -1153,7 +948,6 @@ impl StateMachine {
                                 db,
                                 rx,
                                 scheduler,
-                                metrics,
                             )
                             .await;
                             info!(

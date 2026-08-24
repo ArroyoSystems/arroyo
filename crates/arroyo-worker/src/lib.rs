@@ -404,13 +404,9 @@ impl WorkerState {
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
 
-            let file_path_layout = if req.wait_for_leader || req.is_leader {
-                CheckpointFilePathLayout::Protocol {
-                    pipeline_id: self.worker_context.pipeline_id.clone(),
-                    generation: self.worker_context.generation,
-                }
-            } else {
-                CheckpointFilePathLayout::Legacy
+            let file_path_layout = CheckpointFilePathLayout::Protocol {
+                pipeline_id: self.worker_context.pipeline_id.clone(),
+                generation: self.worker_context.generation,
             };
 
             let program = Program::from_logical(
@@ -449,32 +445,13 @@ impl WorkerState {
 
         let mut phase_guard = self.phase.lock().unwrap();
 
-        let job_controller_addr = req
-            .job_controller_addr
-            .clone()
-            .unwrap_or_else(|| config().controller_endpoint());
-
-        if req.wait_for_leader {
-            info!("waiting for leader");
-            *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
-                control_rx,
-                engine_state,
-                job_controller_addr,
-            };
-            drop(phase_guard);
-        } else {
-            info!("Worker moving to running phase");
-            *phase_guard = WorkerExecutionPhase::Running(engine_state);
-            drop(phase_guard);
-
-            let cancel_token = shutdown_guard.token();
-            shutdown_guard
-                .child("control-thread")
-                .into_spawn_task(async move {
-                    self.run_control_loop(cancel_token, control_rx, job_controller_addr, false)
-                        .await
-                });
-        }
+        info!("waiting for leader");
+        *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
+            control_rx,
+            engine_state,
+            job_controller_addr: req.job_controller_addr,
+        };
+        drop(phase_guard);
 
         info!("Initialization completed successfully");
         Ok(())
@@ -485,18 +462,12 @@ impl WorkerState {
         cancel_token: CancellationToken,
         control_rx: Receiver<ControlResp>,
         job_controller_addr: String,
-        is_worker_job_controller: bool,
     ) -> Result<()> {
         // TODO: We need this just for sending TaskStarted notifications to the actual controller for
         //  scheduling; it would be nicer if we didn't need to retain it for the entire job lifecycle
         let mut controller = controller_client("worker", &config().worker.tls).await?;
-        let mut job_controller = job_controller_client(
-            "worker",
-            &config().worker.tls,
-            job_controller_addr,
-            is_worker_job_controller,
-        )
-        .await?;
+        let mut job_controller =
+            job_controller_client("worker", &config().worker.tls, job_controller_addr).await?;
 
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1188,7 +1159,7 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(async move {
                 state
-                    .run_control_loop(cancel_token, control_rx, job_controller_addr, true)
+                    .run_control_loop(cancel_token, control_rx, job_controller_addr)
                     .await
             });
 

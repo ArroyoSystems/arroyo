@@ -263,9 +263,6 @@ pub struct Config {
     /// Directory to look for config files in
     pub config_dir: Option<PathBuf>,
 
-    /// Controls where the "job controller" lives, either on the controller or a worker-leader
-    pub job_controller: JobControllerMode,
-
     /// Run options
     #[serde(default)]
     pub run: RunConfig,
@@ -273,14 +270,6 @@ pub struct Config {
     /// Telemetry config
     #[serde(default)]
     pub disable_telemetry: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub enum JobControllerMode {
-    #[default]
-    Controller,
-    Worker,
 }
 
 impl Config {

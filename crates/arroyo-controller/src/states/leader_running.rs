@@ -141,7 +141,7 @@ impl State for LeaderRunning {
                                 job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                                 msg =? msg,
-                                "unexpected job message in leader mode"
+                                "unexpected job message while monitoring worker leader"
                             );
                         }
                         None => {
