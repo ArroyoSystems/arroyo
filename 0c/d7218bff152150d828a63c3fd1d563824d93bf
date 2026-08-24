@@ -1,0 +1,23 @@
+crates/arroyo-formats/src/de.rs
+  s_ff2ee700ddc71e::t_a70bf6ac0eabee 61,185,500,503-506,509-511
+crates/arroyo-connectors/src/nexmark/operator.rs
+  s_ff2ee700ddc71e::t_a70bf6ac0eabee 284
+crates/arroyo-formats/src/lib.rs
+  s_ff2ee700ddc71e::t_a70bf6ac0eabee 12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0cd7218bff152150d828a63c3fd1d563824d93bf",
+  "prompts": {},
+  "sessions": {
+    "s_ff2ee700ddc71e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcc8379b3ffeTWJbWqIbXQljBL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
