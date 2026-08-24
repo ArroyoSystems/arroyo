@@ -1,0 +1,37 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_ff2ee700ddc71e::t_004324e1bd6467 20,97-99,337
+  s_ff2ee700ddc71e::t_a7e823bd4d4dc2 85,103,117,134,138
+  s_ff2ee700ddc71e::t_b598ddd95fcc9b 628,643-667
+  s_ff2ee700ddc71e::t_5a488e68529065 169-173,180-186
+  s_ff2ee700ddc71e::t_2f3c64c7ee177b 18-19
+  s_ff2ee700ddc71e::t_ba7965dec1c3d8 477-486
+  s_ff2ee700ddc71e::t_fb093ceff1323c 441,562-574
+  s_ff2ee700ddc71e::t_cb011b3455bb02 523-530
+  s_ff2ee700ddc71e::t_ef51aed9d0d441 670-691
+  s_ff2ee700ddc71e::t_1ed9af6475b290 297,300,310-311,316-336,338-355,385-439
+  s_ff2ee700ddc71e::t_1a12a19e5b6da7 440,442,668-669
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_ff2ee700ddc71e::t_5360f246229467 269-275
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_ff2ee700ddc71e::t_534b3d696d5213 190-196
+  s_ff2ee700ddc71e::t_aa7154db3aa2f3 281-287
+crates/arroyo-connectors/src/superbuffer/source/checkpoint.rs
+  s_ff2ee700ddc71e::t_559c3afe7bfefc 224-231,235-245
+  s_ff2ee700ddc71e::t_004324e1bd6467 232-234
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "833dd781f29349096ac6315eed32569f9f2d43ec",
+  "prompts": {},
+  "sessions": {
+    "s_ff2ee700ddc71e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcc8379b3ffeTWJbWqIbXQljBL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
