@@ -1,0 +1,33 @@
+crates/arroyo-connectors/src/superbuffer/source/progress.rs
+  s_ff2ee700ddc71e::t_0e072ba10cb559 17,69
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_ff2ee700ddc71e::t_67ec89bc99768c 10,56,134,138,140-156,158-170,184-226
+  s_ff2ee700ddc71e::t_dd0aa697c6ebb9 266,279
+  s_5bf72d7edc12f0::t_7077f96fb9a093 227
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_ff2ee700ddc71e::t_282694437148c8 153,155,162,210-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f475611ef6ea43ee40076345153e73fb43af1295",
+  "prompts": {},
+  "sessions": {
+    "s_5bf72d7edc12f0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcbc85aceffeyJ898AHUoOZuKc",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_ff2ee700ddc71e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcc8379b3ffeTWJbWqIbXQljBL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
