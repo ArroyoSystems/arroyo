@@ -93,6 +93,11 @@ impl Optimizer for ChainingOptimizer {
                 .edges
                 .push(edge.weight().schema.clone());
 
+            new_cur
+                .operator_chain
+                .edges
+                .extend(successor_node.operator_chain.edges.clone());
+
             mem::swap(&mut new_cur, plan.node_weight_mut(node_idx).unwrap());
 
             // remove the old successor
@@ -101,5 +106,77 @@ impl Optimizer for ChainingOptimizer {
         }
 
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logical::{LogicalEdge, LogicalNode, OperatorName};
+    use arrow_schema::{DataType, Field};
+    use arroyo_rpc::df::ArroyoSchema;
+    use std::sync::Arc;
+
+    fn node(id: u32, operator_id: &str, name: OperatorName) -> LogicalNode {
+        LogicalNode::single(
+            id,
+            operator_id.to_string(),
+            name,
+            vec![],
+            operator_id.to_string(),
+            1,
+        )
+    }
+
+    fn schema(name: &str) -> Arc<ArroyoSchema> {
+        Arc::new(ArroyoSchema::from_fields(vec![Field::new(
+            name,
+            DataType::Int64,
+            false,
+        )]))
+    }
+
+    #[test]
+    fn preserves_edges_when_merging_into_chain() {
+        let mut graph = LogicalGraph::new();
+
+        // Reverse-topological insertion makes B merge with C before A merges with B.
+        let c = graph.add_node(node(2, "c", OperatorName::ArrowValue));
+        let b = graph.add_node(node(1, "b", OperatorName::ExpressionWatermark));
+        let a = graph.add_node(node(0, "a", OperatorName::ArrowValue));
+
+        let ab_schema = schema("a_to_b");
+        let bc_schema = schema("b_to_c");
+
+        graph.add_edge(
+            a,
+            b,
+            LogicalEdge {
+                edge_type: LogicalEdgeType::Forward,
+                schema: ab_schema.clone(),
+            },
+        );
+        graph.add_edge(
+            b,
+            c,
+            LogicalEdge {
+                edge_type: LogicalEdgeType::Forward,
+                schema: bc_schema.clone(),
+            },
+        );
+
+        ChainingOptimizer {}.optimize(&mut graph);
+
+        assert_eq!(graph.node_count(), 1);
+        let chain = &graph.node_weights().next().unwrap().operator_chain;
+        assert_eq!(
+            chain
+                .operators
+                .iter()
+                .map(|operator| operator.operator_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+        assert_eq!(chain.edges, vec![ab_schema, bc_schema]);
     }
 }
