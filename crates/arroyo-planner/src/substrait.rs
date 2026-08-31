@@ -117,6 +117,11 @@ pub async fn get_program_from_substrait_bytes(
 
 #[cfg(test)]
 mod tests {
+    use arroyo_connectors::nexmark::NexmarkTable;
+    use arroyo_operator::connector::Connection;
+    use arroyo_rpc::api_types::connections::{
+        ConnectionSchema, ConnectionType, FieldType, SourceField,
+    };
     use datafusion_substrait::logical_plan::producer::to_substrait_plan;
     use prost::Message;
 
@@ -127,6 +132,38 @@ mod tests {
     };
 
     const SOURCE_UUID: &str = "9f0c30f1-2a41-4aa9-b07f-a56745c83e90";
+    const FILTER_SOURCE_UUID: &str = "2a2d2bf8-b03b-4f32-a53a-2ed07fa183ab";
+
+    fn get_filter_test_schema_provider() -> ArroyoSchemaProvider {
+        let mut schema_provider = ArroyoSchemaProvider::new();
+        schema_provider.add_connector_table(Connection::new(
+            Some(1),
+            "nexmark",
+            FILTER_SOURCE_UUID.to_string(),
+            ConnectionType::Source,
+            ConnectionSchema {
+                format: None,
+                bad_data: None,
+                framing: None,
+                fields: vec![SourceField {
+                    name: "a".to_string(),
+                    field_type: FieldType::String,
+                    required: false,
+                    sql_name: None,
+                    metadata_key: None,
+                }],
+                definition: None,
+                inferred: None,
+                primary_keys: Default::default(),
+            },
+            &NexmarkTable {
+                event_rate: 10.0,
+                runtime: Some(10.0 * 1_000_000.0),
+            },
+            "Interoperability test source".to_string(),
+        ));
+        schema_provider
+    }
 
     #[tokio::test]
     async fn compiles_substrait_plan_with_named_table() {
@@ -170,6 +207,24 @@ mod tests {
         let compiled = get_program_from_substrait_bytes(
             &substrait_plan.encode_to_vec(),
             schema_provider,
+            SubstraitSink::Preview,
+            SqlConfig::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(compiled.program.graph.node_count() >= 2);
+        assert_eq!(compiled.connection_ids, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn compiles_filter_fixture() {
+        let plan: Plan =
+            serde_json::from_str(include_str!("test/fixtures/filter.substrait.json")).unwrap();
+
+        let compiled = get_program_from_substrait_bytes(
+            &plan.encode_to_vec(),
+            get_filter_test_schema_provider(),
             SubstraitSink::Preview,
             SqlConfig::default(),
         )
