@@ -181,7 +181,7 @@ async fn build_schema_provider(
 
 async fn compile_sql(
     query: String,
-    local_udfs: &Vec<Udf>,
+    local_udfs: &[Udf],
     parallelism: usize,
     auth_data: &AuthData,
     validate_only: bool,
