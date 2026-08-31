@@ -33,9 +33,9 @@ use crate::jobs::{
 use crate::metrics::__path_get_operator_metric_groups;
 use crate::pipelines::__path_get_pipelines;
 use crate::pipelines::{
-    __path_create_pipeline, __path_create_preview_pipeline, __path_delete_pipeline,
-    __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline, __path_put_pipeline,
-    __path_restart_pipeline, __path_validate_query, __path_validate_substrait,
+    __path_create_pipeline, __path_create_preview_pipeline, __path_create_substrait_pipeline,
+    __path_delete_pipeline, __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline,
+    __path_put_pipeline, __path_restart_pipeline, __path_validate_query, __path_validate_substrait,
 };
 use crate::rest::__path_ping;
 use crate::rest_utils::{ErrorResp, service_unavailable};
@@ -249,6 +249,7 @@ impl IntoResponse for HttpError {
         ping,
         validate_query,
         validate_substrait,
+        create_substrait_pipeline,
         validate_udf,
         create_pipeline,
         create_preview_pipeline,

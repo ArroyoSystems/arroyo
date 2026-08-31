@@ -16,9 +16,9 @@ use std::time::{Duration, SystemTime};
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
-    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
-    QueryValidationResult, SqlDiagnostic, StopType, SubstraitSinkBinding, ValidateQueryPost,
-    ValidateSubstraitMetadata,
+    CreateSubstraitMetadata, FailureReason, Job, Pipeline, PipelinePatch, PipelinePost,
+    PipelineRestart, PreviewPost, QueryValidationResult, SqlDiagnostic, StopType,
+    SubstraitSinkBinding, ValidateQueryPost, ValidateSubstraitMetadata,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
@@ -689,6 +689,115 @@ pub async fn validate_substrait(
             errors: error.diagnostics,
         },
     }))
+}
+
+/// Create and start a pipeline from a Substrait plan.
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/substrait",
+    tag = "pipelines",
+    responses(
+        (status = 200, description = "Created pipeline and job", body = Pipeline),
+        (status = 400, description = "Bad request", body = ErrorResp),
+    ),
+)]
+pub async fn create_substrait_pipeline(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    mut multipart: Multipart,
+) -> Result<Json<Pipeline>, ErrorResp> {
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+
+    let mut plan = None;
+    let mut metadata = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| bad_request(format!("Invalid multipart request: {e}")))?
+    {
+        match field.name() {
+            Some("plan") if plan.is_none() => {
+                plan = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| bad_request(format!("Invalid Substrait plan field: {e}")))?,
+                );
+            }
+            Some("metadata") if metadata.is_none() => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| bad_request(format!("Invalid Substrait metadata field: {e}")))?;
+                metadata = Some(
+                    serde_json::from_slice::<CreateSubstraitMetadata>(&bytes)
+                        .map_err(|e| bad_request(format!("Invalid Substrait metadata: {e}")))?,
+                );
+            }
+            Some(name) => {
+                return Err(bad_request(format!(
+                    "Unexpected or duplicate multipart field: {name}"
+                )));
+            }
+            None => return Err(bad_request("Multipart fields must have names".to_string())),
+        }
+    }
+
+    let plan = plan.ok_or_else(|| bad_request("Missing multipart field: plan".to_string()))?;
+    let metadata =
+        metadata.ok_or_else(|| bad_request("Missing multipart field: metadata".to_string()))?;
+    let SubstraitSinkBinding::Named { table: sink_name } = metadata.sink else {
+        return Err(bad_request(
+            "Substrait pipeline creation requires a named sink".to_string(),
+        ));
+    };
+
+    let mut schema_provider =
+        build_schema_provider(&[], &auth_data, false, &state.database).await?;
+    for (substrait_name, table_name) in metadata.source_bindings {
+        schema_provider
+            .add_table_alias(substrait_name, &table_name)
+            .map_err(|error| bad_request(error.to_string()))?;
+    }
+
+    let compiled = get_program_from_substrait_bytes(
+        &plan,
+        schema_provider,
+        SubstraitSink::Named(sink_name),
+        SqlConfig {
+            default_parallelism: metadata.parallelism as usize,
+        },
+    )
+    .await?;
+    let checkpoint_interval = metadata
+        .checkpoint_interval_micros
+        .map(Duration::from_micros)
+        .unwrap_or(*config().default_checkpoint_interval);
+    let pipeline_id = create_pipeline_int(
+        metadata.name,
+        "-- Substrait pipeline".to_string(),
+        vec![],
+        metadata.parallelism,
+        checkpoint_interval,
+        false,
+        true,
+        auth_data.clone(),
+        &state.database,
+        compiled,
+        None,
+        metadata.state_url,
+        metadata.tags.unwrap_or_default(),
+        metadata.env_vars.unwrap_or_default(),
+        match metadata.scheduler_config {
+            None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+            Some(value) => value,
+        },
+    )
+    .await?;
+
+    let pipeline =
+        query_pipeline_by_pub_id(&pipeline_id, &state.database.client().await?, &auth_data).await?;
+    Ok(Json(pipeline))
 }
 
 /// Create a new pipeline
