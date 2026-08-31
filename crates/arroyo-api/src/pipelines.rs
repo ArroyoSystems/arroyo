@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use arrow_schema::SchemaRef;
 use arroyo_connectors::connector_for_type;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::{Json, debug_handler};
 use axum_extra::extract::WithRejection;
 use http::StatusCode;
@@ -17,7 +17,8 @@ use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::default_sink;
 use arroyo_rpc::api_types::pipelines::{
     FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
-    QueryValidationResult, StopType, ValidateQueryPost,
+    QueryValidationResult, SqlDiagnostic, StopType, SubstraitSinkBinding, ValidateQueryPost,
+    ValidateSubstraitMetadata,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
@@ -28,7 +29,10 @@ use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig};
+use arroyo_planner::{
+    ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig,
+    substrait::{SubstraitSink, get_program_from_substrait_bytes},
+};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id, validate_public_id};
@@ -58,14 +62,12 @@ use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
 
-async fn compile_sql(
-    query: String,
-    local_udfs: &Vec<Udf>,
-    parallelism: usize,
+async fn build_schema_provider(
+    local_udfs: &[Udf],
     auth_data: &AuthData,
     validate_only: bool,
     db: &DatabaseSource,
-) -> Result<Result<CompiledSql, PlannerError>, ErrorResp> {
+) -> Result<ArroyoSchemaProvider, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     let global_udfs = fetch_get_udfs(&db.client().await?, &auth_data.organization_id)
@@ -173,6 +175,19 @@ async fn compile_sql(
     for profile in profiles {
         schema_provider.add_connection_profile(profile);
     }
+
+    Ok(schema_provider)
+}
+
+async fn compile_sql(
+    query: String,
+    local_udfs: &Vec<Udf>,
+    parallelism: usize,
+    auth_data: &AuthData,
+    validate_only: bool,
+    db: &DatabaseSource,
+) -> Result<Result<CompiledSql, PlannerError>, ErrorResp> {
+    let schema_provider = build_schema_provider(local_udfs, auth_data, validate_only, db).await?;
 
     Ok(arroyo_planner::parse_and_get_program(
         &query,
@@ -582,6 +597,98 @@ pub async fn validate_query(
     };
 
     Ok(Json(pipeline_graph_validation_result))
+}
+
+/// Validate a Substrait plan and return its pipeline graph.
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/validate_substrait",
+    tag = "pipelines",
+    responses(
+        (status = 200, description = "Validated Substrait plan", body = QueryValidationResult),
+        (status = 400, description = "Malformed multipart request", body = ErrorResp),
+    ),
+)]
+pub async fn validate_substrait(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    mut multipart: Multipart,
+) -> Result<Json<QueryValidationResult>, ErrorResp> {
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+
+    let mut plan = None;
+    let mut metadata = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| bad_request(format!("Invalid multipart request: {e}")))?
+    {
+        match field.name() {
+            Some("plan") if plan.is_none() => {
+                plan = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| bad_request(format!("Invalid Substrait plan field: {e}")))?,
+                );
+            }
+            Some("metadata") if metadata.is_none() => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| bad_request(format!("Invalid Substrait metadata field: {e}")))?;
+                metadata = Some(
+                    serde_json::from_slice::<ValidateSubstraitMetadata>(&bytes)
+                        .map_err(|e| bad_request(format!("Invalid Substrait metadata: {e}")))?,
+                );
+            }
+            Some(name) => {
+                return Err(bad_request(format!(
+                    "Unexpected or duplicate multipart field: {name}"
+                )));
+            }
+            None => return Err(bad_request("Multipart fields must have names".to_string())),
+        }
+    }
+
+    let plan = plan.ok_or_else(|| bad_request("Missing multipart field: plan".to_string()))?;
+    let metadata =
+        metadata.ok_or_else(|| bad_request("Missing multipart field: metadata".to_string()))?;
+
+    let mut schema_provider = build_schema_provider(&[], &auth_data, true, &state.database).await?;
+    for (substrait_name, table_name) in metadata.source_bindings {
+        if let Err(error) = schema_provider.add_table_alias(substrait_name, &table_name) {
+            return Ok(Json(QueryValidationResult {
+                graph: None,
+                errors: vec![SqlDiagnostic::message(error.to_string())],
+            }));
+        }
+    }
+
+    let sink = match metadata.sink {
+        SubstraitSinkBinding::Preview => SubstraitSink::Preview,
+        SubstraitSinkBinding::Named { table } => SubstraitSink::Named(table),
+    };
+    let result = get_program_from_substrait_bytes(
+        &plan,
+        schema_provider,
+        sink,
+        SqlConfig {
+            default_parallelism: 1,
+        },
+    )
+    .await;
+
+    Ok(Json(match result {
+        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+            graph: Some(program.try_into().map_err(log_and_map)?),
+            errors: vec![],
+        },
+        Err(error) => QueryValidationResult {
+            graph: None,
+            errors: error.diagnostics,
+        },
+    }))
 }
 
 /// Create a new pipeline

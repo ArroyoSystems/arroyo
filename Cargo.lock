@@ -816,6 +816,7 @@ dependencies = [
  "datafusion-functions",
  "datafusion-functions-json",
  "datafusion-proto",
+ "datafusion-substrait",
  "futures",
  "glob",
  "itertools 0.14.0",
@@ -1342,6 +1343,17 @@ dependencies = [
  "futures-lite",
  "rustix 1.0.7",
  "tracing",
+]
+
+[[package]]
+name = "async-recursion"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b43422f69d8ff38f95f1b2bb76517c91589a924d1559a0e935d7c8ce0274c11"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -1946,6 +1958,7 @@ dependencies = [
  "matchit 0.7.3",
  "memchr",
  "mime",
+ "multer",
  "percent-encoding",
  "pin-project-lite",
  "rustversion",
@@ -3715,6 +3728,24 @@ dependencies = [
  "recursive",
  "regex",
  "sqlparser 0.55.0",
+]
+
+[[package]]
+name = "datafusion-substrait"
+version = "48.0.1"
+source = "git+https://github.com/ArroyoSystems/arrow-datafusion?branch=48.0.1%2Farroyo#ed5fce439c7bf12811abab184c12077a6b17240a"
+dependencies = [
+ "async-recursion",
+ "async-trait",
+ "chrono",
+ "datafusion",
+ "itertools 0.14.0",
+ "object_store",
+ "pbjson-types",
+ "prost",
+ "substrait",
+ "tokio",
+ "url",
 ]
 
 [[package]]
@@ -7214,6 +7245,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
+name = "pbjson"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7e6349fa080353f4a597daffd05cb81572a9c031a6d4fff7e504947496fcc68"
+dependencies = [
+ "base64 0.21.7",
+ "serde",
+]
+
+[[package]]
+name = "pbjson-build"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6eea3058763d6e656105d1403cb04e0a41b7bbac6362d413e7c33be0c32279c9"
+dependencies = [
+ "heck 0.5.0",
+ "itertools 0.13.0",
+ "prost",
+ "prost-types",
+]
+
+[[package]]
+name = "pbjson-types"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e54e5e7bfb1652f95bc361d76f3c780d8e526b134b85417e774166ee941f0887"
+dependencies = [
+ "bytes",
+ "chrono",
+ "pbjson",
+ "pbjson-build",
+ "prost",
+ "prost-build",
+ "serde",
+]
+
+[[package]]
 name = "pear"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7948,7 +8016,7 @@ dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "parking_lot 0.11.2",
+ "parking_lot 0.12.4",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -9736,6 +9804,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "substrait"
+version = "0.56.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13de2e20128f2a018dab1cfa30be83ae069219a65968c6f89df66ad124de2397"
+dependencies = [
+ "heck 0.5.0",
+ "pbjson",
+ "pbjson-build",
+ "pbjson-types",
+ "prettyplease",
+ "prost",
+ "prost-build",
+ "prost-types",
+ "regress 0.10.4",
+ "schemars 0.8.22",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "syn 2.0.106",
+ "typify 0.4.3",
+ "walkdir",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10939,8 +11032,15 @@ dependencies = [
  "serde_json",
  "url",
  "utoipa",
+ "utoipa-swagger-ui-vendored",
  "zip",
 ]
+
+[[package]]
+name = "utoipa-swagger-ui-vendored"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2eebbbfe4093922c2b6734d7c679ebfebd704a0d7e56dfcb0d05818ce28977d"
 
 [[package]]
 name = "uuid"
