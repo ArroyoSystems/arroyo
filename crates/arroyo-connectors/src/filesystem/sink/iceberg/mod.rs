@@ -109,13 +109,22 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
             let status = extract_catalog_status(&display);
 
             let domain = match status {
+                // Rate limiting is a transient failure in the external service, not a user error.
+                Some(429) => ErrorDomain::External,
                 Some(400..=499) => ErrorDomain::User,
                 Some(_) => ErrorDomain::External,
                 // No status found — could be a transport error or something else
                 None => {
                     if let Some(source) = error.source() {
                         if let Some(err) = source.downcast_ref::<reqwest::Error>() {
-                            if err.status().map(|c| c.is_client_error()).unwrap_or(false) {
+                            if err
+                                .status()
+                                .map(|c| {
+                                    c.is_client_error()
+                                        && c != reqwest::StatusCode::TOO_MANY_REQUESTS
+                                })
+                                .unwrap_or(false)
+                            {
                                 ErrorDomain::User
                             } else {
                                 ErrorDomain::External
@@ -521,6 +530,28 @@ mod tests {
         match map_iceberg_error(error) {
             DataflowError::ConnectorError { domain, .. } => {
                 assert_eq!(domain, ErrorDomain::External);
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_iceberg_error_object_store_429() {
+        let error = iceberg::Error::new(ErrorKind::Unexpected, "Failure in doing io operation")
+            .with_source(anyhow::Error::msg(
+                r#"Unexpected (persistent) at read, context: { uri: https://account.r2.cloudflarestorage.com/bucket/metadata/snapshot.avro, response: Parts { status: 429, version: HTTP/1.1, headers: {"retry-after": "5"} }, service: s3, path: metadata/snapshot.avro, range: 0- } => S3Error { code: "ServiceUnavailable", message: "Reduce your rate of simultaneous reads on the same object." }"#
+            ));
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError {
+                domain,
+                retry,
+                error,
+                ..
+            } => {
+                assert_eq!(domain, ErrorDomain::External);
+                assert_eq!(retry, RetryHint::WithBackoff);
+                assert!(error.contains("status: 429"), "{error}");
             }
             other => panic!("expected ConnectorError, got: {other:?}"),
         }
