@@ -1,0 +1,19 @@
+crates/arroyo-formats/src/de.rs
+  s_535a9191c1093d::t_0317bb953a562e 65-67,812,814,817,827-854
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bd4c73a466cf9929b0ec9b8e0852c4d22e9de4c2",
+  "prompts": {},
+  "sessions": {
+    "s_535a9191c1093d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa1e096a8ffepUbk9AWI7tMXwt",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
