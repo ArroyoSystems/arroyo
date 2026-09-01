@@ -1,0 +1,28 @@
+crates/arroyo-server-common/src/lib_cf.rs
+  s_07ab6252cf4907::t_431708b7009ab8 860
+  s_07ab6252cf4907::t_ef142f10a791e6 407-432
+  s_07ab6252cf4907::t_254f2a4b2c6a47 337-338
+  s_07ab6252cf4907::t_392103b3718304 1030
+  s_07ab6252cf4907::t_7e89954a6d212c 586
+  s_07ab6252cf4907::t_301484166a6b29 451
+  s_07ab6252cf4907::t_211e5c42f2cd31 1191
+  s_07ab6252cf4907::t_17a245abda0bce 557
+  s_07ab6252cf4907::t_e6ee5f19d8a821 621
+  s_07ab6252cf4907::t_7031794077b575 353-360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5511a51e20283fed42df24784d93d31bf2c44c1a",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
