@@ -10,7 +10,7 @@ use arroyo_openapi::types::{
     PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
     ValidateUdfPost, builder,
 };
-use prost::Message;
+use prost::Message as ProstMessage;
 use rand::random;
 use rdkafka::Message;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
@@ -394,7 +394,7 @@ async fn substrait_pipeline() {
         "properties": {"a": {"type": "string"}},
         "required": []
     }"#;
-    let connection_schema = ConnectionSchema::builder()
+    let connection_schema: ConnectionSchema = ConnectionSchema::builder()
         .fields(vec![])
         .format(Format::Json {
             compression: None,
