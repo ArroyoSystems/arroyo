@@ -5767,10 +5767,12 @@ version = "0.16.0-dev"
 dependencies = [
  "anyhow",
  "arroyo-openapi",
+ "prost",
  "rand 0.9.1",
  "rdkafka",
  "reqwest",
  "serde_json",
+ "substrait",
  "tokio",
  "tracing",
 ]
@@ -8639,6 +8641,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "once_cell",
  "percent-encoding",
