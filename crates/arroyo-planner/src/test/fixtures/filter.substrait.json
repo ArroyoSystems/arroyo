@@ -1,0 +1,131 @@
+{
+  "version": {
+    "major_number": 0,
+    "minor_number": 74,
+    "patch_number": 0,
+    "git_hash": "",
+    "producer": ""
+  },
+  "extension_uris": [
+    {
+      "extension_uri_anchor": 2,
+      "uri": "/functions_string.yaml"
+    },
+    {
+      "extension_uri_anchor": 1,
+      "uri": "/functions_comparison.yaml"
+    }
+  ],
+  "extensions": [
+    {
+      "extension_function": {
+        "extension_uri_reference": 1,
+        "function_anchor": 1,
+        "name": "is_not_null:any"
+      }
+    },
+    {
+      "extension_function": {
+        "extension_uri_reference": 2,
+        "function_anchor": 2,
+        "name": "lower:str"
+      }
+    },
+    {
+      "extension_function": {
+        "extension_uri_reference": 1,
+        "function_anchor": 3,
+        "name": "equal:any_any"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "root": {
+        "input": {
+          "filter": {
+            "common": {
+              "direct": {}
+            },
+            "input": {
+              "read": {
+                "common": {
+                  "direct": {}
+                },
+                "base_schema": {
+                  "names": [
+                    "a"
+                  ],
+                  "struct": {
+                    "types": [
+                      {
+                        "string": {
+                          "type_variation_reference": 0,
+                          "nullability": "NULLABILITY_NULLABLE"
+                        }
+                      }
+                    ],
+                    "type_variation_reference": 0,
+                    "nullability": "NULLABILITY_REQUIRED"
+                  }
+                },
+                "named_table": {
+                  "names": [
+                    "2a2d2bf8-b03b-4f32-a53a-2ed07fa183ab"
+                  ]
+                }
+              }
+            },
+            "condition": {
+              "scalar_function": {
+                "function_reference": 1,
+                "args": [],
+                "output_type": {
+                  "bool": {
+                    "type_variation_reference": 0,
+                    "nullability": "NULLABILITY_REQUIRED"
+                  }
+                },
+                "arguments": [
+                  {
+                    "value": {
+                      "scalar_function": {
+                        "function_reference": 2,
+                        "args": [],
+                        "output_type": {
+                          "string": {
+                            "type_variation_reference": 0,
+                            "nullability": "NULLABILITY_NULLABLE"
+                          }
+                        },
+                        "arguments": [
+                          {
+                            "value": {
+                              "selection": {
+                                "direct_reference": {
+                                  "struct_field": {
+                                    "field": 0
+                                  }
+                                },
+                                "root_reference": {}
+                              }
+                            }
+                          }
+                        ],
+                        "options": []
+                      }
+                    }
+                  }
+                ],
+                "options": []
+              }
+            }
+          }
+        },
+        "names": [
+          "a"
+        ]
+      }
+    }
+  ]
+}

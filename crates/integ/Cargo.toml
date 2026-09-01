@@ -11,4 +11,6 @@ rand = { workspace = true }
 tracing = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 rdkafka = "0.39"
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+prost = { workspace = true }
+substrait = { version = "0.56", features = ["protoc", "serde"] }
