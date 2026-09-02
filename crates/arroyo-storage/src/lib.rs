@@ -189,7 +189,7 @@ macro_rules! storage_retry {
             10,
             Duration::from_millis(100),
             Duration::from_secs(10),
-            |e| error!("Error: {}. Retrying...", e),
+            |e| error!("Error: {:#}. Retrying...", anyhow::Error::new(e)),
             should_retry
         )
     };

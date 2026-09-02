@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 default = []
 
 [dependencies]
+anyhow = { workspace = true }
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 bytes = { workspace = true }
