@@ -39,7 +39,7 @@ struct ContextBuffer {
     /// Accumulated raw input bytes since last flush.
     /// Currently measured as pre-deserialization input size rather than Arrow buffer memory.
     buffered_bytes: usize,
-    created: Instant,
+    buffered_since: Option<Instant>,
 }
 
 impl ContextBuffer {
@@ -53,7 +53,7 @@ impl ContextBuffer {
         Self {
             buffer,
             buffered_bytes: 0,
-            created: Instant::now(),
+            buffered_since: None,
         }
     }
 
@@ -62,11 +62,14 @@ impl ContextBuffer {
     }
 
     pub fn should_flush(&self) -> bool {
-        should_flush(self.size(), self.buffered_bytes, self.created)
+        self.buffered_since.is_some_and(|buffered_since| {
+            should_flush(self.size(), self.buffered_bytes, buffered_since)
+        })
     }
 
-    pub fn finish(&mut self) -> Vec<ArrayRef> {
+    pub fn flush(&mut self) -> Vec<ArrayRef> {
         self.buffered_bytes = 0;
+        self.buffered_since = None;
         self.buffer.iter_mut().map(|a| a.finish()).collect()
     }
 }
@@ -203,7 +206,7 @@ impl BufferDecoder {
         match self {
             BufferDecoder::Buffer(buffer) => {
                 if buffer.size() > 0 {
-                    Some(Ok((buffer.finish(), None)))
+                    Some(Ok((buffer.flush(), None)))
                 } else {
                     None
                 }
@@ -328,7 +331,10 @@ impl BufferDecoder {
 
     fn add_input_bytes(&mut self, n: usize) {
         match self {
-            BufferDecoder::Buffer(b) => b.buffered_bytes += n,
+            BufferDecoder::Buffer(b) => {
+                b.buffered_bytes += n;
+                b.buffered_since.get_or_insert_with(Instant::now);
+            }
             BufferDecoder::JsonDecoder { buffered_bytes, .. } => *buffered_bytes += n,
         }
     }
@@ -834,11 +840,14 @@ fn add_additional_fields(
 
 #[cfg(test)]
 mod tests {
-    use crate::de::{ArrowDeserializer, FieldValueType, FramingIterator};
+    use crate::de::{
+        ArrowDeserializer, BufferDecoder, ContextBuffer, FieldValueType, FramingIterator,
+    };
     use arrow::datatypes::Int32Type;
+    use arrow_array::builder::StringBuilder;
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
-    use arrow_schema::{DataType, Schema, TimeUnit};
+    use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::MetadataField;
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::errors::DataflowError;
@@ -848,7 +857,48 @@ mod tests {
     use arroyo_types::to_nanos;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::SystemTime;
+    use std::time::{Duration, Instant, SystemTime};
+
+    #[test]
+    fn context_buffer_resets_linger_after_flush() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Utf8,
+            false,
+        )]));
+        let mut buffer = ContextBuffer::new(schema);
+
+        let builder = buffer.buffer[0]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap();
+        builder.append_value("first");
+        let mut decoder = BufferDecoder::Buffer(buffer);
+        decoder.add_input_bytes(5);
+
+        let BufferDecoder::Buffer(buffer) = &mut decoder else {
+            unreachable!();
+        };
+        buffer.buffered_since = Some(Instant::now() - Duration::from_secs(1));
+        assert!(buffer.should_flush());
+
+        let _ = buffer.flush();
+        assert_eq!(buffer.buffered_bytes, 0);
+        assert_eq!(buffer.buffered_since, None);
+
+        let builder = buffer.buffer[0]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap();
+        builder.append_value("second");
+        let second_write = Instant::now();
+        decoder.add_input_bytes(6);
+
+        let BufferDecoder::Buffer(buffer) = &decoder else {
+            unreachable!();
+        };
+        assert!(buffer.buffered_since.is_some_and(|t| t >= second_write));
+    }
 
     #[test]
     fn test_line_framing() {
