@@ -4,7 +4,6 @@ use super::{
 use crate::JobMessage;
 use crate::job_controller::JobController;
 use crate::job_controller::leader_manager::LeaderManager;
-use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode, StopMode};
 use arroyo_rpc::retry;
@@ -238,7 +237,7 @@ impl State for Recovering {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        let pipeline_config = &config().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         // only allow one restart for preview pipelines
         if ctx.config.ttl.is_some() {

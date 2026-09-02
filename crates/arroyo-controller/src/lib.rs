@@ -5,7 +5,7 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{PipelineConfig, config};
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
@@ -94,6 +94,7 @@ fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
+use crate::states::{StateError, fatal};
 use types::public::LogLevel;
 use types::public::{RestartMode, StopMode};
 
@@ -115,10 +116,19 @@ pub struct JobConfig {
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
     /// Per-job scheduler configuration overlay as raw JSON (same
-    /// shape as the controller-wide scheduler config). The scheduler
-    /// interprets this; the controller treats it as opaque. An empty
-    /// object is the no-override case.
+    /// shape as the controller-wide scheduler config)
     scheduler_config: serde_json::Value,
+    /// The process-wide pipeline config with this job's overlay applied
+    pipeline_config: serde_json::Value,
+}
+
+impl JobConfig {
+    pub fn pipeline_config(&self) -> Result<PipelineConfig, StateError> {
+        config()
+            .pipeline
+            .try_merge(&self.pipeline_config)
+            .map_err(|e| fatal("invalid pipeline_config", e))
+    }
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -720,6 +730,7 @@ impl ControllerServer {
                         ignore_state_before_epoch: p.ignore_state_before_epoch,
                         env_vars: p.env_vars,
                         scheduler_config: p.scheduler_config,
+                        pipeline_config: p.pipeline_config,
                     };
 
                     let mut jobs = jobs.lock().await;

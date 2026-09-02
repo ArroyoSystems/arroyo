@@ -1,6 +1,5 @@
 use super::{JobContext, State, StateError, Transition, scheduling::Scheduling};
 use crate::job_controller::leader_manager::handle_leader_stopping;
-use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 
 #[derive(Debug)]
@@ -26,7 +25,13 @@ impl State for LeaderRescaling {
             ));
         }
 
-        let timeout = config().pipeline.checkpoint.timeout.as_ref().map(|t| **t);
+        let timeout = ctx
+            .config
+            .pipeline_config()?
+            .checkpoint
+            .timeout
+            .as_ref()
+            .map(|t| **t);
         handle_leader_stopping(*self, ctx, JobState::JobStopped, Scheduling {}, timeout).await
     }
 }

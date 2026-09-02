@@ -125,6 +125,7 @@ pub(crate) async fn create_job(
     db: &DatabaseSource,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     let checkpoint_interval = if preview {
         Duration::from_secs(24 * 60 * 60)
@@ -166,6 +167,11 @@ pub(crate) async fn create_job(
     let env_vars_json =
         serde_json::to_value(&env_vars).expect("HashMap<String, String> is always serializable");
 
+    // validate the pipeline config is valid
+    if let Err(e) = config().pipeline.try_merge(&pipeline_config) {
+        return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
+    }
+
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
         &db.client().await?,
@@ -182,6 +188,7 @@ pub(crate) async fn create_job(
         }),
         &env_vars_json,
         &scheduler_config,
+        &pipeline_config,
     )
     .await?;
 
@@ -729,7 +736,8 @@ mod tests {
                     restart_mode TEXT DEFAULT 'safe' NOT NULL,
                     ignore_state_before_epoch INTEGER,
                     env_vars TEXT DEFAULT '{}' NOT NULL,
-                    scheduler_config TEXT DEFAULT '{}' NOT NULL
+                    scheduler_config TEXT DEFAULT '{}' NOT NULL,
+                    pipeline_config TEXT DEFAULT '{}' NOT NULL
                 );
                 CREATE TABLE job_statuses (
                     pub_id TEXT NOT NULL UNIQUE,
@@ -755,11 +763,13 @@ mod tests {
                 INSERT INTO job_configs
                     (id, organization_id, pipeline_name, created_by, updated_by, ttl_micros, stop,
                      parallelism_overrides, checkpoint_interval_micros, pipeline_id, restart_nonce,
-                     restart_mode, ignore_state_before_epoch, env_vars, scheduler_config)
+                     restart_mode, ignore_state_before_epoch, env_vars, scheduler_config,
+                     pipeline_config)
                     VALUES
                     ('job_old', 'org_1', 'pipeline', 'user_1', 'user_1', 123, 'immediate',
                      '{\"1\": 4}', 5000000, 1, 3, 'force', 42,
-                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}');
+                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}',
+                     '{\"allowed_restarts\": 3}');
                 INSERT INTO checkpoints (job_id) VALUES ('job_old');
                 INSERT INTO job_log_messages (job_id) VALUES ('job_old');",
             )
@@ -798,10 +808,11 @@ mod tests {
             Option<i64>,
             String,
             String,
+            String,
         ) = connection
             .query_row(
                 "SELECT id, stop, restart_nonce, restart_mode, updated_by,
-                        ignore_state_before_epoch, env_vars, scheduler_config
+                        ignore_state_before_epoch, env_vars, scheduler_config, pipeline_config
                  FROM job_configs",
                 [],
                 |row| {
@@ -814,6 +825,7 @@ mod tests {
                         row.get(5)?,
                         row.get(6)?,
                         row.get(7)?,
+                        row.get(8)?,
                     ))
                 },
             )
@@ -829,6 +841,7 @@ mod tests {
                 None,
                 "{\"ENV\": \"value\"}".to_string(),
                 "{\"scheduler\": true}".to_string(),
+                "{\"allowed_restarts\": 3}".to_string(),
             )
         );
 

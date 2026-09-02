@@ -684,7 +684,7 @@ impl State for Scheduling {
         let worker_connects = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
-        let pipeline_config = &config().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         let start = Instant::now();
         loop {

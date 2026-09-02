@@ -31,7 +31,7 @@ impl State for Running {
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
         stop_if_desired_running!(self, ctx.config);
 
-        let pipeline_config = &config().clone().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         let running_start = Instant::now();
 
@@ -60,11 +60,13 @@ impl State for Running {
                                 }));
                             }
 
-                            // env_vars and scheduler_config are only applied when workers are
+                            // env_vars, scheduler_config, and pipeline_config are applied when workers are
                             // (re)scheduled, so a change to either while the job is running
                             // requires a restart to take effect.
                             if c.scheduler_config != ctx.config.scheduler_config
-                                || c.env_vars != ctx.config.env_vars {
+                                || c.env_vars != ctx.config.env_vars
+                                || c.pipeline_config != ctx.config.pipeline_config
+                            {
                                 return Ok(Transition::next(*self, Restarting {
                                     mode: RestartMode::safe
                                 }));

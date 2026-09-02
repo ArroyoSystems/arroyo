@@ -1,7 +1,6 @@
 use super::{JobContext, State, Stopped, Transition};
 use crate::job_controller::leader_manager::handle_leader_stopping;
 use crate::states::StateError;
-use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 
 #[derive(Debug)]
@@ -22,7 +21,13 @@ impl State for LeaderCheckpointStopping {
             return Err(ctx.retryable(self, "failed to send stop message to leader", e, 10));
         }
 
-        let timeout = config().pipeline.checkpoint.timeout.as_ref().map(|t| **t);
+        let timeout = ctx
+            .config
+            .pipeline_config()?
+            .checkpoint
+            .timeout
+            .as_ref()
+            .map(|t| **t);
 
         handle_leader_stopping(*self, ctx, JobState::JobStopped, Stopped {}, timeout).await
     }
