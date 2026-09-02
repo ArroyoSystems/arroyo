@@ -65,6 +65,11 @@ pub struct PipelinePost {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay. The shape mirrors the
+    /// controller's global `pipeline` config block and is merged on top
+    /// of it when the job runs. An omitted field, `null`, or an empty
+    /// object all mean "use the global pipeline config unchanged".
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -91,6 +96,9 @@ pub struct PipelinePatch {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// Supplying this field replaces the job's existing overlay.
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -182,6 +190,10 @@ pub struct Job {
     /// An empty object means "no overrides, use the controller's
     /// global scheduler config unchanged".
     pub scheduler_config: serde_json::Value,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// An empty object means "no overrides, use the global pipeline
+    /// config unchanged".
+    pub pipeline_config: serde_json::Value,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: serde_json::Value,
 }
