@@ -306,6 +306,7 @@ pub(crate) async fn create_pipeline_int(
     tags: HashMap<String, String>,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -445,6 +446,7 @@ pub(crate) async fn create_pipeline_int(
         db,
         env_vars,
         scheduler_config,
+        pipeline_config,
     )
     .await?;
 
@@ -537,6 +539,7 @@ impl From<DbPipelineJob> for Job {
             }),
             created_at: to_micros(val.created_at),
             scheduler_config: val.scheduler_config,
+            pipeline_config: val.pipeline_config,
             env_vars: val.env_vars,
         }
     }
@@ -685,6 +688,10 @@ async fn create_pipeline_inner(
             None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
             Some(v) => v,
         },
+        match pipeline_post.pipeline_config {
+            None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+            Some(v) => v,
+        },
     )
     .await?;
 
@@ -739,6 +746,7 @@ pub async fn create_preview_pipeline(
         None,
         HashMap::default(),
         HashMap::default(),
+        serde_json::Value::Object(Default::default()),
         serde_json::Value::Object(Default::default()),
     )
     .await?;
@@ -831,6 +839,11 @@ pub async fn patch_pipeline(
         v => v,
     });
 
+    let pipeline_config = pipeline_patch.pipeline_config.map(|v| match v {
+        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
+        v => v,
+    });
+
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
@@ -840,6 +853,7 @@ pub async fn patch_pipeline(
         &parallelism_overrides,
         &env_vars,
         &scheduler_config,
+        &pipeline_config,
         &job_id,
         &auth_data.organization_id,
     )

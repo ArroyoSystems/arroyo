@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arc_swap::ArcSwapOption;
-use figment::Figment;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
+use figment::{Figment, providers};
 use k8s_openapi::api::core::v1::{
     EnvVar, LocalObjectReference, ResourceRequirements, Toleration, Volume, VolumeMount,
 };
@@ -541,6 +541,9 @@ pub enum DefaultSink {
     Stdout,
 }
 
+/// Configs that apply to individual pipelines. Not that overrides for these are stored in the
+/// control plane's job_configs table, so changing or removing fields here can break existing
+/// pipelines.
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct PipelineConfig {
@@ -590,6 +593,16 @@ pub struct PipelineConfig {
     pub compaction: CompactionConfig,
 
     pub checkpoint: CheckpointConfig,
+}
+
+impl PipelineConfig {
+    pub fn try_merge(&self, overrides: &serde_json::Value) -> anyhow::Result<Self> {
+        let overrides = serde_json::to_string(overrides)?;
+        let figment =
+            Figment::from(providers::Serialized::defaults(self)).merge(Json::string(&overrides));
+
+        Ok(figment.extract()?)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -1054,7 +1067,13 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config};
+    use crate::config::{
+        Config, DEFAULT_CONFIG, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config,
+    };
+    use figment::{
+        Figment,
+        providers::{Format, Toml},
+    };
     use url::Url;
 
     #[test]
@@ -1114,6 +1133,30 @@ mod tests {
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_pipeline_config_try_merge() {
+        let config: Config = Figment::from(Toml::string(DEFAULT_CONFIG))
+            .extract()
+            .unwrap();
+        let merged = config
+            .pipeline
+            .try_merge(&serde_json::json!({
+                "allowed-restarts": 3,
+                "compaction": {
+                    "enabled": true,
+                },
+            }))
+            .unwrap();
+
+        assert_eq!(merged.allowed_restarts, 3);
+        assert!(merged.compaction.enabled);
+        assert_eq!(
+            merged.compaction.checkpoints_to_compact,
+            config.pipeline.compaction.checkpoints_to_compact
+        );
+        assert_eq!(merged.source_batch_size, config.pipeline.source_batch_size);
     }
 
     #[test]
