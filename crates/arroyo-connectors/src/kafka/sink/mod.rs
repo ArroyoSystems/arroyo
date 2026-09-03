@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::borrow::Cow;
 
+use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, ControlResp};
@@ -357,10 +358,29 @@ impl ArrowOperator for KafkaSinkFunc {
         };
 
         let Some(committing_producer) = producer_to_complete.take() else {
+            // Reaching this branch means the operator was restarted mid two-phase
+            // commit: `handle_checkpoint` prepared a producer and staged
+            // `producer_to_complete`, but `handle_commit` was invoked after a restart
+            // that lost the in-memory reference. The pending Kafka transaction may
+            // have committed on the broker, aborted, or still be open — we cannot
+            // tell without querying transaction state, which is not yet implemented.
+            //
+            // Silently returning Ok(()) here would tell the checkpoint coordinator
+            // that the commit succeeded when its actual outcome is unknown, breaking
+            // the exactly-once contract. Return an error instead so the pipeline
+            // fails loudly rather than proceeding with unknown consistency.
             error!(
-                "received a commit message without a producer ready to commit. Restoring from commit phase not yet implemented"
+                "received a commit message for epoch {epoch} without a producer ready to commit; \
+                 checkpoint restore during the two-phase-commit window is not yet implemented"
             );
-            return Ok(());
+            return Err(connector_err!(
+                Internal,
+                NoRetry,
+                "kafka exactly-once sink: received commit for epoch {} without a producer ready to commit; \
+                 checkpoint restore during the two-phase-commit window is not yet implemented, \
+                 so the pipeline cannot safely proceed without risking an exactly-once violation",
+                epoch
+            ));
         };
 
         let mut commits_attempted = 0;
