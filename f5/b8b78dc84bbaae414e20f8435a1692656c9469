@@ -1,0 +1,26 @@
+k8s/cdk8s/README.md
+  s_1874365b2851d3::t_9a8f1281fceda4 178-183
+k8s/cdk8s/chart.test.ts
+  s_1874365b2851d3::t_9a8f1281fceda4 90-125
+k8s/cdk8s/config.ts
+  s_1874365b2851d3::t_22bf301aa5826c 552-560,573-581
+  s_1874365b2851d3::t_9a8f1281fceda4 547-551,561
+k8s/cdk8s/dist/arroyo/production/app.k8s.yaml
+  s_1874365b2851d3::t_817462208bd79a 78-83,105-110,228,472
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f5b8b78dc84bbaae414e20f8435a1692656c9469",
+  "prompts": {},
+  "sessions": {
+    "s_1874365b2851d3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fb77dbac1ffeGJxCKaLljsQO9l",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

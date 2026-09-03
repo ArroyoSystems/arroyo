@@ -1,0 +1,20 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_7668b9cff743e0::t_371a4e9cbdceda 15-17
+  s_7668b9cff743e0::t_b9352af906af04 289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d500ee51b554686511571134368f8a915691f5ec",
+  "prompts": {},
+  "sessions": {
+    "s_7668b9cff743e0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe5df7043ffe9Ko6JhizUSnhKE",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

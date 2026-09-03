@@ -1,0 +1,22 @@
+crates/arroyo-connectors/src/timber/source.rs
+  s_5c8aa395ba9427::t_3bad523a45e24e 548-555
+  s_5c8aa395ba9427::t_8176b83219a7ae 22
+  s_5c8aa395ba9427::t_a3609b94f531aa 28-33
+  s_5c8aa395ba9427::t_30fda267e03d90 285-292
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1dd9ef7a98cf4b3d546eef990404c64018784c8d",
+  "prompts": {},
+  "sessions": {
+    "s_5c8aa395ba9427": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4033421ffeRA24RJLd7dDfci",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

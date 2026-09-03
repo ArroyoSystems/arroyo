@@ -1,0 +1,30 @@
+Cargo.lock
+  s_464c5affa92eaa::t_e966c92190974e 7541,9279,9288,9292-9293,9300-9301,9304,10638
+  s_7668b9cff743e0::t_7329debd2af9d4 10627,10652
+crates/arroyo-connectors/Cargo.toml
+  s_464c5affa92eaa::t_224a9900b4969d 126,132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1ffebb4cfaf78216c21928ec9b016c5f770544d4",
+  "prompts": {},
+  "sessions": {
+    "s_464c5affa92eaa": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0015048b2ffeD3VcrZHEhPY36J",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_7668b9cff743e0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe5df7043ffe9Ko6JhizUSnhKE",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+Cargo.lock
+  s_04c95619088bfb::t_5a116eed77d91a 10627,10653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b10ac6a99591c340f9ec273020e01f9eadd52b6f",
+  "prompts": {},
+  "sessions": {
+    "s_04c95619088bfb": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbd324829ffecE8Ep1YHe2gsLL",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

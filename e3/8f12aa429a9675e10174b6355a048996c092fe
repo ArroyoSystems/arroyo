@@ -1,0 +1,26 @@
+crates/arroyo-server-common/src/lib_cf.rs
+  s_07ab6252cf4907::t_807bb8f5e4db2f 5
+  s_07ab6252cf4907::t_746049efe25df7 35,37,39-40
+  s_07ab6252cf4907::t_74e941ebdecafd 457
+  s_07ab6252cf4907::t_74c8bc89fbfb99 33-34,36
+  s_07ab6252cf4907::t_1431a6bc6397c2 38
+  s_07ab6252cf4907::t_f24bfad5ca6ca1 467
+  s_07ab6252cf4907::t_c7b59bc1d69ef7 225,233-238
+  s_07ab6252cf4907::t_811518efee8241 458-459
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e38f12aa429a9675e10174b6355a048996c092fe",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

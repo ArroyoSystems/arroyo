@@ -1,0 +1,19 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_f764ba7a3e5523::t_35bf796b6bd36b 140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0f8e598afe08cbe130d65304697d371326a01959",
+  "prompts": {},
+  "sessions": {
+    "s_f764ba7a3e5523": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbf6ff4b7ffe186piHahUoYx7S",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

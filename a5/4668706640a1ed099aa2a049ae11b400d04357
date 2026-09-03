@@ -1,0 +1,20 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_edc32cc412be20::t_071da96bd0c098 20,215,219,240,263,280-306,309-310
+  s_edc32cc412be20::t_d486b344e97788 311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a54668706640a1ed099aa2a049ae11b400d04357",
+  "prompts": {},
+  "sessions": {
+    "s_edc32cc412be20": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fde034c16ffeViKo9LQoWXFPVO",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_60de9f20253a6c::t_d38431259a92e2 560,583,599
+  s_60de9f20253a6c::t_d95ad87ce25616 39
+  s_60de9f20253a6c::t_55581162ce602c 247,249-250,253-258
+  s_60de9f20253a6c::t_edc3a1a9b0a634 248,251-252
+  s_60de9f20253a6c::t_9d968e4d453323 31-33,38,40,233-240,244,259,551-554,588-591,657-661
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_60de9f20253a6c::t_9d968e4d453323 23,26
+  s_60de9f20253a6c::t_7fef3aa30f81cc 16-17
+  s_60de9f20253a6c::t_edc3a1a9b0a634 198-205,207-212
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_60de9f20253a6c::t_1c63bde80a17b6 164,196,213,237,257,267,288,296,313,332,814
+  s_60de9f20253a6c::t_edc3a1a9b0a634 32-33,504,1064,1067-1068,1093-1097
+  s_60de9f20253a6c::t_d38431259a92e2 362-365,377-380,905,954,1091
+  s_60de9f20253a6c::t_465ec9d79767f4 531,559-562,571-573
+  s_60de9f20253a6c::t_4671acedeac1bd 574,576-592,594,596-601
+  s_60de9f20253a6c::t_3d91564a68acf0 480,482-483,485-490,492,495-496,498-500,502-503,505,507-509,511-527
+  s_60de9f20253a6c::t_b790b44700c729 31,34,400,402-404,411,443,457,469,657,666,669-670,680,693-702,896-899,944-947,1051,1063,1065-1066,1069,1072-1090,1092,1098-1099
+  s_60de9f20253a6c::t_6bea7d4088ee07 26-28
+crates/arroyo-connectors/src/superbuffer/source/frame_read.rs
+  s_60de9f20253a6c::t_55581162ce602c 5-7,43-44,142,179-180
+  s_60de9f20253a6c::t_edc3a1a9b0a634 32,37,40,62,72,74,78
+  s_60de9f20253a6c::t_9d968e4d453323 15,21-29,33-34,48-50,53-61,66-71,73,75-76,90-91,95,98,100,113,129-132,154-172,203,205-213,218-219
+  s_60de9f20253a6c::t_7fef3aa30f81cc 19,107
+  s_60de9f20253a6c::t_d95ad87ce25616 38-39
+  s_60de9f20253a6c::t_abcfebd4c243d9 20,30,133,173-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f10dfe3d5471ff29d03e7ce5141a3abfb8cc9701",
+  "prompts": {},
+  "sessions": {
+    "s_60de9f20253a6c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdfaeb877ffes3YMTI7RKn6D6n",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+crates/arroyo-operator/src/context.rs
+  s_5c8aa395ba9427::t_9df6e8b753f0ff 39-44,342-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "40f12dffc37b34424d959c44c7995ded4530b393",
+  "prompts": {},
+  "sessions": {
+    "s_5c8aa395ba9427": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4033421ffeRA24RJLd7dDfci",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

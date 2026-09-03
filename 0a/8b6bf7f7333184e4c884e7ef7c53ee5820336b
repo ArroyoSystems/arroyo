@@ -1,0 +1,21 @@
+crates/arroyo-worker/src/arrow/watermark_generator.rs
+  s_5c8aa395ba9427::t_8ac127fb5a7094 28-33
+  s_5c8aa395ba9427::t_161b686c0a1997 24
+  s_5c8aa395ba9427::t_c511d14c4d3e68 162-164
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0a8b6bf7f7333184e4c884e7ef7c53ee5820336b",
+  "prompts": {},
+  "sessions": {
+    "s_5c8aa395ba9427": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fd4033421ffeRA24RJLd7dDfci",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_f764ba7a3e5523::t_6dfd61a1d44f26 80,82-86
+crates/arroyo-connectors/src/superbuffer/source/partition_discovery.rs
+  s_f764ba7a3e5523::t_6dfd61a1d44f26 87-90,102-112,116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0c19714968ee247a3d48571fb18e345ee52e2c55",
+  "prompts": {},
+  "sessions": {
+    "s_f764ba7a3e5523": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbf6ff4b7ffe186piHahUoYx7S",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

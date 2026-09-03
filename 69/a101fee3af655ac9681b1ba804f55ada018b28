@@ -1,0 +1,21 @@
+Cargo.lock
+  s_f764ba7a3e5523::t_c302362ea94a77 7541,9279,9288,9292-9293,9300-9301,9304,10627,10638-10639,10653
+crates/arroyo-connectors/Cargo.toml
+  s_f764ba7a3e5523::t_49ba0a9b734a49 126,132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "69a101fee3af655ac9681b1ba804f55ada018b28",
+  "prompts": {},
+  "sessions": {
+    "s_f764ba7a3e5523": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbf6ff4b7ffe186piHahUoYx7S",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

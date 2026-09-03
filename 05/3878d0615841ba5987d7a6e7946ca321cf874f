@@ -1,0 +1,36 @@
+crates/arroyo-rpc/src/config_cf.rs
+  s_07ab6252cf4907::t_603e0de9664f37 102-131
+crates/arroyo-server-common/src/lib_cf.rs
+  s_07ab6252cf4907::t_ca401de41890e4 765-767,775-779,784-785
+  s_07ab6252cf4907::t_12ac27ebf6b0c5 345-346,349,373,394,398
+  s_07ab6252cf4907::t_5504504075ddc3 438
+  s_07ab6252cf4907::t_1f78827cc93e2e 5-6,21,31,36-40
+  s_07ab6252cf4907::t_c7c95324be087b 435
+  s_07ab6252cf4907::t_936d169c30c69a 628-630,638
+  s_07ab6252cf4907::t_d26566fa756cfe 622
+  s_07ab6252cf4907::t_914a4927fe3311 487,511-512,517-527,538-553,563,572-574
+  s_07ab6252cf4907::t_d1d5b07e039a86 575-576,936-993,995-1181
+  s_07ab6252cf4907::t_a3fb6fc9cff4f7 994
+  s_07ab6252cf4907::t_1d34490ceaaaff 22
+  s_07ab6252cf4907::t_9c09530b487526 472
+  s_07ab6252cf4907::t_64df802151565a 444
+  s_07ab6252cf4907::t_d5cbc120933fb6 326-344,347-348,350-372,374-393,395-397,399-434,436-437,439-443,445-471,473-475,482-483
+  s_07ab6252cf4907::t_690db233c34860 41
+  s_07ab6252cf4907::t_e7542a2afe2229 577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "053878d0615841ba5987d7a6e7946ca321cf874f",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

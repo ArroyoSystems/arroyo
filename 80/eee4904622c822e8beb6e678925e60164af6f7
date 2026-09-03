@@ -1,0 +1,57 @@
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_c68aee801ebf8a::t_ffb5bd6730149c 99
+  s_c68aee801ebf8a::t_d51a3f193122ed 179
+crates/arroyo-connectors/src/superbuffer/source/frame_read.rs
+  s_c68aee801ebf8a::t_8c0b03eaeb9325 155,165,173,182
+  s_c68aee801ebf8a::t_0773d5957d9ac8 1,3-6,14,18,21-27,29-30,34,36-38,45-46,51-52,54,136-140,142,144,147,149-154,158,160-164,167,169-172,174,176,178-181,183-186
+  s_c68aee801ebf8a::t_5aac12ff3eb6c3 8
+  s_c68aee801ebf8a::t_d657427b01c962 16,40,43-44,53,55-56
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_c68aee801ebf8a::t_2668836cd1153c 246-249
+  s_c68aee801ebf8a::t_1e5c34764c679f 180,185-187,199
+  s_c68aee801ebf8a::t_a15ae51ff8ee94 120
+  s_c68aee801ebf8a::t_229cfc2b8c2977 16-17,117-119,125-126,184,188-193,200-211,326,460-472
+  s_c68aee801ebf8a::t_cb926549d24ad0 56-60
+  s_c68aee801ebf8a::t_3cd63cf74f4baa 88
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_c68aee801ebf8a::t_2e3428115500c7 864
+  s_c68aee801ebf8a::t_99d19b601a97d0 221
+  s_c68aee801ebf8a::t_5327409e7e7c25 1060-1067
+  s_c68aee801ebf8a::t_591178beb15adc 391,403
+  s_c68aee801ebf8a::t_a63c1e1a6c4795 31,222-223,324-327,334-335,338,340-343,346-347,475,478,511-513,520-521,533,540,653-654,669,671,675,685,803,813,818-819,829,834,836-837,839,842,844-845,853-856,862,865-892,898-900,904-905,907-908,910,912-914,918-919,989-1019,1153-1155,1162,1190-1195
+  s_c68aee801ebf8a::t_6051dc301d8968 833,841
+  s_c68aee801ebf8a::t_9a49c269c46511 909,917
+  s_c68aee801ebf8a::t_25b6b564842341 1068
+  s_c68aee801ebf8a::t_ef67f939099897 26-28
+  s_c68aee801ebf8a::t_9c94dc8e619394 817
+  s_c68aee801ebf8a::t_d36bae468b5695 1156
+  s_c68aee801ebf8a::t_cb5b07d3f4d68b 337,345
+  s_c68aee801ebf8a::t_f055203039eece 797-800
+  s_c68aee801ebf8a::t_a25d98e11bf4cd 35
+  s_c68aee801ebf8a::t_81adbd5587f4c9 344
+  s_c68aee801ebf8a::t_a86e9f2dda3b97 1020
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_c68aee801ebf8a::t_94dea79304fe62 31,36,40
+  s_c68aee801ebf8a::t_46a8aa797030fa 540
+  s_c68aee801ebf8a::t_7434ebfc930025 532-539
+  s_c68aee801ebf8a::t_9d575d9a48e015 230-231,234-235
+  s_c68aee801ebf8a::t_5330329f5e28b3 568-581
+Cargo.lock
+  s_c68aee801ebf8a::t_a0913b5e2b1669 10638
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "80eee4904622c822e8beb6e678925e60164af6f7",
+  "prompts": {},
+  "sessions": {
+    "s_c68aee801ebf8a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe15dfbfbffeRUbyE70Hcb2maT",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

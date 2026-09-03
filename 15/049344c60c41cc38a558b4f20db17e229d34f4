@@ -1,0 +1,26 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_f764ba7a3e5523::t_2bf0cc1bfc308d 11,243,256-260,266-268,371-407
+  s_f764ba7a3e5523::t_963ce33fa5d271 408
+crates/arroyo-server-common/src/lib_cf.rs
+  s_f764ba7a3e5523::t_2bf0cc1bfc308d 5,451
+crates/arroyo-connectors/src/superbuffer/source/partition_discovery.rs
+  s_f764ba7a3e5523::t_2bf0cc1bfc308d 87-89,104
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_f764ba7a3e5523::t_2bf0cc1bfc308d 80,82-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "15049344c60c41cc38a558b4f20db17e229d34f4",
+  "prompts": {},
+  "sessions": {
+    "s_f764ba7a3e5523": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fbf6ff4b7ffe186piHahUoYx7S",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": null
+    }
+  }
+}

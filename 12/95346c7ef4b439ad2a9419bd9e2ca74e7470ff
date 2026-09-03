@@ -1,0 +1,25 @@
+crates/arroyo-server-common/src/lib.rs
+  s_07ab6252cf4907::t_506233b94ed3a7 271
+crates/arroyo-storage/Cargo.toml
+  s_07ab6252cf4907::t_506233b94ed3a7 11
+crates/arroyo-storage/src/lib.rs
+  s_07ab6252cf4907::t_506233b94ed3a7 192
+Cargo.lock
+  s_07ab6252cf4907::t_a9ff139b0228ec 1007
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1295346c7ef4b439ad2a9419bd9e2ca74e7470ff",
+  "prompts": {},
+  "sessions": {
+    "s_07ab6252cf4907": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff583e6dffe0LD9HBJ3TC1ILQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
