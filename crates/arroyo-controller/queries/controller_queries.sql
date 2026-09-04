@@ -4,7 +4,6 @@ SELECT
     c.organization_id as org_id,
     pipeline_name,
     pipeline_id,
-    checkpoint_interval_micros,
     ttl_micros,
     parallelism_overrides,
     stop,

@@ -53,7 +53,6 @@ pub struct PipelinePost {
     pub query: String,
     pub udfs: Option<Vec<Udf>>,
     pub parallelism: u64,
-    pub checkpoint_interval_micros: Option<u64>,
     pub state_url: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     /// Per-job environment variables forwarded to workers.
@@ -85,7 +84,6 @@ pub struct PreviewPost {
 #[serde(rename_all = "snake_case")]
 pub struct PipelinePatch {
     pub parallelism: Option<u64>,
-    pub checkpoint_interval_micros: Option<u64>,
     pub stop: Option<StopType>,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: Option<HashMap<String, String>>,
@@ -115,7 +113,6 @@ pub struct Pipeline {
     pub name: String,
     pub query: String,
     pub udfs: Vec<Udf>,
-    pub checkpoint_interval_micros: u64,
     pub stop: StopType,
     pub created_at: u64,
     pub action: Option<StopType>,

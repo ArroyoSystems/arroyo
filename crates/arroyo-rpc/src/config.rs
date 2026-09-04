@@ -236,9 +236,6 @@ pub struct Config {
     /// URL of an object store or filesystem for storing checkpoints
     pub checkpoint_url: String,
 
-    /// Default interval for checkpointing
-    pub default_checkpoint_interval: HumanReadableDuration,
-
     /// The endpoint of the controller, used by other services to connect to it. This must be set
     /// if running the controller on a separate machine from the other services or on a separate
     /// process with a non-standard port.
@@ -569,12 +566,28 @@ pub struct PipelineWorkerConfigs {
     pub checkpoint: CheckpointConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+fn deserialize_checkpoint_interval<'de, D>(
+    deserializer: D,
+) -> Result<HumanReadableDuration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let interval = HumanReadableDuration::deserialize(deserializer)?;
+    if !(Duration::from_secs(1)..=Duration::from_secs(24 * 60 * 60)).contains(&interval.duration) {
+        return Err(de::Error::custom(
+            "checkpoint interval must be between 1 second and 1 day",
+        ));
+    }
+
+    Ok(interval)
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CheckpointConfig {
     /// Checkpoint interval
-    #[serde(default)]
-    pub interval: Option<HumanReadableDuration>,
+    #[serde(deserialize_with = "deserialize_checkpoint_interval")]
+    pub interval: HumanReadableDuration,
 }
 
 /// Configs that apply to individual pipelines. Not that overrides for these are stored in the
@@ -1165,6 +1178,9 @@ mod tests {
                 "compaction": {
                     "enabled": true,
                 },
+                "checkpoint": {
+                    "interval": "5s",
+                },
             }))
             .unwrap();
 
@@ -1174,7 +1190,35 @@ mod tests {
             merged.worker.compaction.checkpoints_to_compact,
             config.pipeline.worker.compaction.checkpoints_to_compact
         );
-        assert_eq!(merged.worker.source_batch_size, config.pipeline.worker.source_batch_size);
+        assert_eq!(
+            merged.worker.source_batch_size,
+            config.pipeline.worker.source_batch_size
+        );
+        assert_eq!(
+            *merged.worker.checkpoint.interval,
+            std::time::Duration::from_secs(5)
+        );
+
+        let encoded = serde_json::to_string(&merged.worker).unwrap();
+        let decoded: super::PipelineWorkerConfigs = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, merged.worker);
+
+        assert!(
+            config
+                .pipeline
+                .try_merge(&serde_json::json!({
+                    "checkpoint": { "interval": "999ms" }
+                }))
+                .is_err()
+        );
+        assert!(
+            config
+                .pipeline
+                .try_merge(&serde_json::json!({
+                    "checkpoint": { "interval": "86401s" }
+                }))
+                .is_err()
+        );
     }
 
     #[test]

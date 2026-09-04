@@ -47,7 +47,7 @@ use crate::job_controller::controller::WorkerJobController;
 use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{PipelineWorkerConfigs, config, update};
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
@@ -322,6 +322,11 @@ impl WorkerState {
         shutdown_guard: ShutdownGuard,
         req: StartExecutionReq,
     ) -> Result<()> {
+        let pipeline_worker_config: PipelineWorkerConfigs =
+            serde_json::from_str(&req.pipeline_worker_config_json)
+                .context("invalid pipeline worker config")?;
+        update(|config| config.pipeline.worker = pipeline_worker_config.clone());
+
         let mut registry = new_registry();
         let logical = Arc::new(
             LogicalProgram::try_from(req.program.expect("Program is None"))
@@ -386,7 +391,7 @@ impl WorkerState {
                     Epoch(req.start_epoch),
                     Epoch(req.min_epoch),
                     &shutdown_guard,
-                    Duration::from_micros(req.checkpoint_interval_micros),
+                    *config().pipeline.worker.checkpoint.interval,
                     parent.clone(),
                 )
                 .await?

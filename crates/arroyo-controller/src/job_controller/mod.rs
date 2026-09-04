@@ -38,6 +38,7 @@ const COMPACT_EVERY: u64 = 4;
 pub struct JobController {
     checkpoint_store: Arc<dyn CheckpointMetadataStore>,
     config: JobConfig,
+    checkpoint_interval: Duration,
     model: RunningJobModel,
     cleanup_task: Option<JoinHandle<anyhow::Result<Epoch>>>,
 }
@@ -74,6 +75,13 @@ impl JobController {
         commit_state: Option<CommittingState>,
         job_metrics: Option<JobMetrics>,
     ) -> Self {
+        let checkpoint_interval = *config
+            .pipeline_config()
+            .expect("pipeline config was validated before starting the job controller")
+            .worker
+            .checkpoint
+            .interval;
+
         Self {
             checkpoint_store,
             model: RunningJobModel {
@@ -89,7 +97,7 @@ impl JobController {
                 // checkpoint times are staggered across jobs
                 last_checkpoint: Instant::now()
                     + Duration::from_millis(
-                        rng().random_range(0..config.checkpoint_interval.as_millis() as u64),
+                        rng().random_range(0..checkpoint_interval.as_millis() as u64),
                     ),
                 workers: worker_connects
                     .into_iter()
@@ -134,6 +142,7 @@ impl JobController {
                 job_metrics,
             },
             config,
+            checkpoint_interval,
             cleanup_task: None,
         }
     }
@@ -225,7 +234,7 @@ impl JobController {
             self.model
                 .finish_checkpoint_if_done(&*self.checkpoint_store)
                 .await?;
-        } else if self.model.last_checkpoint.elapsed() > self.config.checkpoint_interval
+        } else if self.model.last_checkpoint.elapsed() > self.checkpoint_interval
             && self.cleanup_task.is_none()
         {
             // or do we need to start checkpointing?

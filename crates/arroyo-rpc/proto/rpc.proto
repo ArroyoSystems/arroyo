@@ -490,9 +490,12 @@ message StartExecutionReq {
   // if set, the worker should wait for a job_controller_init message before starting
   // (used in worker leader mode)
   bool wait_for_leader = 8;
-  uint64 checkpoint_interval_micros = 9;
+  reserved 9;
+  reserved "checkpoint_interval_micros";
   // for leader mode, this gives the path to load the restore checkpoint manifest from
   optional string checkpoint_manifest_ref = 10;
+  // JSON-encoded config.PipelineWorkerConfigs
+  string pipeline_worker_config_json = 11;
 }
 
 message StartExecutionResp {

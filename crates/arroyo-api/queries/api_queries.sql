@@ -128,7 +128,7 @@ INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -143,7 +143,7 @@ ORDER BY pipelines.created_at DESC
 LIMIT cast(:limit as integer);
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -165,14 +165,13 @@ WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 ----------- jobs -----------------------
 
---! update_job(checkpoint_interval_micros?, stop?, parallelism_overrides?, env_vars?, scheduler_config?, pipeline_config?)
+--! update_job(stop?, parallelism_overrides?, env_vars?, scheduler_config?, pipeline_config?)
 UPDATE job_configs
 SET
    updated_at = :updated_at,
    updated_by = :updated_by,
 
    stop = COALESCE(:stop, stop),
-   checkpoint_interval_micros = COALESCE(:checkpoint_interval_micros, checkpoint_interval_micros),
    parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides),
    env_vars = COALESCE(:env_vars, env_vars),
    scheduler_config = COALESCE(:scheduler_config, scheduler_config),
@@ -191,8 +190,8 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars, scheduler_config, pipeline_config)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars, :scheduler_config, :pipeline_config);
+(id, organization_id, pipeline_name, created_by, pipeline_id, ttl_micros, env_vars, scheduler_config, pipeline_config)
+VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :ttl_micros, :env_vars, :scheduler_config, :pipeline_config);
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
@@ -200,11 +199,9 @@ INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :or
 --! clone_job_without_state
 INSERT INTO job_configs
     (id, organization_id, pipeline_name, created_by, updated_by, updated_at,
-     ttl_micros, stop, pipeline_id, parallelism_overrides,
-     checkpoint_interval_micros, env_vars, scheduler_config, pipeline_config)
+     ttl_micros, stop, pipeline_id, parallelism_overrides, env_vars, scheduler_config, pipeline_config)
 SELECT :new_job_id, organization_id, pipeline_name, created_by, :updated_by, CURRENT_TIMESTAMP,
-       ttl_micros, 'none', pipeline_id, parallelism_overrides,
-       checkpoint_interval_micros, env_vars, scheduler_config, pipeline_config
+       ttl_micros, 'none', pipeline_id, parallelism_overrides, env_vars, scheduler_config, pipeline_config
 FROM job_configs
 WHERE id = :old_job_id;
 
@@ -223,7 +220,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
 --! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -231,7 +228,7 @@ WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub
 ORDER BY job_configs.created_at DESC;
 
 --! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -239,7 +236,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY job_configs.created_at DESC;
 
 --! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id

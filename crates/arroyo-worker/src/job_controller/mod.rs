@@ -77,7 +77,8 @@ impl CheckpointHistory {
             > config()
                 .worker
                 .checkpoint_details_to_keep
-                .unwrap_or(config().pipeline.worker.checkpoint_details_to_keep) as usize
+                .unwrap_or(config().pipeline.worker.checkpoint_details_to_keep)
+                as usize
         {
             self.checkpoints.pop_front();
         }

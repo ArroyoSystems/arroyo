@@ -174,7 +174,8 @@ impl ParquetBackend {
         operator_id: &str,
         epoch: u32,
     ) -> Result<HashMap<String, TableCheckpointMetadata>, StateError> {
-        let min_files_to_compact = config().pipeline.worker.compaction.checkpoints_to_compact as usize;
+        let min_files_to_compact =
+            config().pipeline.worker.compaction.checkpoints_to_compact as usize;
 
         let operator_checkpoint_metadata =
             Self::load_operator_metadata(role, &job_id, operator_id, epoch)

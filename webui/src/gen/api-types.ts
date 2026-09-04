@@ -816,8 +816,6 @@ export interface components {
             action_in_progress: boolean;
             action_text: string;
             /** Format: int64 */
-            checkpoint_interval_micros: number;
-            /** Format: int64 */
             created_at: number;
             graph: components["schemas"]["PipelineGraph"];
             id: string;
@@ -860,14 +858,10 @@ export interface components {
         };
         PipelinePatch: {
             /** Format: int64 */
-            checkpoint_interval_micros?: number | null;
-            /** Format: int64 */
             parallelism?: number | null;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
-            /** Format: int64 */
-            checkpoint_interval_micros?: number | null;
             /** @description Per-job environment variables forwarded to workers. */
             env_vars?: {
                 [key: string]: string;

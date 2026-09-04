@@ -107,7 +107,6 @@ pub struct JobConfig {
     pipeline_name: String,
     pipeline_id: i64,
     stop_mode: StopMode,
-    checkpoint_interval: Duration,
     ttl: Option<Duration>,
     parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
@@ -712,9 +711,6 @@ impl ControllerServer {
                         pipeline_id: p.pipeline_id,
                         pipeline_name: p.pipeline_name,
                         stop_mode: p.stop,
-                        checkpoint_interval: Duration::from_micros(
-                            p.checkpoint_interval_micros as u64,
-                        ),
                         ttl: p.ttl_micros.map(|t| Duration::from_micros(t as u64)),
                         parallelism_overrides: p
                             .parallelism_overrides

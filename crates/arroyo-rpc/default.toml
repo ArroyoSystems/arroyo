@@ -1,5 +1,4 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
-default-checkpoint-interval = "10s"
 job-controller = "controller"
 
 [pipeline]
@@ -23,6 +22,7 @@ enabled = false
 checkpoints-to-compact = 4
 
 [pipeline.checkpoint]
+interval = "10s"
 
 # Services
 

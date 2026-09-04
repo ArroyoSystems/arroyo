@@ -779,7 +779,8 @@ impl State for Scheduling {
                 .unwrap()
         });
 
-        let checkpoint_interval_micros = ctx.config.checkpoint_interval.as_micros() as u64;
+        let pipeline_worker_config_json = serde_json::to_string(&pipeline_config.worker)
+            .map_err(|e| fatal("failed to serialize pipeline worker config", e.into()))?;
 
         let tasks: Vec<_> = worker_connects
             .into_iter()
@@ -791,6 +792,7 @@ impl State for Scheduling {
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
                 let (leader_id, leader_addr) = leader_info.clone().unzip();
+                let pipeline_worker_config_json = pipeline_worker_config_json.clone();
 
                 let checkpoint_manifest_ref =
                     leader_id.and(checkpoint_info.as_ref().map(|ci| ci.id.clone()));
@@ -813,8 +815,8 @@ impl State for Scheduling {
                             job_controller_addr: leader_addr,
                             is_leader: leader_id.is_some_and(|l| l == id),
                             wait_for_leader: leader_id.is_some(),
-                            checkpoint_interval_micros,
                             checkpoint_manifest_ref: checkpoint_manifest_ref.clone(),
+                            pipeline_worker_config_json,
                         }))
                         .await
                     {
