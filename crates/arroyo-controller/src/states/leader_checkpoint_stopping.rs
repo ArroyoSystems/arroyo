@@ -24,8 +24,7 @@ impl State for LeaderCheckpointStopping {
         let timeout = ctx
             .config
             .pipeline_config()?
-            .checkpoint
-            .timeout
+            .stopping_timeout
             .as_ref()
             .map(|t| **t);
 
