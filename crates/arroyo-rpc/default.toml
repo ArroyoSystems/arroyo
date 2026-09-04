@@ -1,5 +1,4 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
-default-checkpoint-interval = "10s"
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"
@@ -21,6 +20,7 @@ enabled = false
 checkpoints-to-compact = 4
 
 [pipeline.checkpoint]
+interval = "10s"
 
 # Services
 
