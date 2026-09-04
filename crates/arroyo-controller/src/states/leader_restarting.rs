@@ -5,7 +5,6 @@ use super::{
 use crate::JobMessage;
 use crate::states::recovering::Recovering;
 use crate::types::public::RestartMode;
-use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStopMode};
 use std::time::{Duration, Instant};
@@ -41,8 +40,9 @@ impl State for LeaderRestarting {
                 let started = Instant::now();
 
                 loop {
-                    let timeout = config()
-                        .pipeline
+                    let timeout = ctx
+                        .config
+                        .pipeline_config()?
                         .stopping_timeout
                         .as_ref()
                         .map(|t| (started + **t).saturating_duration_since(Instant::now()))
