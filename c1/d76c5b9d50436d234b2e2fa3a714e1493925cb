@@ -1,0 +1,25 @@
+k8s/cdk8s/config.ts
+  s_cb757c7665a72c::t_2e43559e38df8b 376-377
+crates/arroyo-connectors/src/filesystem/r2_cf.rs
+  s_cb757c7665a72c::t_3926b64b2fdf82 383-389
+k8s/cdk8s/dist/arroyo/production/app.k8s.yaml
+  s_cb757c7665a72c::t_a293c7032eba27 826-829
+k8s/cdk8s/dist/arroyo/staging/app.k8s.yaml
+  s_cb757c7665a72c::t_ba91c145867d1f 858-861
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c1d76c5b9d50436d234b2e2fa3a714e1493925cb",
+  "prompts": {},
+  "sessions": {
+    "s_cb757c7665a72c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f92ae9f58ffeo23MSxhCThbF8q",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
