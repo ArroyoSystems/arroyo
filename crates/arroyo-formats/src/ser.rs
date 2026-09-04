@@ -1,6 +1,6 @@
 use crate::avro::schema;
 use crate::json::encoders::ArroyoEncoderFactory;
-use crate::{avro, json};
+use crate::{avro, json, msgpack};
 use arrow_array::cast::AsArray;
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{Array, RecordBatch, StructArray};
@@ -9,8 +9,8 @@ use arrow_json::writer::make_encoder;
 use arrow_schema::{ArrowError, DataType, Field};
 use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::formats::{
-    AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
-    TimestampFormat,
+    AvroFormat, DecimalEncoding, Format, JsonFormat, MsgPackFormat, RawBytesFormat,
+    RawStringFormat, TimestampFormat,
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -121,6 +121,7 @@ impl ArrowSerializer {
             Format::Parquet(_) => todo!("parquet"),
             Format::RawString(RawStringFormat {}) => self.serialize_raw_string(&batch),
             Format::RawBytes(RawBytesFormat {}) => self.serialize_raw_bytes(&batch),
+            Format::MsgPack(msgpack) => self.serialize_msgpack(msgpack, &batch),
             Format::Protobuf(_) => {
                 todo!("protobuf serializer!")
             }
@@ -227,6 +228,36 @@ impl ArrowSerializer {
         Box::new(values.into_iter())
     }
 
+    fn serialize_msgpack(
+        &self,
+        msgpack_format: &MsgPackFormat,
+        batch: &RecordBatch,
+    ) -> Box<dyn Iterator<Item = Vec<u8>> + Send> {
+        let rows = record_batch_to_vec(
+            batch,
+            true,
+            msgpack_format.timestamp_format,
+            msgpack_format.decimal_encoding,
+        )
+        .unwrap();
+        let fields = batch.schema().fields().clone();
+        let decimal_encoding = msgpack_format.decimal_encoding;
+
+        Box::new(rows.into_iter().map(move |row| {
+            let parsed: serde_json::Value = serde_json::from_slice(&row).unwrap();
+            let value = msgpack::json_to_msgpack(
+                &parsed,
+                Some(&Field::new_struct("", fields.clone(), false)),
+                decimal_encoding,
+            )
+            .expect("failed to convert JSON row to MessagePack");
+
+            let mut buf = Vec::with_capacity(row.len());
+            rmpv::encode::write_value(&mut buf, &value).expect("msgpack serialization failed");
+            buf
+        }))
+    }
+
     fn serialize_avro(
         &self,
         format: &AvroFormat,
@@ -280,9 +311,12 @@ mod tests {
     use arrow_array::builder::{Decimal128Builder, TimestampNanosecondBuilder};
     use arrow_schema::{Schema, TimeUnit};
     use arroyo_rpc::formats::{
-        DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
+        DecimalEncoding, Format, JsonFormat, MsgPackFormat, RawBytesFormat, RawStringFormat,
+        TimestampFormat,
     };
     use arroyo_types::to_nanos;
+    use rmpv::Value as MsgPackValue;
+    use std::io::Cursor;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
@@ -622,5 +656,88 @@ mod tests {
         assert_eq!(iter.next().unwrap(), br#"{"value":"MTIzMTIz"}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":"AAECAwQ="}"#);
         assert_eq!(iter.next(), None);
+    }
+
+    fn msgpack_map_value<'a>(value: &'a MsgPackValue, key: &str) -> &'a MsgPackValue {
+        let MsgPackValue::Map(entries) = value else {
+            panic!("expected msgpack map, got {value:?}");
+        };
+
+        entries
+            .iter()
+            .find_map(|(k, v)| (k.as_str() == Some(key)).then_some(v))
+            .unwrap_or_else(|| panic!("missing msgpack key {key}"))
+    }
+
+    #[test]
+    fn test_msgpack_serializes_rows_and_binary_values() {
+        let mut serializer = ArrowSerializer::new(Format::MsgPack(MsgPackFormat::default()));
+
+        let names = vec!["ada".to_string(), "grace".to_string()];
+        let scores = vec![7, 11];
+        let active = vec![true, false];
+        let payloads = vec![b"\x00\x01\x02".as_slice(), b"hello".as_slice()];
+        let ts: Vec<_> = names
+            .iter()
+            .enumerate()
+            .map(|(i, _)| to_nanos(SystemTime::now() + Duration::from_secs(i as u64)) as i64)
+            .collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
+            arrow_schema::Field::new("score", arrow_schema::DataType::Int32, false),
+            arrow_schema::Field::new("active", arrow_schema::DataType::Boolean, false),
+            arrow_schema::Field::new("payload", arrow_schema::DataType::Binary, false),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(arrow_array::StringArray::from(names)),
+                Arc::new(arrow_array::Int32Array::from(scores)),
+                Arc::new(arrow_array::BooleanArray::from(active)),
+                Arc::new(arrow_array::GenericBinaryArray::<i32>::from(payloads)),
+                Arc::new(arrow_array::TimestampNanosecondArray::from(ts)),
+            ],
+        )
+        .unwrap();
+
+        let mut iter = serializer.serialize(&batch);
+        let first = rmpv::decode::read_value(&mut Cursor::new(iter.next().unwrap())).unwrap();
+        let second = rmpv::decode::read_value(&mut Cursor::new(iter.next().unwrap())).unwrap();
+        assert_eq!(iter.next(), None);
+
+        assert_eq!(
+            msgpack_map_value(&first, "name"),
+            &MsgPackValue::from("ada")
+        );
+        assert_eq!(msgpack_map_value(&first, "score"), &MsgPackValue::from(7));
+        assert_eq!(
+            msgpack_map_value(&first, "active"),
+            &MsgPackValue::from(true)
+        );
+        assert_eq!(
+            msgpack_map_value(&first, "payload"),
+            &MsgPackValue::Binary(vec![0, 1, 2])
+        );
+
+        assert_eq!(
+            msgpack_map_value(&second, "name"),
+            &MsgPackValue::from("grace")
+        );
+        assert_eq!(msgpack_map_value(&second, "score"), &MsgPackValue::from(11));
+        assert_eq!(
+            msgpack_map_value(&second, "active"),
+            &MsgPackValue::from(false)
+        );
+        assert_eq!(
+            msgpack_map_value(&second, "payload"),
+            &MsgPackValue::Binary(b"hello".to_vec())
+        );
     }
 }
