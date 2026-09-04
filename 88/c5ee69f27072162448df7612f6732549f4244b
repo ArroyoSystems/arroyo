@@ -1,0 +1,34 @@
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 158,224
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 1,3,13,26-40,42-46,48-50,55-62
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 3-5,11,35-36,38-47,50,52-68,70-113,227,230-231,233,296,299,301,357-358,388,395,397-403,438-439,468-469,508,511,515
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 3,5,31,34-36,38,206,211-215,219,235,243,258,267,336,344,355,440-441,502-503,529,532,534,587,590,594
+crates/arroyo-connectors/src/superbuffer/mod.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 10,18,221-222,240
+crates/arroyo-rpc/default.toml
+  s_4e5289cf3d6c87::t_ff755d63870c01 129-140
+crates/arroyo-rpc/src/config.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 296-298
+crates/arroyo-rpc/src/config_cf.rs
+  s_4e5289cf3d6c87::t_ff755d63870c01 6,154-259
+  s_4e5289cf3d6c87::t_e94cf4eab2003d 260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "88c5ee69f27072162448df7612f6732549f4244b",
+  "prompts": {},
+  "sessions": {
+    "s_4e5289cf3d6c87": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f93bfbd4fffegKjnslD9s1Mu66",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
