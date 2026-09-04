@@ -9,6 +9,8 @@ crates/arroyo-formats/src/de.rs
   s_cf6fe36134d233::t_7c88a54ac3ceaa 881
   s_cf6fe36134d233::t_373ee4c6d21a3d 882
   s_cf6fe36134d233::t_ee727614a62cbf 864
+  s_8972befb049341::t_cb59bab34029ed 75,79,848,851
+  s_8972befb049341::t_6515921ca11ef0 42,56,65-67,72,76-78,324,340,877,879,883-884,891-893
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -16,6 +18,14 @@ crates/arroyo-formats/src/de.rs
   "base_commit_sha": "deadadcb96341a46eadacfa95c7194d35c4dbaba",
   "prompts": {},
   "sessions": {
+    "s_8972befb049341": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f937b0a0dffe663T1kDAkmmEwK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
     "s_cf6fe36134d233": {
       "agent_id": {
         "tool": "opencode",
