@@ -1,0 +1,50 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_81cf7249db78e3::t_ad2383d5b0f66b 1,11-12,14-15,21-22,29-35,38,41-45,49-62,66,68,70-111,113-139,144-167,187-209,242-244,283-284,294-296,298-307,310-311,313,315-316,318,322-323
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_81cf7249db78e3::t_c71c751eb39cc0 170,173,204,207,234-238,240,258-259,284,286,294,299,309,318,327,341-356,364-372,374-376,384,386,388-390,394-395,397-400,403-404,406-409,423,428-432,441-447,450,454-461,469-472,474-484,487-491,493
+  s_81cf7249db78e3::t_ad2383d5b0f66b 6
+  s_81cf7249db78e3::t_89fd17e6a1b29d 5,295,305,357-363,385,387,396,405,433-438,440,448-449,451-453,462,464-465,467,473,485-486,492,494-499,501-504
+  s_81cf7249db78e3::t_83ee6dc3c5022c 313,328,382-383,500
+  s_81cf7249db78e3::t_68846c8770fcce 329-331
+  s_81cf7249db78e3::t_94058af4175a48 422,439
+  s_81cf7249db78e3::t_f375fdb44c2a45 373,377,463,466
+  s_81cf7249db78e3::t_c0d552e25474f9 468
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_81cf7249db78e3::t_ad2383d5b0f66b 30
+  s_81cf7249db78e3::t_f375fdb44c2a45 175,178
+  s_81cf7249db78e3::t_3f1ce1fc3e09a9 169,179-180,225,228,241,303-304
+  s_81cf7249db78e3::t_3fc60c56cad877 113,128-141
+  s_81cf7249db78e3::t_1891f870035458 29,176-177
+crates/arroyo-connectors/src/superbuffer/source/partition_discovery.rs
+  s_81cf7249db78e3::t_18e0e10e5692d5 15,23,72-74,221,254
+  s_81cf7249db78e3::t_94058af4175a48 13
+  s_81cf7249db78e3::t_b50a7591692ee8 5,12,14,22,24-25,34-42,44-49,51-63,66-68,76,78-81,90,109-115,117-119,121-127,154-156,197-202
+  s_81cf7249db78e3::t_d22196dad030c8 1,33,50,65,70-71,120,186-194,196
+  s_81cf7249db78e3::t_ad2383d5b0f66b 4
+  s_81cf7249db78e3::t_f375fdb44c2a45 8,19-20,43,64,69,75,77,82-89,91-108,116,128-153
+  s_81cf7249db78e3::t_d3d9b4174b3790 21
+  s_81cf7249db78e3::t_c01475a6c03a77 203
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_81cf7249db78e3::t_3f1ce1fc3e09a9 17-18,28-29,35-36,69,71,79
+  s_81cf7249db78e3::t_ad2383d5b0f66b 5
+  s_81cf7249db78e3::t_1891f870035458 16,27,34,75-78
+  s_81cf7249db78e3::t_83ee6dc3c5022c 64,74
+  s_81cf7249db78e3::t_3fc60c56cad877 4,47-63
+  s_81cf7249db78e3::t_5f8328a8626767 72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4749295bac2f85e0945dc6d03290643c1c595cad",
+  "prompts": {},
+  "sessions": {
+    "s_81cf7249db78e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9dd64ce8ffeMd4DcWhN7j3L70",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

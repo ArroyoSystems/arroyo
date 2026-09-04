@@ -1,0 +1,19 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_discovery.rs
+  s_2bbfc917a8baf7::t_00f159e731c50d 55-62,72-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bc5b29ebd3b1799a945f9368850d0895642dce4d",
+  "prompts": {},
+  "sessions": {
+    "s_2bbfc917a8baf7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f939f23dcffeZ16phWXRqmgvDl",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

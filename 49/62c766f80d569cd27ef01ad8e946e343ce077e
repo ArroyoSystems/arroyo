@@ -1,0 +1,60 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_75fa5a0458b62f::t_e1fe1608566727 76,80-85,231,246-247,252,267-268,283-284,302-303,321-324,328,330
+  s_c3afa7eaf620c8::t_7ba0b6fc681fb3 296
+  s_c3afa7eaf620c8::t_8da0738302a540 511
+  s_c3afa7eaf620c8::t_5dd417b639d56f 315-317
+  s_75fa5a0458b62f::t_a7ab5e233460de 63,217
+  s_c3afa7eaf620c8::t_340d0e4ea41dfd 301,320,454,456,463,465,470,472,474-482,487-491,509
+  s_c3afa7eaf620c8::t_9820b6bd87fa51 447
+  s_4e5289cf3d6c87::t_efb083bf2cb4ef 260,433,494
+  s_75fa5a0458b62f::t_ffadbfaf549e8d 518
+  s_c3afa7eaf620c8::t_85a6af72afe87d 285
+  s_c3afa7eaf620c8::t_6b1df770df412e 262
+  s_c3afa7eaf620c8::t_c42d44e9793d92 11-12
+  s_c3afa7eaf620c8::t_e604d82865654b 263-266,269-282,286-287,290,297
+  s_c3afa7eaf620c8::t_e75341f6f3620b 379-380,391-397,399,401-402,407-408,410-411,416-417,419-421,425,428,430,439,444
+  s_c3afa7eaf620c8::t_1f054939e22393 288-289,291-295,298-300,304-305,310-314,318-319
+  s_c3afa7eaf620c8::t_54c0403e8fad99 258-259
+  s_c3afa7eaf620c8::t_c415a2cf79814d 306-309
+  s_c3afa7eaf620c8::t_7d3ca037f555f2 400,409,418,451-453,455,457-458,460-462,464,466,468-469,471,473,483-486,492-493,495-508,510
+  s_c3afa7eaf620c8::t_77f54e92c95bc7 261,404-406,413-415,422-424,426-427,429,431-432,434-438,440-443,445-446
+  s_75fa5a0458b62f::t_874977dbaba049 230
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_4e5289cf3d6c87::t_efb083bf2cb4ef 164
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_4e5289cf3d6c87::t_e40be483a899a1 19,152-154,165,234,281-283,317,339-343,362
+crates/arroyo-connectors/Cargo.toml
+  s_75fa5a0458b62f::t_1ed17a036c6192 126,132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4962c766f80d569cd27ef01ad8e946e343ce077e",
+  "prompts": {},
+  "sessions": {
+    "s_4e5289cf3d6c87": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f93bfbd4fffegKjnslD9s1Mu66",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_75fa5a0458b62f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f992b4befffeLwGdDZrueUOpTV",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_c3afa7eaf620c8": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f96ebb797ffepbcy473dvAAG7n",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}

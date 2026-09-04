@@ -1,0 +1,28 @@
+crates/arroyo-formats/src/de.rs
+  s_cf6fe36134d233::t_c608ffa8ebb2f3 827-828
+  s_cf6fe36134d233::t_ab5f6c45398503 856
+  s_cf6fe36134d233::t_4c4bd22b25df38 829
+  s_cf6fe36134d233::t_cb64e5f859ea2e 849
+  s_cf6fe36134d233::t_28669c281b97f7 831-835
+  s_cf6fe36134d233::t_217e49646718ab 64-67,199,812,836,838,843,845-846,850,855
+  s_cf6fe36134d233::t_c842f4d4daa2c1 837,839-842,844,851-854
+  s_cf6fe36134d233::t_7c88a54ac3ceaa 847
+  s_cf6fe36134d233::t_373ee4c6d21a3d 848
+  s_cf6fe36134d233::t_ee727614a62cbf 39,52,61,830
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "83c79262a4cc397f743e357e4a705044757a74b8",
+  "prompts": {},
+  "sessions": {
+    "s_cf6fe36134d233": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9e0b9757ffeD6i1vqgKPVCGFf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

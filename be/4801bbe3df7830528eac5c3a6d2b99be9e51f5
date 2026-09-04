@@ -1,0 +1,19 @@
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_75fa5a0458b62f::t_b07ddb36943f28 66,78,81-85,99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "be4801bbe3df7830528eac5c3a6d2b99be9e51f5",
+  "prompts": {},
+  "sessions": {
+    "s_75fa5a0458b62f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f992b4befffeLwGdDZrueUOpTV",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
