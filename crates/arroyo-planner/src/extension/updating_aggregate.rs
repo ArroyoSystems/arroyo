@@ -3,7 +3,6 @@ use crate::builder::{NamedNode, Planner};
 use crate::functions::multi_hash;
 use crate::physical::ArroyoPhysicalExtensionCodec;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
-use arroyo_rpc::config::config;
 use arroyo_rpc::{df::ArroyoSchema, grpc::api::UpdatingAggregateOperator};
 use datafusion::common::{DFSchemaRef, Result, TableReference, ToDFSchema, plan_err};
 use datafusion::logical_expr::expr::ScalarFunction;
@@ -138,8 +137,9 @@ impl ArroyoExtension for UpdatingAggregateExtension {
             aggregate_exec: aggregate_exec.encode_to_vec(),
             metadata_expr: planner
                 .serialize_as_physical_expr(&updating_meta_expr, &input_dfschema)?,
-            flush_interval_micros: config()
-                .pipeline
+            flush_interval_micros: planner
+                .sql_config
+                .compiler
                 .update_aggregate_flush_interval
                 .as_micros() as u64,
             ttl_micros: self.ttl.as_micros() as u64,

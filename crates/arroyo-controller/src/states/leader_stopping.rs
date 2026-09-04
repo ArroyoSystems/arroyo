@@ -1,6 +1,5 @@
 use super::{JobContext, State, Stopped, Transition};
 use crate::states::StateError;
-use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::JobStopMode;
 use std::time::Duration;
@@ -37,8 +36,9 @@ impl State for LeaderStopping {
                 }
 
                 let timeout = match self.stop_behavior {
-                    LeaderStopBehavior::StopJob(JobStopMode::JobStopCheckpoint) => config()
-                        .pipeline
+                    LeaderStopBehavior::StopJob(JobStopMode::JobStopCheckpoint) => ctx
+                        .config
+                        .pipeline_config()?
                         .stopping_timeout
                         .as_ref()
                         .map(|t| **t)

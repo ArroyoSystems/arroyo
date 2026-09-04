@@ -4,7 +4,7 @@
 pub mod logical;
 pub mod optimizers;
 
-use arroyo_rpc::config::{DefaultSink, config};
+use arroyo_rpc::config::{DefaultSink, PipelineCompilerConfigs};
 use arroyo_rpc::grpc::api;
 use bincode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -217,8 +217,8 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
-pub fn default_sink() -> api::ConnectorOp {
-    match config().pipeline.default_sink {
+pub fn default_sink(compiler_config: &PipelineCompilerConfigs) -> api::ConnectorOp {
+    match &compiler_config.default_sink {
         DefaultSink::Preview => api::ConnectorOp {
             connector: "preview".to_string(),
             config: json!({

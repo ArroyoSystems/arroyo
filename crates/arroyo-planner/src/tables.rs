@@ -14,6 +14,7 @@ use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
+use arroyo_rpc::config::PipelineCompilerConfigs;
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
@@ -979,12 +980,12 @@ impl Table {
         }
     }
 
-    pub fn connector_op(&self) -> Result<ConnectorOp> {
+    pub fn connector_op(&self, compiler_config: &PipelineCompilerConfigs) -> Result<ConnectorOp> {
         match self {
             Table::ConnectorTable(c) | Table::LookupTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
-            Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
+            Table::PreviewSink { logical_plan: _ } => Ok(default_sink(compiler_config)),
         }
     }
 
