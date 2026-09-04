@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/v1/configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Controller configuration endpoint */
+        get: operations["get_configs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/connection_profiles": {
         parameters: {
             query?: never;
@@ -694,6 +711,10 @@ export interface components {
             /** Format: int64 */
             finish_time?: number | null;
             id: string;
+            /** @description Per-job pipeline configuration overlay (see `PipelinePost`).
+             *     An empty object means "no overrides, use the global pipeline
+             *     config unchanged". */
+            pipeline_config: unknown;
             /** @description The `pub_id` of the pipeline this job belongs to. */
             pipeline_id: string;
             /** Format: int64 */
@@ -857,8 +878,22 @@ export interface components {
             parallelism: number;
         };
         PipelinePatch: {
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             /** Format: int64 */
             parallelism?: number | null;
+            /** @description Per-job pipeline configuration overlay (see `PipelinePost`).
+             *     Supplying this field replaces the job's existing overlay. */
+            pipeline_config?: unknown;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
@@ -869,6 +904,11 @@ export interface components {
             name: string;
             /** Format: int64 */
             parallelism: number;
+            /** @description Per-job pipeline configuration overlay. The shape mirrors the
+             *     controller's global `pipeline` config block and is merged on top
+             *     of it when the job runs. An omitted field, `null`, or an empty
+             *     object all mean "use the global pipeline config unchanged". */
+            pipeline_config?: unknown;
             query: string;
             /** @description Per-job scheduler configuration overlay. The shape mirrors the
              *     controller's global scheduler config (e.g. the
@@ -1006,6 +1046,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_configs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Controller configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     get_connection_profiles: {
         parameters: {
             query?: never;
