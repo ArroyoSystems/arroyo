@@ -58,6 +58,22 @@ pub async fn ping() -> impl IntoResponse {
     Json("Pong")
 }
 
+/// Controller configuration endpoint
+#[utoipa::path(
+    get,
+    path = "/v1/configs",
+    tag = "configs",
+    responses(
+        (status = 200, description = "Controller configuration", body = Object),
+    ),
+)]
+pub async fn get_configs() -> impl IntoResponse {
+    Json(
+        serde_json::to_value(config().as_ref())
+            .expect("controller configuration is always serializable"),
+    )
+}
+
 pub async fn api_fallback() -> impl IntoResponse {
     not_found("Route")
 }
@@ -207,6 +223,7 @@ pub fn create_rest_app(database: DatabaseSource) -> anyhow::Result<Router> {
 
     let api_routes = Router::new()
         .route("/ping", get(ping))
+        .route("/configs", get(get_configs))
         .route("/connectors", get(get_connectors))
         .route("/connection_profiles/test", post(test_connection_profile))
         .route("/connection_profiles", post(create_connection_profile))
