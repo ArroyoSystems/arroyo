@@ -376,7 +376,7 @@ impl SourceCollector {
         for error in errors {
             match (bad_data, error) {
                 (BadData::Drop { .. }, DataflowError::DataError { count, details }) => {
-                    if config().pipeline.store_deserialization_errors {
+                    if config().pipeline.worker.store_deserialization_errors {
                         self.error_rate_limiter
                             .rate_limit(|| async {
                                 warn!("Dropping invalid data ({count}): {details}");
@@ -626,7 +626,10 @@ impl ArrowCollector {
             "Size of a tx queue",
             &chain_info,
             &out_qs,
-            config().worker.queue_size as i64,
+            config()
+                .worker
+                .queue_size
+                .unwrap_or(config().pipeline.worker.queue_size) as i64,
         );
 
         let tx_queue_rem_gauges = register_queue_gauge(
@@ -634,7 +637,10 @@ impl ArrowCollector {
             "Remaining space in a tx queue",
             &chain_info,
             &out_qs,
-            config().worker.queue_size as i64,
+            config()
+                .worker
+                .queue_size
+                .unwrap_or(config().pipeline.worker.queue_size) as i64,
         );
 
         let tx_queue_bytes_gauges = register_queue_gauge(

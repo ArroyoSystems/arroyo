@@ -39,8 +39,7 @@ impl State for LeaderStopping {
                 let timeout = match self.stop_behavior {
                     LeaderStopBehavior::StopJob(JobStopMode::JobStopCheckpoint) => config()
                         .pipeline
-                        .checkpoint
-                        .timeout
+                        .stopping_timeout
                         .as_ref()
                         .map(|t| **t)
                         .unwrap_or(Duration::MAX),

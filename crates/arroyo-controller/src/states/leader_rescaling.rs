@@ -28,8 +28,7 @@ impl State for LeaderRescaling {
         let timeout = ctx
             .config
             .pipeline_config()?
-            .checkpoint
-            .timeout
+            .stopping_timeout
             .as_ref()
             .map(|t| **t);
         handle_leader_stopping(*self, ctx, JobState::JobStopped, Scheduling {}, timeout).await
