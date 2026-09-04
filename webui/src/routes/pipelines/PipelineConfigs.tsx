@@ -205,11 +205,7 @@ export function PipelineConfigs({
         ))}
       </TabList>
       <TabPanels minWidth={0} overflow="auto">
-        <ConfigPanel
-          title="Global Config"
-        >
-          {controllerContents}
-        </ConfigPanel>
+        <ConfigPanel title="Global Config">{controllerContents}</ConfigPanel>
         <ConfigPanel
           title="Pipeline Config"
           actions={
@@ -253,17 +249,13 @@ export function PipelineConfigs({
             onReset={path => setDraftOverrides(current => removeConfigValue(current, path))}
           />
         </ConfigPanel>
-        <ConfigPanel
-          title="Scheduler Config Overrides"
-        >
+        <ConfigPanel title="Scheduler Config Overrides">
           <ConfigViewer
             value={job.scheduler_config}
             emptyMessage="This pipeline does not override the scheduler config."
           />
         </ConfigPanel>
-        <ConfigPanel
-          title="Environment Variable Overrides"
-        >
+        <ConfigPanel title="Environment Variable Overrides">
           <ConfigViewer
             value={job.env_vars}
             emptyMessage="This pipeline does not define environment variable overrides."
