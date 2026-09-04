@@ -754,9 +754,7 @@ async fn get_graph(query_string: String, udfs: &[LocalUdf]) -> Result<LogicalPro
     let program = parse_and_get_arrow_program(
         query_string,
         schema_provider,
-        SqlConfig {
-            default_parallelism: 1,
-        },
+        SqlConfig::new(1, &config::config().pipeline.compiler),
     )
     .await?
     .program;

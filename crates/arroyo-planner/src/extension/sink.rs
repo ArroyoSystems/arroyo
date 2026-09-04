@@ -158,13 +158,13 @@ impl ArroyoExtension for SinkExtension {
 
     fn plan_node(
         &self,
-        _planner: &Planner,
+        planner: &Planner,
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> Result<NodeWithIncomingEdges> {
         let operator_config = (self
             .table
-            .connector_op()
+            .connector_op(&planner.sql_config.compiler)
             .map_err(|e| e.context("connector op"))?)
         .encode_to_vec();
 
@@ -173,7 +173,10 @@ impl ArroyoExtension for SinkExtension {
             format!("sink_{}_{}", self.name, index),
             OperatorName::ConnectorSink,
             operator_config,
-            self.table.connector_op()?.description.clone(),
+            self.table
+                .connector_op(&planner.sql_config.compiler)?
+                .description
+                .clone(),
             1,
         );
 

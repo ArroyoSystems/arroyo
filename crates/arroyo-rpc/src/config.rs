@@ -530,7 +530,7 @@ pub struct AdminConfig {
     pub allow_unauthenticated_metrics: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DefaultSink {
     #[default]
@@ -590,6 +590,20 @@ pub struct CheckpointConfig {
     pub interval: HumanReadableDuration,
 }
 
+/// Options that affect the compiled pipeline program.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PipelineCompilerConfigs {
+    /// How often to flush aggregates
+    pub update_aggregate_flush_interval: HumanReadableDuration,
+
+    /// Default sink, for when none is specified
+    #[serde(default)]
+    pub default_sink: DefaultSink,
+
+    pub chaining: ChainingConfig,
+}
+
 /// Configs that apply to individual pipelines. Not that overrides for these are stored in the
 /// control plane's job_configs table, so changing or removing fields here can break existing
 /// pipelines.
@@ -617,18 +631,12 @@ pub struct PipelineConfig {
     /// Maximum backoff delay for retryable state errors
     pub state_max_backoff: HumanReadableDuration,
 
-    /// How often to flush aggregates
-    pub update_aggregate_flush_interval: HumanReadableDuration,
-
-    /// Default sink, for when none is specified
-    #[serde(default)]
-    pub default_sink: DefaultSink,
-
-    pub chaining: ChainingConfig,
-
     /// Timeout for final (stopping) checkpoints
     #[serde(default)]
     pub stopping_timeout: Option<HumanReadableDuration>,
+
+    #[serde(flatten)]
+    pub compiler: PipelineCompilerConfigs,
 
     #[serde(flatten)]
     pub worker: PipelineWorkerConfigs,
@@ -644,7 +652,7 @@ impl PipelineConfig {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainingConfig {
     /// Whether to enable operator chaining
@@ -1175,6 +1183,11 @@ mod tests {
             .pipeline
             .try_merge(&serde_json::json!({
                 "allowed-restarts": 3,
+                "default-sink": "stdout",
+                "update-aggregate-flush-interval": "7s",
+                "chaining": {
+                    "enabled": false,
+                },
                 "compaction": {
                     "enabled": true,
                 },
@@ -1185,6 +1198,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(merged.allowed_restarts, 3);
+        assert_eq!(merged.compiler.default_sink, super::DefaultSink::Stdout);
+        assert!(!merged.compiler.chaining.enabled);
+        assert_eq!(
+            *merged.compiler.update_aggregate_flush_interval,
+            std::time::Duration::from_secs(7)
+        );
         assert!(merged.worker.compaction.enabled);
         assert_eq!(
             merged.worker.compaction.checkpoints_to_compact,
@@ -1202,6 +1221,13 @@ mod tests {
         let encoded = serde_json::to_string(&merged.worker).unwrap();
         let decoded: super::PipelineWorkerConfigs = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, merged.worker);
+
+        let encoded = serde_json::to_value(&merged).unwrap();
+        assert!(encoded.get("compiler").is_none());
+        assert_eq!(
+            encoded.pointer("/chaining/enabled"),
+            Some(&serde_json::Value::Bool(false))
+        );
 
         assert!(
             config
