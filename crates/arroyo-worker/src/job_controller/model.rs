@@ -385,7 +385,7 @@ impl RunningJobModel {
             return Ok(());
         }
 
-        if !config().pipeline.compaction.enabled {
+        if !config().pipeline.worker.compaction.enabled {
             debug!("Compaction is disabled, skipping compaction");
             return Ok(());
         }

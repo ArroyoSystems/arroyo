@@ -167,11 +167,6 @@ pub(crate) async fn create_job(
     let env_vars_json =
         serde_json::to_value(&env_vars).expect("HashMap<String, String> is always serializable");
 
-    // validate the pipeline config is valid
-    if let Err(e) = config().pipeline.try_merge(&pipeline_config) {
-        return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
-    }
-
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
         &db.client().await?,

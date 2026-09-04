@@ -15,6 +15,8 @@ state-initial-backoff = "500ms"
 state-max-backoff = "1m"
 chaining.enabled = true
 store-deserialization-errors = true
+queue-size = 8192
+checkpoint-details-to-keep = 10
 
 [pipeline.compaction]
 enabled = false
@@ -55,8 +57,6 @@ bind-address = "0.0.0.0"
 rpc-port = 0
 data-port = 0
 task-slots = 16
-queue-size = 8192
-checkpoint-details-to-keep = 10
 
 [node]
 bind-address = "0.0.0.0"

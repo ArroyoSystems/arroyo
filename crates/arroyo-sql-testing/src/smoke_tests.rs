@@ -50,7 +50,7 @@ async fn run_smoketest(path: &Path) {
     config::config();
     config::update(|c| {
         // reduce the batch size to increase consistency
-        c.pipeline.source_batch_size = 32;
+        c.pipeline.worker.source_batch_size = 32;
     });
 
     // read text at path

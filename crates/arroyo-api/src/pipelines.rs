@@ -325,6 +325,11 @@ pub(crate) async fn create_pipeline_int(
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
+    // validate the pipeline config is valid
+    if let Err(e) = config().pipeline.try_merge(&pipeline_config) {
+        return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
+    }
+
     set_parallelism(&mut compiled.program, parallelism as usize);
 
     if is_preview {
@@ -834,15 +839,18 @@ pub async fn patch_pipeline(
         .map(|e| serde_json::to_value(e).map_err(log_and_map))
         .transpose()?;
 
-    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
-        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
-        v => v,
-    });
+    if !matches!(
+        pipeline_patch.scheduler_config,
+        None | Some(serde_json::Value::Object(_))
+    ) {
+        return Err(bad_request("scheduler_config field must be an object"));
+    }
 
-    let pipeline_config = pipeline_patch.pipeline_config.map(|v| match v {
-        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
-        v => v,
-    });
+    if let Some(pc) = &pipeline_patch.pipeline_config {
+        if let Err(e) = config().pipeline.try_merge(pc) {
+            return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
+        }
+    }
 
     let res = api_queries::execute_update_job(
         &db,
@@ -852,8 +860,8 @@ pub async fn patch_pipeline(
         &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
         &env_vars,
-        &scheduler_config,
-        &pipeline_config,
+        &pipeline_patch.scheduler_config,
+        &pipeline_patch.pipeline_config,
         &job_id,
         &auth_data.organization_id,
     )
@@ -1059,7 +1067,7 @@ pub async fn delete_pipeline(
         .any(|job| job.state != "Stopped" && job.state != "Finished" && job.state != "Failed")
     {
         return Err(bad_request("Pipeline's jobs must be in a terminal state (stopped, finished, or failed) before it can be deleted"
-                .to_string()
+            .to_string()
         ));
     }
 

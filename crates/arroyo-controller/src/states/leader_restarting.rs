@@ -43,8 +43,7 @@ impl State for LeaderRestarting {
                 loop {
                     let timeout = config()
                         .pipeline
-                        .checkpoint
-                        .timeout
+                        .stopping_timeout
                         .as_ref()
                         .map(|t| (started + **t).saturating_duration_since(Instant::now()))
                         .unwrap_or(Duration::MAX);

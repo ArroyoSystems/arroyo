@@ -65,7 +65,7 @@ impl State for Running {
                             // requires a restart to take effect.
                             if c.scheduler_config != ctx.config.scheduler_config
                                 || c.env_vars != ctx.config.env_vars
-                                || c.pipeline_config != ctx.config.pipeline_config
+                                || c.pipeline_config()?.worker != ctx.config.pipeline_config()?.worker
                             {
                                 return Ok(Transition::next(*self, Restarting {
                                     mode: RestartMode::safe

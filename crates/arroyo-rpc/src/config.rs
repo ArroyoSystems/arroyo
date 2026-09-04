@@ -409,7 +409,7 @@ pub struct ControllerConfig {
     pub metrics: MetricsConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CompactionConfig {
     /// Whether to enable compaction for checkpoints
@@ -476,15 +476,15 @@ pub struct WorkerConfig {
     /// Name to identify this worker (e.g., e.g., its hostname or a pod name)
     pub name: Option<String>,
 
-    /// Size of the queues between nodes in the dataflow graph
-    pub queue_size: u32,
+    /// DEPRECATED -- use pipelines.queue-size
+    pub queue_size: Option<u32>,
 
     /// TLS configuration for worker TCP shuffling
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 
-    /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
-    pub checkpoint_details_to_keep: u32,
+    /// DEPRECATED -- use pipelines.checkpoint-details-to-keep
+    pub checkpoint_details_to_keep: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -541,12 +541,10 @@ pub enum DefaultSink {
     Stdout,
 }
 
-/// Configs that apply to individual pipelines. Not that overrides for these are stored in the
-/// control plane's job_configs table, so changing or removing fields here can break existing
-/// pipelines.
-#[derive(Debug, Deserialize, Serialize, Clone)]
+/// Runtime options that apply to a particular pipeline
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct PipelineConfig {
+pub struct PipelineWorkerConfigs {
     /// Batch size
     pub source_batch_size: usize,
 
@@ -557,9 +555,34 @@ pub struct PipelineConfig {
     /// Currently measured as raw input bytes.
     pub source_batch_max_bytes: Option<usize>,
 
-    /// How often to flush aggregates
-    pub update_aggregate_flush_interval: HumanReadableDuration,
+    /// Whether to persist deserialization errors to job_log_messages
+    pub store_deserialization_errors: bool,
 
+    /// Size of the queues between nodes in the dataflow graph
+    pub queue_size: u32,
+
+    /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
+    pub checkpoint_details_to_keep: u32,
+
+    pub compaction: CompactionConfig,
+
+    pub checkpoint: CheckpointConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CheckpointConfig {
+    /// Checkpoint interval
+    #[serde(default)]
+    pub interval: Option<HumanReadableDuration>,
+}
+
+/// Configs that apply to individual pipelines. Not that overrides for these are stored in the
+/// control plane's job_configs table, so changing or removing fields here can break existing
+/// pipelines.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PipelineConfig {
     /// How many restarts to allow before moving to failed (-1 for infinite)
     pub allowed_restarts: i32,
 
@@ -581,18 +604,21 @@ pub struct PipelineConfig {
     /// Maximum backoff delay for retryable state errors
     pub state_max_backoff: HumanReadableDuration,
 
+    /// How often to flush aggregates
+    pub update_aggregate_flush_interval: HumanReadableDuration,
+
     /// Default sink, for when none is specified
     #[serde(default)]
     pub default_sink: DefaultSink,
 
-    /// Whether to persist deserialization errors to job_log_messages
-    pub store_deserialization_errors: bool,
-
     pub chaining: ChainingConfig,
 
-    pub compaction: CompactionConfig,
+    /// Timeout for final (stopping) checkpoints
+    #[serde(default)]
+    pub stopping_timeout: Option<HumanReadableDuration>,
 
-    pub checkpoint: CheckpointConfig,
+    #[serde(flatten)]
+    pub worker: PipelineWorkerConfigs,
 }
 
 impl PipelineConfig {
@@ -603,14 +629,6 @@ impl PipelineConfig {
 
         Ok(figment.extract()?)
     }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct CheckpointConfig {
-    /// Checkpoint timeout
-    #[serde(default)]
-    pub timeout: Option<HumanReadableDuration>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -855,7 +873,7 @@ impl KubernetesWorkerConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct HumanReadableDuration {
     duration: Duration,
     original: String,
@@ -1151,12 +1169,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(merged.allowed_restarts, 3);
-        assert!(merged.compaction.enabled);
+        assert!(merged.worker.compaction.enabled);
         assert_eq!(
-            merged.compaction.checkpoints_to_compact,
-            config.pipeline.compaction.checkpoints_to_compact
+            merged.worker.compaction.checkpoints_to_compact,
+            config.pipeline.worker.compaction.checkpoints_to_compact
         );
-        assert_eq!(merged.source_batch_size, config.pipeline.source_batch_size);
+        assert_eq!(merged.worker.source_batch_size, config.pipeline.worker.source_batch_size);
     }
 
     #[test]
