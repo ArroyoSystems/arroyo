@@ -37,7 +37,7 @@ use crate::pipelines::{
     __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline, __path_put_pipeline,
     __path_restart_pipeline, __path_validate_query,
 };
-use crate::rest::__path_ping;
+use crate::rest::{__path_get_configs, __path_ping};
 use crate::rest_utils::{ErrorResp, service_unavailable};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
@@ -247,6 +247,7 @@ impl IntoResponse for HttpError {
     servers((url = "/api/")),
     paths(
         ping,
+        get_configs,
         validate_query,
         validate_udf,
         create_pipeline,
@@ -362,6 +363,7 @@ impl IntoResponse for HttpError {
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),
+        (name = "configs", description = "Controller configuration endpoint"),
         (name = "connection_profiles", description = "Connection profiles management endpoints"),
         (name = "connection_tables", description = "Connection tables management endpoints"),
         (name = "pipelines", description = "Pipeline management endpoints"),
