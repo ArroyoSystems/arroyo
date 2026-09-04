@@ -1,0 +1,41 @@
+crates/arroyo-api/src/lib.rs
+  s_ff2e2d600f7e17::t_9de987572c3b8f 293,388
+crates/arroyo-api/src/cf_endpoints.rs
+  s_ff2e2d600f7e17::t_d430efc1fae069 5,880,897,902
+  s_ff2e2d600f7e17::t_eea946c71a2228 925,942
+  s_ff2e2d600f7e17::t_cf552302382e57 868
+  s_1ea7e8ce8d5f0a::t_3dcdb676679d8d 25,39,862-867,916,926-927,929-931,933-937,939,946-952,955-964
+  s_1ea7e8ce8d5f0a::t_146d7661d08732 953-954
+  s_ff2e2d600f7e17::t_102f3f6dd4dac7 968
+  s_ff2e2d600f7e17::t_d8ce7e0ac8a83b 899-901
+  s_1ea7e8ce8d5f0a::t_c75282c617b431 928,932
+  s_ff2e2d600f7e17::t_9de987572c3b8f 249-255,284,869-879,881-896,903-915,917-924,938,940-941,943-945,965-967
+  s_ff2e2d600f7e17::t_423f07748957d6 898
+crates/arroyo-api/queries/api_queries.sql
+  s_1ea7e8ce8d5f0a::t_c75282c617b431 161-165,360-364,367,369-373
+  s_1ea7e8ce8d5f0a::t_3dcdb676679d8d 353-359,365-366,368,374-379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f12a4111035954366dbaaf8ff49b53664e2a8b26",
+  "prompts": {},
+  "sessions": {
+    "s_1ea7e8ce8d5f0a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f920cedb9ffewLV3JB7bN8Z02Q",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_ff2e2d600f7e17": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f970c8930ffegORjoox2vLxFCk",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
