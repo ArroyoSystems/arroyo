@@ -1,0 +1,27 @@
+Cargo.lock
+  s_2bbfc917a8baf7::t_603cef6a7383cf 10670,10672,10698,10700
+crates/arroyo-connectors/Cargo.toml
+  s_2bbfc917a8baf7::t_1ca9e808e35908 126,132-133
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_2bbfc917a8baf7::t_b65ff18c6e5050 164
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_2bbfc917a8baf7::t_81fcd1fe0425be 11-12,63,76,80-85,217,230-231,246-247,252-324,328,330,379-380,391-397,399-402,404-411,413-447,451-458,460-466,468-511,515,518
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_2bbfc917a8baf7::t_27fb8251e959ac 19,152-154,165,234,281-283,317,339-343,362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "88008322c49cc25f8e996a19d167229be38be83c",
+  "prompts": {},
+  "sessions": {
+    "s_2bbfc917a8baf7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f939f23dcffeZ16phWXRqmgvDl",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
