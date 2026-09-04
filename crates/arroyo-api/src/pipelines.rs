@@ -295,7 +295,6 @@ pub(crate) async fn create_pipeline_int(
     query: String,
     udfs: Vec<Udf>,
     parallelism: u64,
-    checkpoint_interval: Duration,
     is_preview: bool,
     enable_sinks: bool,
     auth: AuthData,
@@ -325,10 +324,10 @@ pub(crate) async fn create_pipeline_int(
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
-    // validate the pipeline config is valid
-    if let Err(e) = config().pipeline.try_merge(&pipeline_config) {
-        return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
-    }
+    config()
+        .pipeline
+        .try_merge(&pipeline_config)
+        .map_err(|e| bad_request(format!("pipeline_config is invalid: {e}")))?;
 
     set_parallelism(&mut compiled.program, parallelism as usize);
 
@@ -445,7 +444,6 @@ pub(crate) async fn create_pipeline_int(
     let job_id = jobs::create_job(
         &name,
         pipeline_id,
-        checkpoint_interval,
         is_preview,
         &auth,
         db,
@@ -480,7 +478,6 @@ impl TryInto<Pipeline> for DbPipeline {
         let running_desired = self.stop == StopMode::none;
         let state = self.state.unwrap_or_else(|| "Created".to_string());
         let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
-
         let mut program: LogicalProgram = ArrowProgram::decode(&self.program[..])
             .map_err(log_and_map)?
             .try_into()
@@ -510,7 +507,6 @@ impl TryInto<Pipeline> for DbPipeline {
             name: self.name,
             query: self.textual_repr,
             udfs: serde_json::from_value(self.udfs).map_err(log_and_map)?,
-            checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop,
             created_at: to_micros(self.created_at),
             graph: program.try_into().map_err(log_and_map)?,
@@ -657,10 +653,10 @@ async fn create_pipeline_inner(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let checkpoint_interval = pipeline_post
-        .checkpoint_interval_micros
-        .map(Duration::from_micros)
-        .unwrap_or(*config().default_checkpoint_interval);
+    let pipeline_config = match pipeline_post.pipeline_config {
+        None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+        Some(v) => v,
+    };
 
     let udfs = pipeline_post.udfs.unwrap_or_default();
 
@@ -679,7 +675,6 @@ async fn create_pipeline_inner(
         pipeline_post.query,
         udfs,
         pipeline_post.parallelism,
-        checkpoint_interval,
         /* is_preview */ false,
         /* enable_sinks */ true,
         auth_data.clone(),
@@ -693,10 +688,7 @@ async fn create_pipeline_inner(
             None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
             Some(v) => v,
         },
-        match pipeline_post.pipeline_config {
-            None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
-            Some(v) => v,
-        },
+        pipeline_config,
     )
     .await?;
 
@@ -736,12 +728,16 @@ pub async fn create_preview_pipeline(
     )
     .await??;
 
+    let mut pipeline_config = config().pipeline.clone();
+    pipeline_config.worker.checkpoint.interval = Duration::from_secs(24 * 60 * 60).into();
+    let pipeline_config = serde_json::to_value(pipeline_config)
+        .map_err(|e| log_and_map(anyhow!("failed to serialize preview config: {e}")))?;
+
     let pipeline_id = create_pipeline_int(
         format!("preview_{}", to_millis(SystemTime::now())),
         req.query,
         udfs,
         1,
-        Duration::MAX,
         /* is_preview */ true,
         req.enable_sinks,
         auth_data.clone(),
@@ -752,7 +748,7 @@ pub async fn create_preview_pipeline(
         HashMap::default(),
         HashMap::default(),
         serde_json::Value::Object(Default::default()),
-        serde_json::Value::Object(Default::default()),
+        pipeline_config,
     )
     .await?;
 
@@ -795,10 +791,6 @@ pub async fn patch_pipeline(
             .ok_or_else(|| not_found("Job for pipeline"))?
             .id;
 
-    let interval = pipeline_patch
-        .checkpoint_interval_micros
-        .map(Duration::from_micros);
-
     let stop = &pipeline_patch.stop.map(|s| match s {
         StopType::None => types::public::StopMode::none,
         StopType::Graceful => types::public::StopMode::graceful,
@@ -806,14 +798,6 @@ pub async fn patch_pipeline(
         StopType::Checkpoint => types::public::StopMode::checkpoint,
         StopType::Force => types::public::StopMode::force,
     });
-
-    if let Some(interval) = interval
-        && (interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60))
-    {
-        return Err(bad_request(
-            "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
-        ));
-    }
 
     let parallelism_overrides = if let Some(parallelism) = pipeline_patch.parallelism {
         let res = api_queries::fetch_get_job_details(&db, &auth_data.organization_id, &job_id)
@@ -847,9 +831,10 @@ pub async fn patch_pipeline(
     }
 
     if let Some(pc) = &pipeline_patch.pipeline_config {
-        if let Err(e) = config().pipeline.try_merge(pc) {
-            return Err(bad_request(format!("pipeline_config is invalid: {}", e)));
-        }
+        config()
+            .pipeline
+            .try_merge(pc)
+            .map_err(|e| bad_request(format!("pipeline_config is invalid: {e}")))?;
     }
 
     let res = api_queries::execute_update_job(
@@ -857,7 +842,6 @@ pub async fn patch_pipeline(
         &OffsetDateTime::now_utc(),
         &auth_data.user_id,
         stop,
-        &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
         &env_vars,
         &pipeline_patch.scheduler_config,
