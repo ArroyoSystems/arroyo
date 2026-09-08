@@ -1,0 +1,27 @@
+crates/arroyo-api/src/lib.rs
+  s_ff2e2d600f7e17::t_9de987572c3b8f 293,388
+crates/arroyo-api/src/cf_endpoints.rs
+  s_ff2e2d600f7e17::t_9de987572c3b8f 249-255,284,869-879,881-896,903-924,926-929,931-936
+  s_ff2e2d600f7e17::t_d8ce7e0ac8a83b 899-901
+  s_ff2e2d600f7e17::t_423f07748957d6 898
+  s_ff2e2d600f7e17::t_d430efc1fae069 5,880,897,902
+  s_ff2e2d600f7e17::t_eea946c71a2228 925,930
+  s_ff2e2d600f7e17::t_cf552302382e57 866-868
+  s_ff2e2d600f7e17::t_102f3f6dd4dac7 937
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "eb8f39aa9ee7db5ed70de23e30d52d31a5071efe",
+  "prompts": {},
+  "sessions": {
+    "s_ff2e2d600f7e17": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f970c8930ffegORjoox2vLxFCk",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
