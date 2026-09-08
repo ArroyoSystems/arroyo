@@ -1,0 +1,39 @@
+crates/arroyo-formats/src/de.rs
+  s_cf6fe36134d233::t_c842f4d4daa2c1 855,857-860,875-878
+  s_cf6fe36134d233::t_373ee4c6d21a3d 870
+  s_8972befb049341::t_c5749f67cb4026 328-331,828-830,861-866,880-884
+  s_cf6fe36134d233::t_7c88a54ac3ceaa 869
+  s_cf6fe36134d233::t_cb64e5f859ea2e 873
+  s_cf6fe36134d233::t_4c4bd22b25df38 847
+  s_cf6fe36134d233::t_217e49646718ab 70,205,854,856,868,874
+  s_8972befb049341::t_cb59bab34029ed 832,835
+  s_cf6fe36134d233::t_c608ffa8ebb2f3 845-846
+  s_cf6fe36134d233::t_ee727614a62cbf 848
+  s_cf6fe36134d233::t_ab5f6c45398503 886
+  s_cf6fe36134d233::t_28669c281b97f7 849-853
+  s_8972befb049341::t_6515921ca11ef0 42,56,65-67,72,867,871-872,879,885
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "03b41b65b454dae3c9cb6aad6f4bdc663caa6a67",
+  "prompts": {},
+  "sessions": {
+    "s_8972befb049341": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f937b0a0dffe663T1kDAkmmEwK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_cf6fe36134d233": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f9e0b9757ffeD6i1vqgKPVCGFf",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}
