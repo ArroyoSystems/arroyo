@@ -486,7 +486,9 @@ message StartExecutionReq {
   repeated TaskAssignment tasks = 3;
   string job_controller_addr = 4;
   bool is_leader = 5;
-  reserved 8;
+  // Always send true so older workers wait for job_controller_init before running.
+  // New workers always wait for the leader and ignore this field.
+  bool wait_for_leader = 8;
   uint64 checkpoint_interval_micros = 9;
   // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;

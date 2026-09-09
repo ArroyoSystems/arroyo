@@ -521,6 +521,7 @@ impl State for Scheduling {
                             tasks: assignments.clone(),
                             job_controller_addr: leader_addr,
                             is_leader: leader_id == id,
+                            wait_for_leader: true,
                             checkpoint_interval_micros,
                             checkpoint_manifest_ref: checkpoint_manifest_ref.clone(),
                         }))
