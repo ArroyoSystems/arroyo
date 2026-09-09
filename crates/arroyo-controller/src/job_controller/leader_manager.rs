@@ -5,7 +5,7 @@ use crate::states::{
     JobContext, State, StateError, Transition, TransitionTo, controller_job_failure,
 };
 use crate::types::public::StopMode as SqlStopMode;
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
@@ -14,9 +14,12 @@ use arroyo_rpc::identity::InjectWorkerId;
 use arroyo_rpc::{job_status_client, retry};
 use arroyo_types::{JobId, PipelineId, WorkerId};
 use std::time::{Duration, Instant};
+use tokio::time::timeout;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use tracing::{info, warn};
+
+const LEADER_RPC_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct LeaderManager {
     leader_client: JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>,
@@ -65,23 +68,27 @@ impl LeaderManager {
     }
 
     pub async fn poll_leader_status(&mut self) -> anyhow::Result<rpc::JobStatus> {
-        let response = retry!(
-            self.leader_client
-                .get_job_status(JobStatusReq {
-                    job_id: self.job_id.to_string(),
-                    generation: self.generation,
-                })
-                .await,
-            5,
-            Duration::from_millis(100),
-            Duration::from_secs(2),
-            |e| warn!(
-                job_id = %self.job_id,
-                pipeline_id = *self.pipeline_id.0,
-                message = "failed to poll for job status",
-                error = ?e
+        let response = timeout(LEADER_RPC_TIMEOUT, async {
+            retry!(
+                self.leader_client
+                    .get_job_status(JobStatusReq {
+                        job_id: self.job_id.to_string(),
+                        generation: self.generation,
+                    })
+                    .await,
+                5,
+                Duration::from_millis(100),
+                Duration::from_secs(2),
+                |e| warn!(
+                    job_id = %self.job_id,
+                    pipeline_id = *self.pipeline_id.0,
+                    message = "failed to poll for job status",
+                    error = ?e
+                )
             )
-        )?
+        })
+        .await
+        .context("timed out polling leader status")??
         .into_inner();
 
         if response.job_id != *self.job_id.0 {
@@ -117,11 +124,14 @@ impl LeaderManager {
             stop_mode = ?stop_mode,
         );
 
-        self.leader_client
-            .stop_job(StopJobReq {
+        timeout(
+            LEADER_RPC_TIMEOUT,
+            self.leader_client.stop_job(StopJobReq {
                 stop_mode: stop_mode as i32,
-            })
-            .await?;
+            }),
+        )
+        .await
+        .context("timed out sending stop request to leader")??;
 
         Ok(())
     }
