@@ -980,7 +980,7 @@ impl StateMachine {
     ) {
         *self.state.write().unwrap() = status.state.clone();
         if self.config.read().unwrap().0 != config {
-            let update = JobMessage::ConfigUpdate(config.clone());
+            let update = JobMessage::ConfigUpdate(Box::new(config.clone()));
             {
                 let mut c = self.config.write().unwrap();
                 *c = (config, AppliedStatus::NotApplied);

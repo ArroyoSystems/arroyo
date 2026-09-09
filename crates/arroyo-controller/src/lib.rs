@@ -171,7 +171,7 @@ fn job_in_final_state(config: &JobConfig, status: &JobStatus) -> bool {
 
 #[derive(Debug)]
 pub enum JobMessage {
-    ConfigUpdate(JobConfig),
+    ConfigUpdate(Box<JobConfig>),
     WorkerConnect {
         worker_id: WorkerId,
         machine_id: MachineId,
