@@ -1,5 +1,5 @@
 use super::{JobContext, State, StateError, Transition, scheduling::Scheduling};
-use crate::job_controller::leader_manager::handle_leader_stopping;
+use crate::leader_manager::handle_leader_stopping;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 

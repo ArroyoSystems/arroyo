@@ -1,4 +1,4 @@
-use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
+use crate::job_controller::committing_state::CommittingState;
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::grpc::api::OperatorCheckpointDetail;
@@ -13,6 +13,7 @@ use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state_protocol::types::Epoch;
+use arroyo_state_protocol::workflow::CommitPermit;
 use arroyo_types::{from_micros, to_micros};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -471,7 +472,12 @@ impl CheckpointState {
         !self.subtasks_to_commit.is_empty()
     }
 
-    pub fn into_commit(self, checkpoint_id: CheckpointIdOrRef) -> CommittingState {
-        CommittingState::new(checkpoint_id, self.subtasks_to_commit, self.commit_data)
+    pub fn into_commit(self, commit_permit: CommitPermit) -> CommittingState {
+        CommittingState::new(
+            self.checkpoint_id,
+            commit_permit,
+            self.subtasks_to_commit,
+            self.commit_data,
+        )
     }
 }

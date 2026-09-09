@@ -1,5 +1,5 @@
 use crate::job_controller::checkpoint_state::CheckpointState;
-use crate::job_controller::committing_state::{CheckpointIdOrRef, CommittingState};
+use crate::job_controller::committing_state::CommittingState;
 use crate::job_controller::job_metrics::{JobMetrics, get_metric_name};
 use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent};
 use anyhow::bail;
@@ -12,13 +12,12 @@ use arroyo_rpc::checkpoints::{
 };
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LabelPair, LoadCompactedDataReq,
-    MetricsReq, OperatorCheckpointMetadata, TaskCheckpointEventType,
+    CheckpointManifest, CheckpointReq, CommitReq, JobFinishedReq, LabelPair, MetricsReq,
+    OperatorCheckpointMetadata, TaskCheckpointEventType,
 };
 use arroyo_rpc::identity::WorkerClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_state::parquet::ParquetBackend;
-use arroyo_state::{BackingStore, StateBackend, StorageProviderFor, get_storage_provider};
+use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
 use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation, GenerationManifest};
 use arroyo_state_protocol::workflow::{
@@ -55,23 +54,6 @@ pub struct RunningJobModel {
     pub generation_manifest: Option<GenerationManifest>,
 
     pub finished_operators: Vec<OperatorCheckpointMetadata>,
-
-    pub worker_leader_mode: bool,
-
-    /// Identifies which process / role is running this model and where its
-    /// checkpoint storage lives.
-    ///
-    /// On the worker-leader process, this is [`StorageProviderFor::Worker`]:
-    /// the worker resolves its URL from `config().checkpoint_url` (set
-    /// per-pipeline via `ARROYO__CHECKPOINT_URL` at worker startup).
-    ///
-    /// On the controller process, this is
-    /// [`StorageProviderFor::Controller`] carrying the pipeline's
-    /// `state_url`. The controller's own `config().checkpoint_url` is a
-    /// global default that doesn't differ across pipelines, so the
-    /// per-pipeline override is needed to route storage operations to the
-    /// right URL.
-    pub storage_role: StorageProviderFor,
 
     // checkpoint-wide events
     pub checkpoint_spans: Vec<JobCheckpointSpan>,
@@ -163,7 +145,6 @@ impl RunningJobModel {
         msg: RunningMessage,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
-        let storage_role = self.storage_role.clone();
         match msg {
             RunningMessage::TaskCheckpointEvent(c) => {
                 if let Some(checkpoint_state) = &mut self.checkpoint_state {
@@ -184,7 +165,6 @@ impl RunningJobModel {
                                 {
                                     committing_state
                                         .subtask_committed(c.operator_id.clone(), c.subtask_idx);
-                                    self.compact_state().await?;
                                 } else {
                                     warn!("unexpected checkpoint event type {:?}", c.event_type())
                                 }
@@ -216,15 +196,7 @@ impl RunningJobModel {
                             bail!("Received checkpoint finished but not checkpointing");
                         };
                         if let Some(operator_metadata) = checkpoint_state.checkpoint_finished(c)? {
-                            if self.worker_leader_mode {
-                                self.finished_operators.push(operator_metadata);
-                            } else {
-                                StateBackend::write_operator_checkpoint_metadata(
-                                    &storage_role,
-                                    operator_metadata,
-                                )
-                                .await?;
-                            }
+                            self.finished_operators.push(operator_metadata);
                         }
 
                         if checkpoint_state.done()
@@ -379,70 +351,12 @@ impl RunningJobModel {
         Ok(())
     }
 
-    async fn compact_state(&mut self) -> anyhow::Result<()> {
-        if self.worker_leader_mode {
-            // TODO: compaction for leader mode
-            return Ok(());
-        }
-
-        if !config().pipeline.compaction.enabled {
-            debug!("Compaction is disabled, skipping compaction");
-            return Ok(());
-        }
-
-        self.start_or_get_span(JobCheckpointEventType::Compacting);
-        info!(
-            message = "Compacting state",
-            job_id = *self.job_id,
-            epoch = *self.epoch,
-        );
-
-        let storage_role = self.storage_role.clone();
-        let mut worker_clients: Vec<WorkerClient> =
-            self.workers.values().map(|w| w.connect.clone()).collect();
-        for node in self.program.graph.node_weights() {
-            for (op, _) in node.operator_chain.iter() {
-                let compacted_tables = ParquetBackend::compact_operator(
-                    // compact the operator's state and notify the workers to load the new files
-                    &storage_role,
-                    self.job_id.0.clone(),
-                    &op.operator_id,
-                    *self.epoch as u32,
-                )
-                .await?;
-
-                if compacted_tables.is_empty() {
-                    continue;
-                }
-
-                // TODO: these should be put on separate tokio tasks.
-                for worker_client in &mut worker_clients {
-                    worker_client
-                        .load_compacted_data(LoadCompactedDataReq {
-                            operator_id: op.operator_id.clone(),
-                            compacted_metadata: compacted_tables.clone(),
-                        })
-                        .await?;
-                }
-            }
-        }
-        self.start_or_get_span(JobCheckpointEventType::Compacting)
-            .finish();
-
-        info!(
-            message = "Finished compaction",
-            job_id = *self.job_id,
-            epoch = *self.epoch,
-        );
-        Ok(())
-    }
-
-    async fn finish_checkpoint_leader(
+    async fn finish_checkpoint(
         &mut self,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
         let state = self.checkpoint_state.take().unwrap();
-        let storage = get_storage_provider(&self.storage_role).await?;
+        let storage = get_storage_provider(&StorageProviderFor::Worker).await?;
         match state {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
                 let pipeline_id = (*self.pipeline_id).clone();
@@ -479,7 +393,7 @@ impl RunningJobModel {
                     generation_manifest: self
                         .generation_manifest
                         .as_ref()
-                        .expect("generation manifest not set in leader mode"),
+                        .expect("generation manifest not set on worker leader"),
                     checkpoint_ref: &checkpoint_ref,
                     checkpoint: &manifest,
                     created_at: SystemTime::now(),
@@ -542,11 +456,7 @@ impl RunningJobModel {
                     }
                 };
 
-                let checkpoint_id = checkpointing.checkpoint_id.clone();
-                let commit = checkpointing.into_commit(CheckpointIdOrRef::CheckpointIdAndRef(
-                    checkpoint_id,
-                    commit_permit.clone(),
-                ));
+                let commit = checkpointing.into_commit(commit_permit.clone());
 
                 let committing_data = commit.committing_data();
 
@@ -646,109 +556,12 @@ impl RunningJobModel {
         Ok(())
     }
 
-    async fn finish_checkpoint_controller(
-        &mut self,
-        store: &dyn CheckpointMetadataStore,
-    ) -> anyhow::Result<()> {
-        let storage_role = self.storage_role.clone();
-        let state = self.checkpoint_state.take().unwrap();
-        match state {
-            CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
-                let metadata_span = self.start_or_get_span(JobCheckpointEventType::WritingMetadata);
-
-                let metadata = checkpointing.build_metadata();
-
-                StateBackend::write_checkpoint_metadata(&storage_role, metadata).await?;
-
-                metadata_span.finish();
-
-                let duration = checkpointing
-                    .start_time()
-                    .elapsed()
-                    .unwrap_or(Duration::ZERO)
-                    .as_secs_f32();
-                // shortcut if committing is unnecessary
-                if !checkpointing.needs_commit() {
-                    self.start_or_get_span(JobCheckpointEventType::Checkpointing)
-                        .finish();
-                    self.update_checkpoint_in_db(&checkpointing, store, CheckpointStatus::Ready)
-                        .await?;
-                    self.last_checkpoint = Instant::now();
-                    self.checkpoint_state = None;
-                    self.compact_state().await?;
-
-                    info!(
-                        message = "Finished checkpointing",
-                        job_id = *self.job_id,
-                        epoch = *self.epoch,
-                        duration
-                    );
-                    store.notify_checkpoint_complete();
-                } else {
-                    self.update_checkpoint_in_db(
-                        &checkpointing,
-                        store,
-                        CheckpointStatus::Committing,
-                    )
-                    .await?;
-
-                    let id = CheckpointIdOrRef::CheckpointId(checkpointing.checkpoint_id.clone());
-                    let committing = checkpointing.into_commit(id);
-                    info!(
-                        message = "Committing checkpoint",
-                        job_id = *self.job_id,
-                        epoch = *self.epoch,
-                    );
-
-                    self.start_or_get_span(JobCheckpointEventType::Committing);
-
-                    // TODO: this should be done in parallel, but we're being conservative for now
-                    //  about changing existing behaviorÏ
-                    for worker in self.workers.values_mut() {
-                        worker
-                            .connect
-                            .commit(Request::new(CommitReq {
-                                epoch: *self.epoch,
-                                committing_data: committing.committing_data().clone(),
-                            }))
-                            .await?;
-                    }
-
-                    self.checkpoint_state =
-                        Some(CheckpointingOrCommittingState::Committing(committing));
-                }
-            }
-            CheckpointingOrCommittingState::Committing(committing) => {
-                self.start_or_get_span(JobCheckpointEventType::Committing)
-                    .finish();
-                self.start_or_get_span(JobCheckpointEventType::Checkpointing)
-                    .finish();
-                self.finish_committing(committing.checkpoint_id(), store)
-                    .await?;
-                self.last_checkpoint = Instant::now();
-                self.checkpoint_state = None;
-                info!(
-                    message = "Finished committing checkpointing",
-                    job_id = *self.job_id,
-                    epoch = *self.epoch,
-                );
-                store.notify_checkpoint_complete();
-            }
-        }
-
-        Ok(())
-    }
-
     pub async fn finish_checkpoint_if_done(
         &mut self,
         store: &dyn CheckpointMetadataStore,
     ) -> anyhow::Result<()> {
         if self.checkpoint_state.as_ref().unwrap().done() {
-            if self.worker_leader_mode {
-                self.finish_checkpoint_leader(store).await?;
-            } else {
-                self.finish_checkpoint_controller(store).await?;
-            }
+            self.finish_checkpoint(store).await?;
         }
         Ok(())
     }

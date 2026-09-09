@@ -484,14 +484,13 @@ message StartExecutionReq {
   uint64 start_epoch = 6;
   uint64 min_epoch = 7;
   repeated TaskAssignment tasks = 3;
-  // if none, clients should use the controller address
-  optional string job_controller_addr = 4;
+  string job_controller_addr = 4;
   bool is_leader = 5;
-  // if set, the worker should wait for a job_controller_init message before starting
-  // (used in worker leader mode)
+  // Always send true so older workers wait for job_controller_init before running.
+  // New workers always wait for the leader and ignore this field.
   bool wait_for_leader = 8;
   uint64 checkpoint_interval_micros = 9;
-  // for leader mode, this gives the path to load the restore checkpoint manifest from
+  // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;
 }
 

@@ -1,15 +1,12 @@
 use super::{
     JobContext, State, StateError, Transition, compiling::Compiling, fatal, state_backoff,
 };
-use crate::JobMessage;
-use crate::job_controller::JobController;
-use crate::job_controller::leader_manager::LeaderManager;
+use crate::leader_manager::LeaderManager;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
-use arroyo_rpc::grpc::rpc::{JobState, JobStopMode, StopMode};
+use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 use arroyo_rpc::retry;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc::Receiver;
+use std::time::Duration;
 use tokio::time::timeout;
 use tracing::{info, warn};
 
@@ -21,45 +18,6 @@ pub struct Recovering {
 }
 
 impl Recovering {
-    // tries, with increasing levels of force, to tear down the existing cluster
-    pub async fn cleanup_job_controller(
-        job_controller: &mut JobController,
-        job_id: &str,
-        pipeline_id: &str,
-        rx: &mut Receiver<JobMessage>,
-    ) {
-        // first try to stop it gracefully
-        if job_controller.finished() {
-            return;
-        }
-
-        // stop the job
-        info!(message = "stopping job", %job_id, pipeline_id);
-        let start = Instant::now();
-        match job_controller.stop_job(StopMode::Immediate).await {
-            Ok(_) => {
-                if (timeout(Duration::from_secs(5), job_controller.wait_for_finish(rx)).await)
-                    .is_ok()
-                {
-                    info!(
-                        message = "job stopped",
-                        %job_id,
-                        pipeline_id,
-                        duration = start.elapsed().as_secs_f32()
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(
-                    message = "failed to stop job",
-                    error = format!("{:?}", e),
-                    %job_id,
-                    pipeline_id,
-                );
-            }
-        }
-    }
-
     pub async fn cleanup_leader(
         leader_manager: &mut LeaderManager,
         job_id: &str,
@@ -189,29 +147,18 @@ impl Recovering {
 
     pub async fn cleanup<'a>(ctx: &mut JobContext<'a>) -> anyhow::Result<()> {
         // attempt to shutdown the job cleanly
-        match (ctx.job_controller.as_mut(), ctx.leader_manager.as_mut()) {
-            (Some(jc), None) => {
-                Self::cleanup_job_controller(
-                    jc,
-                    &ctx.config.id,
-                    &ctx.pipeline_info.pipeline_id,
-                    ctx.rx,
-                )
-                .await
-            }
-            (None, Some(lm)) => {
-                Self::cleanup_leader(lm, &ctx.config.id, &ctx.pipeline_info.pipeline_id).await
-            }
-            (Some(_), Some(_)) => unreachable!("both job controller and leader manager are set!"),
-            (None, None) => {
-                // somehow we got here before scheduling set the job controller / leader manager
-            }
-        };
+        if let Some(leader_manager) = ctx.leader_manager.as_mut() {
+            Self::cleanup_leader(
+                leader_manager,
+                &ctx.config.id,
+                &ctx.pipeline_info.pipeline_id,
+            )
+            .await;
+        }
 
         // clear workers
         ctx.leader_manager = None;
         ctx.status.state_context.leader = None;
-        ctx.job_controller = None;
 
         // then tear down the workers
         retry!(

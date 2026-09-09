@@ -194,7 +194,7 @@ impl WorkerJobController {
 
         // Note: There are panics in some of these branches because they indicate a bug in the controller
         // or worker, not just inconsistent state. We are working around some limitations in adapting
-        // the existing worker lifecycle to the worker leader mode, such that we need the controller
+        // the existing worker lifecycle to the worker-leader architecture, such that we need the controller
         // to look up the checkpoint information to initialize the workers. If on the leader side
         // we end up with a different view of the checkpoint state, that indicates something has
         // gone very wrong and our best choice is to panic and have the controller clean us up.
@@ -269,8 +269,6 @@ impl WorkerJobController {
                 ),
                 checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
-                worker_leader_mode: true,
-                storage_role: StorageProviderFor::Worker,
                 finished_operators: vec![],
                 generation_manifest: Some(generation_manifest),
             },
@@ -322,10 +320,8 @@ impl WorkerJobController {
 
                 // TODO: this really should happen after we've replayed the initial commit, but
                 //  that requires a significant reworking on the worker lifecycle. However, Committing
-                //  concurrently with startup is how the existing controller has always worked, so in
-                //  practice it doesn't seem to be likely that workers outrun the commit, but it is
-                //  possible and we should look at fixing this at some point in the future when we
-                //  remove the legacy code paths.
+                //  Workers currently begin running concurrently with the commit, so it is possible
+                //  for them to outrun it. Fixing this requires reworking the worker lifecycle.
                 status.connect.job_controller_init(JobControllerInitReq {}).await?;
 
                 Ok(())

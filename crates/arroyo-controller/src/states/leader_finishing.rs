@@ -1,5 +1,5 @@
 use super::{Finished, JobContext, State, Transition};
-use crate::job_controller::leader_manager::handle_leader_stopping;
+use crate::leader_manager::handle_leader_stopping;
 use crate::states::StateError;
 use arroyo_rpc::grpc::rpc::JobState;
 

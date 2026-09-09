@@ -263,7 +263,8 @@ pub struct Config {
     /// Directory to look for config files in
     pub config_dir: Option<PathBuf>,
 
-    /// Controls where the "job controller" lives, either on the controller or a worker-leader
+    /// [deprecated] Controls where the "job controller" lives; only worker is supported
+    #[serde(default)]
     pub job_controller: JobControllerMode,
 
     /// Run options
@@ -279,7 +280,6 @@ pub struct Config {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub enum JobControllerMode {
     #[default]
-    Controller,
     Worker,
 }
 

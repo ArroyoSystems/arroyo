@@ -1,7 +1,5 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
 default-checkpoint-interval = "10s"
-job-controller = "controller"
-
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"

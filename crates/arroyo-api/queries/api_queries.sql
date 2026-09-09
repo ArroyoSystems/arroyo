@@ -178,14 +178,13 @@ SET
    scheduler_config = COALESCE(:scheduler_config, scheduler_config)
 WHERE id = :job_id AND organization_id = :organization_id;
 
---! restart_job(mode, ignore_state_before_epoch?)
+--! restart_job(mode)
 UPDATE job_configs
 SET
    updated_at = :updated_at,
    updated_by = :updated_by,
    restart_nonce = restart_nonce + 1,
-   restart_mode = :mode,
-   ignore_state_before_epoch = :ignore_state_before_epoch
+   restart_mode = :mode
 WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
@@ -252,39 +251,6 @@ FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipeline_id = pipelines.id
 WHERE job_configs.organization_id = :organization_id AND job_configs.id = :job_id;
-
---: DbCheckpoint (finish_time?, operators?)
---: MaxCheckpointEpoch (max_epoch?)
-
---! max_checkpoint_epoch : MaxCheckpointEpoch
-SELECT MAX(epoch) as max_epoch
-FROM checkpoints
-WHERE job_id = :job_id AND organization_id = :organization_id;
-
---! get_job_checkpoints: DbCheckpoint
-SELECT epoch, state_backend, start_time, finish_time, event_spans, operators, is_stopping FROM checkpoints
-JOIN job_configs ON checkpoints.job_id = job_configs.id
-WHERE job_configs.id = :job_id
-    AND checkpoints.organization_id = :organization_id
-    AND state != 'compacted'
-    AND state != 'failed'
-ORDER BY epoch;
-
---! get_job_checkpoint: DbCheckpoint
-SELECT epoch, state_backend, start_time, finish_time, event_spans, operators, is_stopping FROM checkpoints
-JOIN job_configs ON checkpoints.job_id = job_configs.id
-WHERE job_configs.id = :job_id
-    AND checkpoints.organization_id = :organization_id
-    AND state != 'compacted'
-    AND state != 'failed'
-    AND checkpoints.pub_id = :checkpoint_pub_id;
-
---! get_checkpoint_details: (finish_time?, operators?)
-SELECT epoch, state_backend, start_time, finish_time, event_spans, operators FROM checkpoints
-WHERE job_id = :job_id
-    AND organization_id = :organization_id
-    AND epoch = :epoch
-    AND state != 'failed';
 
 --! delete_pipeline_for_job
 DELETE FROM pipelines WHERE pipelines.id = (
