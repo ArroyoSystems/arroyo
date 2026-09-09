@@ -295,6 +295,7 @@ impl FileSystemSourceFunc {
             Format::RawString(_) => todo!(),
             Format::RawBytes(_) => todo!(),
             Format::Protobuf(_) => todo!("Protobuf not supported"),
+            Format::MsgPack(_) => todo!("MsgPack not supported"),
         }
     }
 

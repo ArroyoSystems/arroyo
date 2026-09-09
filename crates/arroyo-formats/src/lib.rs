@@ -4,6 +4,7 @@ use std::time::Instant;
 
 pub mod avro;
 pub mod json;
+pub mod msgpack;
 
 pub mod de;
 pub mod proto;

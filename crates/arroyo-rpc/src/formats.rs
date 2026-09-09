@@ -391,6 +391,83 @@ impl ProtobufFormat {
     }
 }
 
+#[derive(
+    Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, ToSchema, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct MsgPackFormat {
+    #[serde(default)]
+    pub into_unstructured_json: bool,
+
+    #[serde(default)]
+    pub timestamp_format: TimestampFormat,
+
+    #[serde(default)]
+    pub decimal_encoding: DecimalEncoding,
+}
+
+impl MsgPackFormat {
+    pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
+        let into_unstructured_json = opts
+            .pull_opt_bool("msgpack.into_unstructured_json")?
+            .unwrap_or(false);
+
+        let timestamp_format: TimestampFormat = opts
+            .pull_opt_str("msgpack.timestamp_format")?
+            .map(|t| t.as_str().try_into())
+            .transpose()
+            .map_err(|_| plan_datafusion_err!("invalid value for `msgpack.timestamp_format`"))?
+            .unwrap_or_default();
+
+        let decimal_encoding: DecimalEncoding = opts
+            .pull_opt_str("msgpack.decimal_encoding")?
+            .map(|t| t.as_str().try_into())
+            .transpose()
+            .map_err(|_| plan_datafusion_err!("invalid value for `msgpack.decimal_encoding`"))?
+            .unwrap_or_default();
+
+        Ok(Self {
+            into_unstructured_json,
+            timestamp_format,
+            decimal_encoding,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DecimalEncoding, Format, MsgPackFormat, TimestampFormat};
+    use serde_json::json;
+
+    #[test]
+    fn msgpack_format_has_expected_defaults() {
+        let format = Format::MsgPack(MsgPackFormat::default());
+
+        assert_eq!(format.name(), "msgpack");
+        assert!(!format.is_updating());
+
+        let Format::MsgPack(msgpack) = format else {
+            panic!("expected msgpack format");
+        };
+
+        assert!(!msgpack.into_unstructured_json);
+        assert_eq!(msgpack.timestamp_format, TimestampFormat::RFC3339);
+        assert_eq!(msgpack.decimal_encoding, DecimalEncoding::Number);
+
+        assert_eq!(
+            serde_json::to_value(Format::MsgPack(MsgPackFormat::default())).unwrap(),
+            json!({
+                "type": "msgpack",
+                "into_unstructured_json": false,
+                "timestamp_format": "rfc3339",
+                "decimal_encoding": "number"
+            })
+        );
+        assert!(serde_json::from_value::<Format>(json!({ "type": "msgpack" })).is_ok());
+        assert!(serde_json::from_value::<Format>(json!({ "type": "msg_pack" })).is_ok());
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, ToSchema)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Format {
@@ -400,6 +477,9 @@ pub enum Format {
     Avro(AvroFormat),
     #[schema(title = "Protobuf")]
     Protobuf(ProtobufFormat),
+    #[serde(rename = "msgpack", alias = "msg_pack")]
+    #[schema(title = "MsgPack")]
+    MsgPack(MsgPackFormat),
     #[schema(title = "Parquet")]
     Parquet(ParquetFormat),
     #[schema(title = "RawString")]
@@ -420,6 +500,7 @@ impl Format {
             Format::Json(_) => "json",
             Format::Avro(_) => "avro",
             Format::Protobuf(_) => "protobuf",
+            Format::MsgPack(_) => "msgpack",
             Format::Parquet(_) => "parquet",
             Format::RawString(_) => "raw_string",
             Format::RawBytes(_) => "raw_bytes",
@@ -435,6 +516,7 @@ impl Format {
             "json" => Format::Json(JsonFormat::from_opts(false, opts)?),
             "debezium_json" => Format::Json(JsonFormat::from_opts(true, opts)?),
             "protobuf" => Format::Protobuf(ProtobufFormat::from_opts(opts)?),
+            "msgpack" | "msg_pack" => Format::MsgPack(MsgPackFormat::from_opts(opts)?),
             "avro" => Format::Avro(AvroFormat::from_opts(opts)?),
             "raw_string" => Format::RawString(RawStringFormat {}),
             "raw_bytes" => Format::RawBytes(RawBytesFormat {}),
@@ -450,6 +532,7 @@ impl Format {
             | Format::Avro(_)
             | Format::Parquet(_)
             | Format::RawString(_)
+            | Format::MsgPack(_)
             | Format::Protobuf(_) => false,
             Format::RawBytes(_) => false,
         }
