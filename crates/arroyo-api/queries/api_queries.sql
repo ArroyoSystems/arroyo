@@ -51,8 +51,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_tables.current_version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -62,6 +64,9 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND connection_table_versions.version = connection_tables.current_version
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id
     AND (connection_tables.created_at < (
@@ -78,8 +83,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_tables.current_version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -89,6 +96,9 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND connection_table_versions.version = connection_tables.current_version
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id
 ORDER BY connection_tables.created_at DESC;
@@ -100,8 +110,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_tables.current_version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -111,8 +123,64 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND connection_table_versions.version = connection_tables.current_version
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
+
+--! get_connection_table_version: DbConnectionTable
+SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
+    connection_tables.name as name,
+    connection_table_versions.created_at as created_at,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_tables.current_version as latest,
+    connection_profiles.pub_id as profile_id,
+    connection_profiles.name as profile_name,
+    connection_profiles.type as profile_type,
+    connection_profiles.config as profile_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+          AND connection_table_pipelines.connection_version = connection_table_versions.version
+    ) as consumer_count
+FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND connection_table_versions.version = :version
+LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
+
+--! create_connection_table_version(schema?)
+INSERT INTO connection_table_versions
+    (connection_table_id, version, config, schema, created_by)
+SELECT id, :version, :config, :schema, :created_by
+FROM connection_tables
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
+
+--! set_current_connection_table_version
+UPDATE connection_tables
+SET current_version = :version,
+    config = (
+        SELECT config FROM connection_table_versions
+        WHERE connection_table_id = connection_tables.id AND version = :version
+    ),
+    schema = (
+        SELECT schema FROM connection_table_versions
+        WHERE connection_table_id = connection_tables.id AND version = :version
+    )
+WHERE organization_id = :organization_id
+  AND pub_id = :pub_id
+  AND current_version = :expected_current_version
+  AND EXISTS (
+      SELECT 1 FROM connection_table_versions
+      WHERE connection_table_id = connection_tables.id AND version = :version
+  );
 
 --! delete_connection_table
 DELETE FROM connection_tables
@@ -155,8 +223,14 @@ FROM pipelines
 WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 --! add_pipeline_connection_table
-INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id)
-VALUES (:pub_id, :pipeline_id, :connection_table_id);
+INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id, connection_version)
+SELECT :pub_id, :pipeline_id, id, :connection_version
+FROM connection_tables
+WHERE id = :connection_table_id
+  AND EXISTS (
+      SELECT 1 FROM connection_table_versions
+      WHERE connection_table_id = connection_tables.id AND version = :connection_version
+  );
 
 --! delete_pipeline
 DELETE FROM pipelines

@@ -360,6 +360,8 @@ impl TryInto<ConnectionTable> for DbConnectionTable {
             id: self.id,
             pub_id: self.pub_id,
             name: self.name,
+            version: self.version,
+            latest: self.latest,
             created_at: to_micros(self.created_at),
             connection_profile: profile,
             connector: self.connector,
