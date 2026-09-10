@@ -23,7 +23,8 @@ use crate::connection_profiles::{
 };
 use crate::connection_tables::{
     __path_create_connection_table, __path_delete_connection_table, __path_get_connection_tables,
-    __path_test_connection_table, __path_test_schema,
+    __path_patch_connection_table, __path_test_connection_table, __path_test_schema,
+    ConnectionTablePatch,
 };
 use crate::connectors::__path_get_connectors;
 use crate::jobs::{
@@ -270,6 +271,7 @@ impl IntoResponse for HttpError {
         get_connection_profile_autocomplete,
         get_connection_tables,
         create_connection_table,
+        patch_connection_table,
         create_connection_profile,
         delete_connection_table,
         test_connection_table,
@@ -314,6 +316,7 @@ impl IntoResponse for HttpError {
         ConnectionAutocompleteResp,
         ConnectionProfileCollection,
         ConnectionTable,
+        ConnectionTablePatch,
         ConnectionTablePost,
         ConnectionTableCollection,
         ConnectionSchema,

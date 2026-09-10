@@ -575,6 +575,8 @@ pub struct ConnectionTable {
     #[serde(rename = "id")]
     pub pub_id: String,
     pub name: String,
+    pub version: i32,
+    pub latest: i32,
     pub created_at: u64,
     pub connector: String,
     pub connection_profile: Option<ConnectionProfile>,
