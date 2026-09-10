@@ -1,0 +1,40 @@
+crates/arroyo-api/src/pipelines.rs
+  s_d0272ff6ad58b6::t_9ab566748b9742 202-203
+  s_d0272ff6ad58b6::t_8eaedb97c9ea24 187,193-201,204-216,506
+crates/arroyo-api/src/cf_endpoints.rs
+  s_d0272ff6ad58b6::t_9a5706e7662d22 1246,1532-1561,1568-1574
+  s_974938792fb3c5::t_010144e758e604 1225
+  s_d0272ff6ad58b6::t_e9cd7c979d62bb 1575
+  s_d0272ff6ad58b6::t_c6841c9c873c32 907
+  s_974938792fb3c5::t_abddce455783e2 1230
+  s_974938792fb3c5::t_7771c1264a92d1 901,1228-1229,1232-1235
+  s_974938792fb3c5::t_62e87d0b9324dd 10,1226-1227,1231
+  s_d0272ff6ad58b6::t_8eaedb97c9ea24 1-3,908,912-913,915,923
+  s_974938792fb3c5::t_05837da1170cad 1236-1238
+  s_974938792fb3c5::t_aa3f7adc4a1c9c 1239
+  s_d0272ff6ad58b6::t_9ab566748b9742 1562-1567
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d6eb51bfd1954d59a738503a776a150c8500b77b",
+  "prompts": {},
+  "sessions": {
+    "s_974938792fb3c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f74b94525ffejBEfFeuaNTYaTx",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    },
+    "s_d0272ff6ad58b6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f79f71460ffeCUj3QKxkNd7tbV",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
