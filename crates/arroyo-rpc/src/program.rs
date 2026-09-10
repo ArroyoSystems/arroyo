@@ -59,7 +59,7 @@ impl ArrowProgram {
         Ok(parallelism)
     }
 
-    /// Produce a scheduling/legacy-transport copy, leaving persisted defaults intact.
+    /// Produce a scheduling/transport copy, leaving persisted defaults intact.
     pub fn with_parallelism_overrides(&self, overrides: &HashMap<u32, usize>) -> Result<Self> {
         let parallelism = self.effective_parallelism(overrides)?;
         let mut program = self.clone();

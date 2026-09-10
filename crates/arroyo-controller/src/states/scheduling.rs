@@ -590,6 +590,7 @@ impl State for Scheduling {
                             start_epoch,
                             min_epoch,
                             program: Some(program.clone()),
+                            program_version: None,
                             tasks: assignments.clone(),
                             job_controller_addr: leader_addr,
                             is_leader: leader_id == id,
