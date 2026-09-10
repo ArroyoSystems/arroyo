@@ -1,0 +1,59 @@
+crates/arroyo-api/src/pipelines.rs
+  s_d0272ff6ad58b6::t_8eaedb97c9ea24 187,193-201,204-216,506
+  s_d0272ff6ad58b6::t_9ab566748b9742 202-203
+crates/arroyo-rpc/src/lib.rs
+  s_d0272ff6ad58b6::t_ed530658dd5e97 333
+crates/arroyo-state/src/tables/table_manager.rs
+  s_d0272ff6ad58b6::t_e24b13eda3e3e1 8
+  s_974938792fb3c5::t_25a0529702e7c6 720-723
+  s_d0272ff6ad58b6::t_3c5004491d2988 665-693,696,700-701,724-739,744-757,759-762,764-767,769-771,775-776,802-803
+  s_d0272ff6ad58b6::t_ad5fe9ce3c7e5e 266,269,271-276,284,286,288-290,313,318
+  s_974938792fb3c5::t_cbb6b45860e451 243,268,277-280,695,768
+  s_974938792fb3c5::t_59d26ebd63597f 241-242,248,250
+  s_974938792fb3c5::t_2d6a77977aa8b7 259-261,758
+  s_d0272ff6ad58b6::t_9ab566748b9742 339,702-703,740-743,777-778,801
+  s_d0272ff6ad58b6::t_327a94899c7540 345
+  s_d0272ff6ad58b6::t_ed530658dd5e97 694,697-699,704-719,763,772-774,779-800
+  s_974938792fb3c5::t_a9859d063070fb 263,267
+  s_d0272ff6ad58b6::t_0a87ac5df7a3da 239,244-247,249,251-256,258,262,264-265,270,281-283,285,294-312,314-317,319-324,332-333,335,337-338,340-344,346-350,384-392
+  s_d0272ff6ad58b6::t_1cab9da115affc 257
+crates/arroyo-planner/src/lib_cf.rs
+  s_d0272ff6ad58b6::t_ed530658dd5e97 10,178,221
+crates/arroyo-api/src/cf_endpoints.rs
+  s_974938792fb3c5::t_62e87d0b9324dd 10,1218-1219,1223
+  s_d0272ff6ad58b6::t_9ab566748b9742 1554-1559
+  s_d0272ff6ad58b6::t_8eaedb97c9ea24 1-3,907,911-912,914,922
+  s_974938792fb3c5::t_7771c1264a92d1 900,936-940,1220-1221,1224-1227
+  s_d0272ff6ad58b6::t_c6841c9c873c32 906
+  s_d0272ff6ad58b6::t_9a5706e7662d22 1238,1524-1553,1560-1566
+  s_ff2e2d600f7e17::t_9de987572c3b8f 944
+  s_974938792fb3c5::t_8d308b52aa0652 941-943
+  s_974938792fb3c5::t_010144e758e604 1217
+  s_974938792fb3c5::t_abddce455783e2 1222
+  s_974938792fb3c5::t_05837da1170cad 1228-1230
+  s_d0272ff6ad58b6::t_e9cd7c979d62bb 1567
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2c5c92636db28080ad5936b147699b2708a1e781",
+  "prompts": {},
+  "sessions": {
+    "s_974938792fb3c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f74b94525ffejBEfFeuaNTYaTx",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_d0272ff6ad58b6": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f79f71460ffeCUj3QKxkNd7tbV",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
