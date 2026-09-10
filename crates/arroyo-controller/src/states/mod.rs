@@ -28,7 +28,6 @@ use self::stopping::Stopping;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
@@ -404,7 +403,8 @@ pub struct JobContext<'a> {
     pub config: JobConfig,
     pub pipeline_info: Arc<PipelineInfo>,
     pub status: &'a mut JobStatus,
-    pub program: &'a mut LogicalProgram,
+    pub program: &'a ArrowProgram,
+    pub running_parallelism: Option<HashMap<u32, usize>>,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
@@ -734,7 +734,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeli
 async fn run_to_completion(
     job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
-    mut program: LogicalProgram,
+    program: ArrowProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
     db: DatabaseSource,
@@ -770,7 +770,8 @@ async fn run_to_completion(
         config: job_config,
         pipeline_info,
         status: &mut status,
-        program: &mut program,
+        program: &program,
+        running_parallelism: None,
         db: db.clone(),
         scheduler,
         rx: &mut rx,
@@ -828,18 +829,18 @@ impl StateMachine {
         this
     }
 
-    fn decode_program(bs: &[u8]) -> anyhow::Result<LogicalProgram> {
-        ArrowProgram::decode(bs)
-            .map_err(|e| anyhow!("Failed to decode program: {:?}", e))?
-            .try_into()
-            .map_err(|e| anyhow!("Failed to construct graph from program: {:?}", e))
+    fn decode_program(bs: &[u8]) -> anyhow::Result<ArrowProgram> {
+        let program =
+            ArrowProgram::decode(bs).map_err(|e| anyhow!("Failed to decode program: {e}"))?;
+        program.validate_topology()?;
+        Ok(program)
     }
 
     async fn get_program(
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<(LogicalProgram, PipelineInfo)>> {
+    ) -> anyhow::Result<Option<(ArrowProgram, PipelineInfo)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?

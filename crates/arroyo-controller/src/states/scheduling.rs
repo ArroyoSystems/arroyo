@@ -20,7 +20,6 @@ use crate::{
     states::{StateError, fatal},
 };
 use anyhow::{anyhow, bail};
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::{LeaderContext, grpc_channel_builder};
@@ -53,27 +52,19 @@ enum WorkerState {
 #[derive(Debug)]
 pub struct Scheduling {}
 
-fn slots_for_job(job: &LogicalProgram) -> usize {
-    job.graph
-        .node_weights()
-        .map(|n| n.parallelism)
-        .max()
-        .unwrap_or(0)
-}
-
 fn compute_assignments(
     workers: Vec<&WorkerStatus>,
-    program: &LogicalProgram,
+    program: &api::ArrowProgram,
 ) -> Vec<TaskAssignment> {
     let mut assignments = vec![];
-    for node in program.graph.node_weights() {
+    for node in &program.nodes {
         let mut worker_idx = 0;
         let mut current_count = 0;
 
         for i in 0..node.parallelism {
             assignments.push(TaskAssignment {
                 task_id: node.node_id,
-                subtask_idx: i as u32,
+                subtask_idx: i,
                 worker_id: workers[worker_idx].id.0,
                 worker_addr: workers[worker_idx].data_address.clone(),
                 worker_rpc: workers[worker_idx].rpc_address.clone(),
@@ -88,6 +79,89 @@ fn compute_assignments(
     }
 
     assignments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::states::StateMachine;
+    use prost::Message;
+
+    #[test]
+    fn protobuf_scheduling_preserves_task_placement() {
+        let hex = include_str!("../../../arroyo-rpc/testdata/v2_program.hex").trim();
+        let bytes: Vec<_> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        let mut opaque_program = api::ArrowProgram::decode(bytes.as_slice()).unwrap();
+        opaque_program.nodes[0].operators[0].operator_name = "UnknownRuntimeOperator".into();
+        opaque_program.edges[0]
+            .schema
+            .as_mut()
+            .unwrap()
+            .arrow_schema = "unreadable schema".into();
+        let program = StateMachine::decode_program(&opaque_program.encode_to_vec()).unwrap();
+        let workers: Vec<_> = (0..2)
+            .map(|id| WorkerStatus {
+                id: WorkerId(id),
+                machine_id: MachineId(Arc::new(format!("machine-{id}"))),
+                rpc_address: format!("rpc-{id}"),
+                data_address: format!("data-{id}"),
+                slots: 2,
+                state: WorkerState::Connected,
+            })
+            .collect();
+
+        for (overrides, expected) in [
+            (
+                HashMap::new(),
+                vec![
+                    (10, 0, 0),
+                    (10, 1, 0),
+                    (20, 0, 0),
+                    (20, 1, 0),
+                    (20, 2, 1),
+                    (30, 0, 0),
+                ],
+            ),
+            (
+                HashMap::from([(10, 4), (30, 2)]),
+                vec![
+                    (10, 0, 0),
+                    (10, 1, 0),
+                    (10, 2, 1),
+                    (10, 3, 1),
+                    (20, 0, 0),
+                    (20, 1, 0),
+                    (20, 2, 1),
+                    (30, 0, 0),
+                    (30, 1, 0),
+                ],
+            ),
+        ] {
+            let scheduled = program.with_parallelism_overrides(&overrides).unwrap();
+            let assignments = compute_assignments(workers.iter().collect(), &scheduled);
+            assert_eq!(assignments.len(), scheduled.task_count());
+            assert_eq!(
+                assignments
+                    .iter()
+                    .map(|a| (a.task_id, a.subtask_idx, a.worker_id))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for assignment in assignments {
+                assert_eq!(
+                    assignment.worker_addr,
+                    format!("data-{}", assignment.worker_id)
+                );
+                assert_eq!(
+                    assignment.worker_rpc,
+                    format!("rpc-{}", assignment.worker_id)
+                );
+            }
+        }
+    }
 }
 
 async fn handle_worker_connect<'a>(
@@ -317,14 +391,12 @@ impl Scheduling {
             match ctx
                 .scheduler
                 .start_workers(StartPipelineReq {
-                    program: ctx.program.clone(),
                     wasm_path: "".to_string(),
                     pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
                     organization_id: ctx.config.organization_id.clone(),
                     job_id: JobId(ctx.config.id.clone()),
                     generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
-                    hash: ctx.program.get_hash(),
                     slots: slots_needed,
                     env_vars: env_vars.clone(),
                     pipeline_tags: ctx.pipeline_info.tags.clone(),
@@ -403,10 +475,11 @@ impl State for Scheduling {
             )
         }
 
-        ctx.program
-            .update_parallelism(&ctx.config.parallelism_overrides);
-
-        let slots_needed: usize = slots_for_job(&*ctx.program);
+        let program = ctx
+            .program
+            .with_parallelism_overrides(&ctx.config.parallelism_overrides)
+            .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
+        let slots_needed = program.slots_required();
         self = self.start_workers(ctx, slots_needed).await?;
 
         let checkpoint_info = match get_and_register_checkpoint_info_leader(ctx).await {
@@ -474,9 +547,8 @@ impl State for Scheduling {
 
         // Compute assignments and send to workers
 
-        let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
+        let assignments = compute_assignments(workers.values().collect(), &program);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
-        let program = api::ArrowProgram::from(ctx.program.clone());
 
         let start_epoch = checkpoint_info.as_ref().map(|info| info.epoch).unwrap_or(0);
         let min_epoch = checkpoint_info
@@ -569,7 +641,7 @@ impl State for Scheduling {
         // Now wait until all tasks are running
         let start = Instant::now();
         let mut started_tasks = HashSet::new();
-        while started_tasks.len() < ctx.program.task_count() {
+        while started_tasks.len() < program.task_count() {
             let timeout = pipeline_config
                 .task_startup_time
                 .min(ctx.config.ttl.unwrap_or(*pipeline_config.task_startup_time))
@@ -670,7 +742,8 @@ impl State for Scheduling {
             }
         }
 
-        ctx.status.tasks = Some(ctx.program.task_count() as i32);
+        ctx.status.tasks = Some(program.task_count() as i32);
+        ctx.running_parallelism = Some(program.tasks_per_node());
 
         let leader_manager = match LeaderManager::connect(
             JobId(ctx.config.id.clone()),

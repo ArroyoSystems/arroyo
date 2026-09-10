@@ -1,5 +1,4 @@
 use anyhow::bail;
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
@@ -97,12 +96,10 @@ const PROCESS_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct StartPipelineReq {
     pub name: String,
-    pub program: LogicalProgram,
     pub wasm_path: String,
     pub pipeline_id: PipelineId,
     pub organization_id: String,
     pub job_id: JobId,
-    pub hash: String,
     pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
