@@ -1,0 +1,19 @@
+crates/arroyo-api/src/cf_endpoints.rs
+  s_974938792fb3c5::t_eaf42a301cfb69 936-944
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26472e46b3e993a21147e370ffb8ca8b215a5404",
+  "prompts": {},
+  "sessions": {
+    "s_974938792fb3c5": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f74b94525ffejBEfFeuaNTYaTx",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
