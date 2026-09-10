@@ -28,14 +28,12 @@ pub(crate) fn validate_start_execution_program(
     if program_version != SUPPORTED_PROGRAM_VERSION {
         return Err(ProgramAdmissionError::UnsupportedVersion(program_version));
     }
-    let program = req.program.as_ref().ok_or_else(|| {
-        ProgramAdmissionError::InvalidArgument(
+    if req.program.is_none() {
+        return Err(ProgramAdmissionError::InvalidArgument(
             "start execution request is missing a program".into(),
-        )
-    })?;
-    program
-        .validate_topology()
-        .map_err(|error| ProgramAdmissionError::InvalidArgument(error.to_string()))
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -45,17 +43,9 @@ mod tests {
     use prost::Message;
     use tonic::Code;
 
-    fn fixture_bytes() -> Vec<u8> {
-        let hex = include_str!("../../arroyo-rpc/testdata/v2_program.hex").trim();
-        (0..hex.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
-            .collect()
-    }
-
     fn legacy_request() -> StartExecutionReq {
         StartExecutionReq {
-            program: Some(ArrowProgram::decode(fixture_bytes().as_slice()).unwrap()),
+            program: Some(ArrowProgram::default()),
             ..Default::default()
         }
     }
@@ -72,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_versions_even_with_a_valid_program() {
+    fn rejects_unsupported_versions() {
         for version in [0, 3, u32::MAX] {
             let mut req = legacy_request();
             req.program_version = Some(version);
@@ -91,17 +81,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_program_or_invalid_topology() {
+    fn rejects_missing_program() {
         let error = validate_start_execution_program(&StartExecutionReq::default())
             .unwrap_err()
             .into_status();
         assert_eq!(error.code(), Code::InvalidArgument);
         assert!(error.message().contains("missing a program"));
-        let mut req = legacy_request();
-        req.program.as_mut().unwrap().nodes[1].node_id = 10;
-        let error = validate_start_execution_program(&req)
-            .unwrap_err()
-            .into_status();
-        assert!(error.message().contains("duplicate node id"));
     }
 }

@@ -65,15 +65,7 @@ impl State for LeaderRunning {
                 .await;
         }
 
-        // After controller recovery, use the persisted configuration for the
-        // existing generation. After scheduling, retain the actual assignments.
-        let operator_parallelism = match &ctx.running_parallelism {
-            Some(parallelism) => parallelism.clone(),
-            None => ctx
-                .program
-                .effective_parallelism(&ctx.config.parallelism_overrides)
-                .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?,
-        };
+        let operator_parallelism = ctx.program.decoded.tasks_per_node();
 
         loop {
             if ctx.leader_manager().last_heartbeat.elapsed()
@@ -133,7 +125,7 @@ impl State for LeaderRunning {
                                 ));
                             }
 
-                            let desired = ctx.program.effective_parallelism(&c.parallelism_overrides)
+                            let desired = ctx.program.decoded.effective_parallelism(&c.parallelism_overrides)
                                 .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
                             if desired != operator_parallelism {
                                 return Ok(Transition::next(*self, LeaderRescaling {}));

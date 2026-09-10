@@ -38,6 +38,7 @@ use tracing::{debug, info, warn};
 
 //pub mod compiler;
 pub mod leader_manager;
+mod program;
 pub mod schedulers;
 mod states;
 

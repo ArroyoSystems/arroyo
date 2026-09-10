@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
-use arroyo_rpc::grpc::api::ArrowProgram;
+use crate::program::ControllerProgram;
 
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -36,7 +36,6 @@ use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
-use prost::Message;
 
 pub(crate) mod compiling;
 pub(crate) mod failing;
@@ -403,8 +402,7 @@ pub struct JobContext<'a> {
     pub config: JobConfig,
     pub pipeline_info: Arc<PipelineInfo>,
     pub status: &'a mut JobStatus,
-    pub program: &'a ArrowProgram,
-    pub running_parallelism: Option<HashMap<u32, usize>>,
+    pub program: &'a mut ControllerProgram,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
@@ -734,7 +732,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeli
 async fn run_to_completion(
     job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
-    program: ArrowProgram,
+    mut program: ControllerProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
     db: DatabaseSource,
@@ -770,8 +768,7 @@ async fn run_to_completion(
         config: job_config,
         pipeline_info,
         status: &mut status,
-        program: &program,
-        running_parallelism: None,
+        program: &mut program,
         db: db.clone(),
         scheduler,
         rx: &mut rx,
@@ -829,18 +826,11 @@ impl StateMachine {
         this
     }
 
-    fn decode_program(bs: &[u8]) -> anyhow::Result<ArrowProgram> {
-        let program =
-            ArrowProgram::decode(bs).map_err(|e| anyhow!("Failed to decode program: {e}"))?;
-        program.validate_topology()?;
-        Ok(program)
-    }
-
     async fn get_program(
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<(ArrowProgram, PipelineInfo)>> {
+    ) -> anyhow::Result<Option<(ControllerProgram, PipelineInfo)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?
@@ -861,9 +851,9 @@ impl StateMachine {
             tags,
         };
 
-        Ok(if res.proto_version == 2 {
-            match Self::decode_program(&res.program) {
-                Ok(p) => Some((p, info)),
+        Ok(
+            match ControllerProgram::from_bytes(res.proto_version, &res.program) {
+                Ok(program) => Some((program, info)),
                 Err(e) => {
                     warn!(
                         %job_id,
@@ -873,10 +863,8 @@ impl StateMachine {
                     );
                     None
                 }
-            }
-        } else {
-            None
-        })
+            },
+        )
     }
 
     async fn start(&mut self, mut status: JobStatus, shutdown_guard: ShutdownGuard) {
