@@ -1,0 +1,22 @@
+crates/arroyo-api/src/cf_endpoints.rs
+  s_f2d8e30b433bfc::t_d05dab799e376e 889
+  s_f2d8e30b433bfc::t_98014ee0184f58 7-8
+crates/arroyo-api/src/rest.rs
+  s_f2d8e30b433bfc::t_d05dab799e376e 15,93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8d057353445152b208167fe7876d8bd70f0336f1",
+  "prompts": {},
+  "sessions": {
+    "s_f2d8e30b433bfc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f743c1aa2ffeHBYw4Kj7iwqUpl",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
