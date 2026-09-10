@@ -1,0 +1,27 @@
+crates/arroyo-api/migrations/V33__connection_table_versions.sql
+  s_88aca95bf75659::t_2bec2cdcf18a34 1-43
+crates/arroyo-api/queries/api_queries.sql
+  s_88aca95bf75659::t_21b8c82fe54f40 54-57,67-69,86-89,99-101,113-116,126-128,132-184,226-233
+crates/arroyo-api/sqlite_migrations/V11__connection_table_versions.sql
+  s_88aca95bf75659::t_9d47acc7ee1ed8 1-55
+crates/arroyo-api/src/connection_tables.rs
+  s_88aca95bf75659::t_c9d3331bd91212 363-364
+crates/arroyo-rpc/src/api_types/connections.rs
+  s_88aca95bf75659::t_6d88dc7412e4ab 578-579
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "18ebdae8d94bc1e362a1755bc021226c61ae1c97",
+  "prompts": {},
+  "sessions": {
+    "s_88aca95bf75659": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08cfc-17c1-7c93-8f06-9d35330da4f6",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
