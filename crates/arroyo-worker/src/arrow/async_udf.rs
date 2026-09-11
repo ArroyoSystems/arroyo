@@ -258,13 +258,19 @@ impl ArrowOperator for AsyncUdfOperator {
 
         // start futures for the recovered input data
         for (id, row) in &self.inputs {
+            let batch = RecordBatch::try_new(
+                ctx.in_schemas[0].schema.clone(),
+                self.input_row_converter.convert_rows([row.row()])?,
+            )?;
             let args = self
-                .input_row_converter
-                .convert_rows([row.row()].into_iter())
-                .unwrap()
-                .into_iter()
-                .map(|t| t.to_data())
-                .collect();
+                .input_exprs
+                .iter()
+                .map(|expr| {
+                    expr.evaluate(&batch)?
+                        .into_array(batch.num_rows())
+                        .map(|array| array.to_data())
+                })
+                .try_collect()?;
             self.udf.send(*id, args).await?;
         }
 
@@ -336,11 +342,7 @@ impl ArrowOperator for AsyncUdfOperator {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let Some((ids, results)) = self
-            .udf
-            .drain_results()
-            .expect("failed to get results from async UDF executor")
-        else {
+        let Some((ids, results)) = self.udf.drain_results()? else {
             return Ok(());
         };
 
@@ -422,10 +424,11 @@ impl ArrowOperator for AsyncUdfOperator {
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
-            while !self.inputs.is_empty() && !self.outputs.is_empty() {
+            while !self.inputs.is_empty() {
                 self.handle_tick(0, ctx, collector).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
+            self.flush_output(ctx, collector).await?;
         }
 
         Ok(())

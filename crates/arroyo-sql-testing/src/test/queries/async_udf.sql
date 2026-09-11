@@ -20,5 +20,5 @@ CREATE TABLE double_negative_udf
 );
 
 INSERT INTO double_negative_udf
-SELECT double_negative(counter)
+SELECT async_double_negative(counter)
 FROM impulse_source;

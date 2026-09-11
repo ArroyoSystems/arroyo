@@ -80,6 +80,11 @@ pub async fn send(handle: SendableFfiAsyncUdfHandle, id: u64, arrays: FfiArrays)
 
 pub fn drain_results(handle: SendableFfiAsyncUdfHandle) -> DrainResult {
     let handle = unsafe { &mut *(handle.ptr as *mut AsyncUdfHandle) };
+    // The runtime owns the receiver; a user future can panic without
+    // poisoning the results mutex.
+    if handle.tx.is_closed() {
+        return DrainResult::Error;
+    }
     match handle.results.lock() {
         Ok(mut data) => {
             if data.0.is_empty() {
