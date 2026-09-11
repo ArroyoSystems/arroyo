@@ -421,7 +421,7 @@ impl State for Scheduling {
         let worker_connects = Arc::new(Mutex::new(HashMap::new()));
         let mut handles = vec![];
 
-        let pipeline_config = &config().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         let start = Instant::now();
         loop {
@@ -490,7 +490,8 @@ impl State for Scheduling {
             .map(|(id, status)| (*id, status.rpc_address.clone()))
             .unwrap();
 
-        let checkpoint_interval_micros = ctx.config.checkpoint_interval.as_micros() as u64;
+        let pipeline_worker_config_json = serde_json::to_string(&pipeline_config.worker)
+            .map_err(|e| fatal("failed to serialize pipeline worker config", e.into()))?;
 
         let tasks: Vec<_> = worker_connects
             .into_iter()
@@ -502,6 +503,7 @@ impl State for Scheduling {
                 let program = program.clone();
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
                 let leader_addr = leader_addr.clone();
+                let pipeline_worker_config_json = pipeline_worker_config_json.clone();
                 let checkpoint_manifest_ref = checkpoint_info.as_ref().map(|ci| ci.id.clone());
                 tokio::spawn(async move {
                     info!(
@@ -522,8 +524,8 @@ impl State for Scheduling {
                             job_controller_addr: leader_addr,
                             is_leader: leader_id == id,
                             wait_for_leader: true,
-                            checkpoint_interval_micros,
                             checkpoint_manifest_ref: checkpoint_manifest_ref.clone(),
+                            pipeline_worker_config_json,
                         }))
                         .await
                     {

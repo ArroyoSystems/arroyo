@@ -489,9 +489,12 @@ message StartExecutionReq {
   // Always send true so older workers wait for job_controller_init before running.
   // New workers always wait for the leader and ignore this field.
   bool wait_for_leader = 8;
-  uint64 checkpoint_interval_micros = 9;
+  reserved 9;
+  reserved "checkpoint_interval_micros";
   // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;
+  // JSON-encoded config.PipelineWorkerConfigs
+  string pipeline_worker_config_json = 11;
 }
 
 message StartExecutionResp {

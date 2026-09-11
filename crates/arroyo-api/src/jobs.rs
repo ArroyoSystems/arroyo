@@ -119,27 +119,13 @@ fn operator_checkpoint_groups(
 pub(crate) async fn create_job(
     pipeline_name: &str,
     pipeline_id: i64,
-    checkpoint_interval: Duration,
     preview: bool,
     auth: &AuthData,
     db: &DatabaseSource,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
-    let checkpoint_interval = if preview {
-        Duration::from_secs(24 * 60 * 60)
-    } else {
-        checkpoint_interval
-    };
-
-    if checkpoint_interval < Duration::from_secs(1)
-        || checkpoint_interval > Duration::from_secs(24 * 60 * 60)
-    {
-        return Err(bad_request(
-            "Checkpoint_interval_micros must be between 1 second and 1 day.".to_string(),
-        ));
-    }
-
     let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
         .await?
         .iter()
@@ -174,7 +160,6 @@ pub(crate) async fn create_job(
         &pipeline_name,
         &auth.user_id,
         &pipeline_id,
-        &(checkpoint_interval.as_micros() as i64),
         &(if preview {
             Some(PREVIEW_TTL.as_micros() as i64)
         } else {
@@ -182,6 +167,7 @@ pub(crate) async fn create_job(
         }),
         &env_vars_json,
         &scheduler_config,
+        &pipeline_config,
     )
     .await?;
 
@@ -674,12 +660,12 @@ mod tests {
                     ttl_micros INTEGER,
                     stop TEXT DEFAULT 'none' NOT NULL,
                     parallelism_overrides TEXT DEFAULT '{}' NOT NULL,
-                    checkpoint_interval_micros INTEGER DEFAULT 10000000 NOT NULL,
                     pipeline_id INTEGER NOT NULL,
                     restart_nonce INTEGER DEFAULT 0 NOT NULL,
                     restart_mode TEXT DEFAULT 'safe' NOT NULL,
                     env_vars TEXT DEFAULT '{}' NOT NULL,
-                    scheduler_config TEXT DEFAULT '{}' NOT NULL
+                    scheduler_config TEXT DEFAULT '{}' NOT NULL,
+                    pipeline_config TEXT DEFAULT '{}' NOT NULL
                 );
                 CREATE TABLE job_statuses (
                     pub_id TEXT NOT NULL UNIQUE,
@@ -704,12 +690,13 @@ mod tests {
                     VALUES (1, 'pl_1', 'org_1');
                 INSERT INTO job_configs
                     (id, organization_id, pipeline_name, created_by, updated_by, ttl_micros, stop,
-                     parallelism_overrides, checkpoint_interval_micros, pipeline_id, restart_nonce,
-                     restart_mode, env_vars, scheduler_config)
+                     parallelism_overrides, pipeline_id, restart_nonce, restart_mode,
+                     env_vars, scheduler_config, pipeline_config)
                     VALUES
                     ('job_old', 'org_1', 'pipeline', 'user_1', 'user_1', 123, 'immediate',
-                     '{\"1\": 4}', 5000000, 1, 3, 'force',
-                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}');
+                     '{\"1\": 4}', 1, 3, 'force',
+                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}',
+                     '{\"allowed_restarts\": 3}');
                 INSERT INTO checkpoints (job_id) VALUES ('job_old');
                 INSERT INTO job_log_messages (job_id) VALUES ('job_old');",
             )
@@ -739,10 +726,10 @@ mod tests {
         };
         let connection = connection.lock().unwrap();
 
-        let job: (String, String, i64, String, String, String, String) = connection
+        let job: (String, String, i64, String, String, String, String, String) = connection
             .query_row(
                 "SELECT id, stop, restart_nonce, restart_mode, updated_by,
-                        env_vars, scheduler_config
+                        env_vars, scheduler_config, pipeline_config
                  FROM job_configs",
                 [],
                 |row| {
@@ -754,6 +741,7 @@ mod tests {
                         row.get(4)?,
                         row.get(5)?,
                         row.get(6)?,
+                        row.get(7)?,
                     ))
                 },
             )
@@ -768,6 +756,7 @@ mod tests {
                 "user_2".to_string(),
                 "{\"ENV\": \"value\"}".to_string(),
                 "{\"scheduler\": true}".to_string(),
+                "{\"allowed_restarts\": 3}".to_string(),
             )
         );
 

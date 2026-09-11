@@ -5,7 +5,7 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{PipelineConfig, config};
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, OutputData, RegisterNodeReq,
@@ -83,6 +83,7 @@ fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
+use crate::states::{StateError, fatal};
 use types::public::{RestartMode, StopMode};
 
 #[derive(PartialEq, Clone, Debug)]
@@ -92,7 +93,6 @@ pub struct JobConfig {
     pipeline_name: String,
     pipeline_id: i64,
     stop_mode: StopMode,
-    checkpoint_interval: Duration,
     ttl: Option<Duration>,
     parallelism_overrides: HashMap<u32, usize>,
     restart_nonce: i32,
@@ -100,10 +100,19 @@ pub struct JobConfig {
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
     /// Per-job scheduler configuration overlay as raw JSON (same
-    /// shape as the controller-wide scheduler config). The scheduler
-    /// interprets this; the controller treats it as opaque. An empty
-    /// object is the no-override case.
+    /// shape as the controller-wide scheduler config)
     scheduler_config: serde_json::Value,
+    /// The process-wide pipeline config with this job's overlay applied
+    pipeline_config: serde_json::Value,
+}
+
+impl JobConfig {
+    pub fn pipeline_config(&self) -> Result<PipelineConfig, StateError> {
+        config()
+            .pipeline
+            .try_merge(&self.pipeline_config)
+            .map_err(|e| fatal("invalid pipeline_config", e))
+    }
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -483,9 +492,6 @@ impl ControllerServer {
                         pipeline_id: p.pipeline_id,
                         pipeline_name: p.pipeline_name,
                         stop_mode: p.stop,
-                        checkpoint_interval: Duration::from_micros(
-                            p.checkpoint_interval_micros as u64,
-                        ),
                         ttl: p.ttl_micros.map(|t| Duration::from_micros(t as u64)),
                         parallelism_overrides: p
                             .parallelism_overrides
@@ -500,6 +506,7 @@ impl ControllerServer {
                         restart_mode: p.restart_mode,
                         env_vars: p.env_vars,
                         scheduler_config: p.scheduler_config,
+                        pipeline_config: p.pipeline_config,
                     };
 
                     let mut jobs = jobs.lock().await;

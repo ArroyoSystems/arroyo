@@ -298,7 +298,10 @@ impl Program {
             }
         }
 
-        let queue_size = config().worker.queue_size;
+        let queue_size = config()
+            .worker
+            .queue_size
+            .unwrap_or(config().pipeline.worker.queue_size);
 
         for idx in logical.edge_indices() {
             let edge = logical.edge_weight(idx).unwrap();

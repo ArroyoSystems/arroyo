@@ -454,7 +454,7 @@ pub async fn run(args: RunArgs) {
             c.controller.scheduler = Scheduler::Process;
         }
 
-        c.pipeline.default_sink = DefaultSink::Stdout;
+        c.pipeline.compiler.default_sink = DefaultSink::Stdout;
     });
 
     let db = db_source().await;

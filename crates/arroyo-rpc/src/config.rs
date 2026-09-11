@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use arc_swap::ArcSwapOption;
-use figment::Figment;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
+use figment::{Figment, providers};
 use k8s_openapi::api::core::v1::{
     EnvVar, LocalObjectReference, ResourceRequirements, Toleration, Volume, VolumeMount,
 };
@@ -236,9 +236,6 @@ pub struct Config {
     /// URL of an object store or filesystem for storing checkpoints
     pub checkpoint_url: String,
 
-    /// Default interval for checkpointing
-    pub default_checkpoint_interval: HumanReadableDuration,
-
     /// The endpoint of the controller, used by other services to connect to it. This must be set
     /// if running the controller on a separate machine from the other services or on a separate
     /// process with a non-standard port.
@@ -409,7 +406,7 @@ pub struct ControllerConfig {
     pub metrics: MetricsConfig,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct CompactionConfig {
     /// Whether to enable compaction for checkpoints
@@ -476,15 +473,15 @@ pub struct WorkerConfig {
     /// Name to identify this worker (e.g., e.g., its hostname or a pod name)
     pub name: Option<String>,
 
-    /// Size of the queues between nodes in the dataflow graph
-    pub queue_size: u32,
+    /// DEPRECATED -- use pipelines.queue-size
+    pub queue_size: Option<u32>,
 
     /// TLS configuration for worker TCP shuffling
     #[serde(default)]
     pub tls: Option<TlsConfig>,
 
-    /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
-    pub checkpoint_details_to_keep: u32,
+    /// DEPRECATED -- use pipelines.checkpoint-details-to-keep
+    pub checkpoint_details_to_keep: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -533,7 +530,7 @@ pub struct AdminConfig {
     pub allow_unauthenticated_metrics: bool,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum DefaultSink {
     #[default]
@@ -541,9 +538,10 @@ pub enum DefaultSink {
     Stdout,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+/// Runtime options that apply to a particular pipeline
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct PipelineConfig {
+pub struct PipelineWorkerConfigs {
     /// Batch size
     pub source_batch_size: usize,
 
@@ -554,9 +552,64 @@ pub struct PipelineConfig {
     /// Currently measured as raw input bytes.
     pub source_batch_max_bytes: Option<usize>,
 
+    /// Whether to persist deserialization errors to job_log_messages
+    pub store_deserialization_errors: bool,
+
+    /// Size of the queues between nodes in the dataflow graph
+    pub queue_size: u32,
+
+    /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
+    pub checkpoint_details_to_keep: u32,
+
+    pub compaction: CompactionConfig,
+
+    pub checkpoint: CheckpointConfig,
+}
+
+fn deserialize_checkpoint_interval<'de, D>(
+    deserializer: D,
+) -> Result<HumanReadableDuration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let interval = HumanReadableDuration::deserialize(deserializer)?;
+    if !(Duration::from_secs(1)..=Duration::from_secs(24 * 60 * 60)).contains(&interval.duration) {
+        return Err(de::Error::custom(
+            "checkpoint interval must be between 1 second and 1 day",
+        ));
+    }
+
+    Ok(interval)
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CheckpointConfig {
+    /// Checkpoint interval
+    #[serde(deserialize_with = "deserialize_checkpoint_interval")]
+    pub interval: HumanReadableDuration,
+}
+
+/// Options that affect the compiled pipeline program.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PipelineCompilerConfigs {
     /// How often to flush aggregates
     pub update_aggregate_flush_interval: HumanReadableDuration,
 
+    /// Default sink, for when none is specified
+    #[serde(default)]
+    pub default_sink: DefaultSink,
+
+    pub chaining: ChainingConfig,
+}
+
+/// Configs that apply to individual pipelines. Not that overrides for these are stored in the
+/// control plane's job_configs table, so changing or removing fields here can break existing
+/// pipelines.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PipelineConfig {
     /// How many restarts to allow before moving to failed (-1 for infinite)
     pub allowed_restarts: i32,
 
@@ -578,29 +631,28 @@ pub struct PipelineConfig {
     /// Maximum backoff delay for retryable state errors
     pub state_max_backoff: HumanReadableDuration,
 
-    /// Default sink, for when none is specified
+    /// Timeout for final (stopping) checkpoints
     #[serde(default)]
-    pub default_sink: DefaultSink,
+    pub stopping_timeout: Option<HumanReadableDuration>,
 
-    /// Whether to persist deserialization errors to job_log_messages
-    pub store_deserialization_errors: bool,
+    #[serde(flatten)]
+    pub compiler: PipelineCompilerConfigs,
 
-    pub chaining: ChainingConfig,
-
-    pub compaction: CompactionConfig,
-
-    pub checkpoint: CheckpointConfig,
+    #[serde(flatten)]
+    pub worker: PipelineWorkerConfigs,
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct CheckpointConfig {
-    /// Checkpoint timeout
-    #[serde(default)]
-    pub timeout: Option<HumanReadableDuration>,
+impl PipelineConfig {
+    pub fn try_merge(&self, overrides: &serde_json::Value) -> anyhow::Result<Self> {
+        let overrides = serde_json::to_string(overrides)?;
+        let figment =
+            Figment::from(providers::Serialized::defaults(self)).merge(Json::string(&overrides));
+
+        Ok(figment.extract()?)
+    }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ChainingConfig {
     /// Whether to enable operator chaining
@@ -842,7 +894,7 @@ impl KubernetesWorkerConfig {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct HumanReadableDuration {
     duration: Duration,
     original: String,
@@ -1054,7 +1106,13 @@ impl TlsConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{Config, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config};
+    use crate::config::{
+        Config, DEFAULT_CONFIG, DatabaseType, Scheduler, SchemaName, SqliteConfig, load_config,
+    };
+    use figment::{
+        Figment,
+        providers::{Format, Toml},
+    };
     use url::Url;
 
     #[test]
@@ -1114,6 +1172,79 @@ mod tests {
 
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_pipeline_config_try_merge() {
+        let config: Config = Figment::from(Toml::string(DEFAULT_CONFIG))
+            .extract()
+            .unwrap();
+        let merged = config
+            .pipeline
+            .try_merge(&serde_json::json!({
+                "allowed-restarts": 3,
+                "default-sink": "stdout",
+                "update-aggregate-flush-interval": "7s",
+                "chaining": {
+                    "enabled": false,
+                },
+                "compaction": {
+                    "enabled": true,
+                },
+                "checkpoint": {
+                    "interval": "5s",
+                },
+            }))
+            .unwrap();
+
+        assert_eq!(merged.allowed_restarts, 3);
+        assert_eq!(merged.compiler.default_sink, super::DefaultSink::Stdout);
+        assert!(!merged.compiler.chaining.enabled);
+        assert_eq!(
+            *merged.compiler.update_aggregate_flush_interval,
+            std::time::Duration::from_secs(7)
+        );
+        assert!(merged.worker.compaction.enabled);
+        assert_eq!(
+            merged.worker.compaction.checkpoints_to_compact,
+            config.pipeline.worker.compaction.checkpoints_to_compact
+        );
+        assert_eq!(
+            merged.worker.source_batch_size,
+            config.pipeline.worker.source_batch_size
+        );
+        assert_eq!(
+            *merged.worker.checkpoint.interval,
+            std::time::Duration::from_secs(5)
+        );
+
+        let encoded = serde_json::to_string(&merged.worker).unwrap();
+        let decoded: super::PipelineWorkerConfigs = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, merged.worker);
+
+        let encoded = serde_json::to_value(&merged).unwrap();
+        assert!(encoded.get("compiler").is_none());
+        assert_eq!(
+            encoded.pointer("/chaining/enabled"),
+            Some(&serde_json::Value::Bool(false))
+        );
+
+        assert!(
+            config
+                .pipeline
+                .try_merge(&serde_json::json!({
+                    "checkpoint": { "interval": "999ms" }
+                }))
+                .is_err()
+        );
+        assert!(
+            config
+                .pipeline
+                .try_merge(&serde_json::json!({
+                    "checkpoint": { "interval": "86401s" }
+                }))
+                .is_err()
+        );
     }
 
     #[test]
