@@ -1,0 +1,35 @@
+Cargo.lock
+  s_2e0230d3bd0f47::t_99a5b36e4a2d6f 681-690,2124,2234-2236,2924-2938,2981-2989,4149-4154,4218-4220,4302-4312,4883-4893,5215-5223,6186-6188,6853-6868,7254,7520-7530,8059,8768-8787,9677-9679,9750-9759,9790-9994,11183-11188,11534-11539,11746-11754,11761,11770-11785,11819-11824,11837-11842,11855-11860,11879-11884,11897-11902,11915-11920,11933-11938
+Cargo.toml
+  s_2e0230d3bd0f47::t_ff331b37903d31 29
+crates/arroyo-database/Cargo.toml
+  s_2e0230d3bd0f47::t_441816d99846ad 1-15
+crates/arroyo-database/README.md
+  s_2e0230d3bd0f47::t_cac60dc2e808b3 1-56
+crates/arroyo-database/src/database.rs
+  s_2e0230d3bd0f47::t_025a461d8fdebf 1-188
+crates/arroyo-database/src/error.rs
+  s_2e0230d3bd0f47::t_fe50cf95297f2e 1-31
+crates/arroyo-database/src/lib.rs
+  s_2e0230d3bd0f47::t_e40c5b53127d32 1-22
+crates/arroyo-database/src/query.rs
+  s_2e0230d3bd0f47::t_ae1a0a51adeaaf 1-26
+crates/arroyo-database/src/tests.rs
+  s_2e0230d3bd0f47::t_f17dd6e45f11f4 1-215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8df663c16dbc1ab1f0aed0c633f2ea68ed980e19",
+  "prompts": {},
+  "sessions": {
+    "s_2e0230d3bd0f47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09163-1978-7cd1-85c0-70a270b833ae",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
