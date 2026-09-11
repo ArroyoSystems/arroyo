@@ -6,12 +6,12 @@ impl ArrowProgram {
     /// Arroyo task parallelism, independent of DataFusion's local partitions.
     pub fn effective_parallelism(
         &self,
-        overrides: &HashMap<u32, usize>,
-    ) -> Result<HashMap<u32, usize>> {
+        overrides: &HashMap<u32, u32>,
+    ) -> Result<HashMap<u32, u32>> {
         let mut parallelism = self.tasks_per_node();
         for (&id, &value) in overrides {
             ensure!(
-                value > 0 && u32::try_from(value).is_ok(),
+                value > 0,
                 "invalid parallelism override {value} for node {id}"
             );
             let current = parallelism.get_mut(&id).ok_or_else(|| {
@@ -23,10 +23,10 @@ impl ArrowProgram {
     }
 
     /// Apply parallelism overrides in place, leaving unspecified nodes unchanged.
-    pub fn update_parallelism(&mut self, overrides: &HashMap<u32, usize>) -> Result<()> {
+    pub fn update_parallelism(&mut self, overrides: &HashMap<u32, u32>) -> Result<()> {
         let parallelism = self.effective_parallelism(overrides)?;
         for node in &mut self.nodes {
-            node.parallelism = parallelism[&node.node_id] as u32;
+            node.parallelism = parallelism[&node.node_id];
         }
         Ok(())
     }
@@ -41,15 +41,15 @@ impl ArrowProgram {
     pub fn slots_required(&self) -> usize {
         self.nodes
             .iter()
-            .map(|node| node.parallelism as usize)
+            .map(|node| node.parallelism)
             .max()
-            .unwrap_or(0)
+            .unwrap_or(0) as usize
     }
 
-    pub fn tasks_per_node(&self) -> HashMap<u32, usize> {
+    pub fn tasks_per_node(&self) -> HashMap<u32, u32> {
         self.nodes
             .iter()
-            .map(|node| (node.node_id, node.parallelism as usize))
+            .map(|node| (node.node_id, node.parallelism))
             .collect()
     }
 }

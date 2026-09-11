@@ -3,7 +3,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use std::{fmt::Debug, sync::Arc};
 
-use crate::program::ControllerProgram;
+use arroyo_rpc::grpc::api::ArrowProgram;
 
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use tracing::{debug, error, info, warn};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use cornucopia_async::DatabaseSource;
 
 use self::compiling::Compiling;
@@ -36,6 +36,7 @@ use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
+use prost::Message;
 
 pub(crate) mod compiling;
 pub(crate) mod failing;
@@ -397,6 +398,27 @@ pub fn controller_job_failure(
 use crate::leader_manager::LeaderManager;
 pub(crate) use leader_stop_if_desired_running;
 pub(crate) use stop_if_desired_non_running;
+
+/// The persisted program's protobuf scheduling view and serialization version.
+/// Runtime payloads remain opaque to the controller.
+/// Scheduling updates the decoded program's parallelism in memory.
+#[derive(Debug)]
+pub struct ControllerProgram {
+    pub decoded: ArrowProgram,
+    pub program_version: u32,
+}
+
+impl ControllerProgram {
+    pub fn from_bytes(program_version: i32, program_bytes: &[u8]) -> Result<Self> {
+        let program_version = u32::try_from(program_version).context("negative program version")?;
+        ensure!(program_version > 0, "program version must be non-zero");
+        let decoded = ArrowProgram::decode(program_bytes).context("decoding program topology")?;
+        Ok(Self {
+            decoded,
+            program_version,
+        })
+    }
+}
 
 pub struct JobContext<'a> {
     pub config: JobConfig,
