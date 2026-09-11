@@ -1,0 +1,21 @@
+Cargo.lock
+  s_0056b71aa4f276::t_47ed20ef9c4796 9823
+crates/arroyo-database/Cargo.toml
+  s_0056b71aa4f276::t_4bac8b26fc4619 12-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "51e74d9fe0fa9e1c4859926b44fd765c77618d61",
+  "prompts": {},
+  "sessions": {
+    "s_0056b71aa4f276": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a091a7-05ce-7252-89a2-e925dcbada36",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
