@@ -1,0 +1,39 @@
+crates/arroyo-controller/Cargo.toml
+  s_2e0230d3bd0f47::t_394a0bdea3173d 48
+crates/arroyo-controller/src/leader_manager.rs
+  s_2e0230d3bd0f47::t_d733f6a6ddf535 8,200,203,206,209
+crates/arroyo-controller/src/lib.rs
+  s_2e0230d3bd0f47::t_3ad72520e76f67 7-14,137-157,169,404-449,519-520,600-604
+crates/arroyo-controller/src/states/leader_restarting.rs
+  s_2e0230d3bd0f47::t_d8c6cead552249 7,27,56,60,105
+crates/arroyo-controller/src/states/leader_running.rs
+  s_2e0230d3bd0f47::t_013cf039df06f0 9,123
+crates/arroyo-controller/src/states/mod.rs
+  s_2e0230d3bd0f47::t_887a54fb489ed5 6-7,29,167,328,330,333,344,348,356,359,367,375,471-484,842-844
+crates/arroyo-database/README.md
+  s_2e0230d3bd0f47::t_8dea594b456866 46-61
+crates/arroyo-database/src/controller_queries.rs
+  s_2e0230d3bd0f47::t_bc83738cb591df 1-12,14-45,62-63,69-87,89,91-141,147-564
+crates/arroyo-database/src/error.rs
+  s_2e0230d3bd0f47::t_c53fa469955bb1 12-15
+crates/arroyo-database/src/lib.rs
+  s_2e0230d3bd0f47::t_f98f530cf752bf 12-13
+crates/arroyo/src/main.rs
+  s_2e0230d3bd0f47::t_26741e847a2629 12,310,312,314,450,465,475,477
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fa828067afa0f17cd97c60b0894b1e2bf59b9e55",
+  "prompts": {},
+  "sessions": {
+    "s_2e0230d3bd0f47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09163-1978-7cd1-85c0-70a270b833ae",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
