@@ -278,7 +278,10 @@ impl FileSystemSourceFunc {
                 self.read_line_file(ctx, collector, line_reader, obj_key, records_read)
                     .await
             }
-            Format::Avro(_) => todo!(),
+            Format::Avro(_) => {
+                self.read_avro_file(ctx, collector, storage_provider, obj_key)
+                    .await
+            }
             Format::Parquet(_) => {
                 let record_batch_stream = self
                     .get_record_batch_stream(
@@ -331,6 +334,54 @@ impl FileSystemSourceFunc {
                 }
             }
         }
+    }
+
+    async fn read_avro_file(
+        &mut self,
+        ctx: &mut SourceContext,
+        collector: &mut SourceCollector,
+        storage_provider: &StorageProvider,
+        obj_key: &String,
+    ) -> Result<Option<SourceFinishType>, DataflowError> {
+        // Avro files are self-describing object container files (header + embedded
+        // writer schema + one or more, possibly compressed, record blocks), so unlike
+        // JSON/Parquet we decode the whole file in a single call rather than streaming
+        // individual records/batches. This means checkpointing and resume happen at
+        // file granularity: a checkpoint can't land mid-file, and a restart re-reads
+        // any file that was in progress from the start.
+        // obj_key is already fully qualified (it came from storage_provider.list()), so we
+        // read it via the backing store directly rather than storage_provider.get(), which
+        // would re-apply the configured path prefix and look up the wrong key.
+        let bytes = storage_provider
+            .get_backing_store()
+            .get(&obj_key.as_str().into())
+            .await
+            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not read file {obj_key}"))?
+            .bytes()
+            .await
+            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not read file {obj_key}"))?;
+
+        collector
+            .deserialize_slice(&bytes, SystemTime::now(), None)
+            .await?;
+        collector.flush_buffer().await?;
+
+        info!("finished reading file {}", obj_key);
+        self.file_states
+            .insert(obj_key.to_string(), FileReadState::Finished);
+
+        // whole-file decoding above never yields to check for control messages, so give
+        // the framework a chance to process a pending checkpoint/stop before moving on
+        // to the next file.
+        if let Ok(control_message) = ctx.control_rx.try_recv()
+            && let Some(finish_type) = self
+                .process_control_message(ctx, collector, control_message)
+                .await
+        {
+            return Ok(Some(finish_type));
+        }
+
+        Ok(None)
     }
 
     async fn read_line_file(
