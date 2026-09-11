@@ -5735,6 +5735,7 @@ name = "integ"
 version = "0.17.0-dev"
 dependencies = [
  "anyhow",
+ "apache-avro 0.18.0",
  "arroyo-openapi",
  "rand 0.9.1",
  "rdkafka",

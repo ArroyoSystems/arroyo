@@ -842,3 +842,136 @@ async fn connection_table() {
     // delete topic
     delete_topic(&kafka_admin, &kafka_topic).await;
 }
+
+const AVRO_TEST_SCHEMA: &str = r#"
+{
+  "type": "record",
+  "name": "IntegAvroTest",
+  "fields": [
+    {"name": "id", "type": "long"},
+    {"name": "name", "type": "string"},
+    {"name": "score", "type": "double"}
+  ]
+}
+"#;
+
+fn write_avro_test_file(path: &std::path::Path, records: &[(i64, &str, f64)]) {
+    use apache_avro::Schema;
+    use apache_avro::types::Value;
+
+    let schema = Schema::parse_str(AVRO_TEST_SCHEMA).unwrap();
+    let file = std::fs::File::create(path).unwrap();
+    let mut writer = apache_avro::Writer::new(&schema, file);
+    for (id, name, score) in records {
+        let record = Value::Record(vec![
+            ("id".to_string(), Value::Long(*id)),
+            ("name".to_string(), Value::String((*name).to_string())),
+            ("score".to_string(), Value::Double(*score)),
+        ]);
+        writer.append(record).unwrap();
+    }
+    writer.flush().unwrap();
+}
+
+// Regression test for the FileSystem connector's Avro support (issue #1040): reads a small
+// Avro object container file from local disk and confirms the pipeline runs to completion
+// with no decode errors. Uses a blackhole sink rather than Kafka: this is a bounded source
+// that finishes almost immediately, and committing sinks (Kafka, filesystem/Parquet) only
+// flush on a checkpoint barrier that a fast-finishing bounded job isn't guaranteed to reach
+// before it naturally completes, and the worker is torn down (metrics endpoints start
+// returning 503) as soon as the job reaches "Finished" — so this only asserts on state and
+// job errors, which remain queryable after completion, rather than sink output or metrics.
+#[tokio::test]
+async fn avro_filesystem_source() {
+    let api_client = get_client();
+    let test_id: u32 = random();
+
+    let dir = std::env::temp_dir().join(format!("arroyo-integ-avro-{test_id}"));
+    std::fs::create_dir_all(&dir).expect("failed to create temp dir for avro test file");
+    let records = [(1i64, "alice", 9.5), (2, "bob", 7.25), (3, "carol", 10.0)];
+    write_avro_test_file(&dir.join("data.avro"), &records);
+
+    let query = format!(
+        r#"
+CREATE TABLE avro_source (
+    id BIGINT,
+    name TEXT,
+    score DOUBLE
+) WITH (
+    connector = 'filesystem',
+    type = 'source',
+    path = 'file://{}',
+    format = 'avro'
+);
+
+CREATE TABLE output (
+    id BIGINT,
+    name TEXT,
+    score DOUBLE
+) WITH (
+    connector = 'blackhole'
+);
+
+INSERT INTO output SELECT id, name, score FROM avro_source;
+"#,
+        dir.display()
+    );
+
+    let valid = api_client
+        .validate_query()
+        .body(ValidateQueryPost::builder().query(&query).udfs(vec![]))
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(valid.errors.is_empty());
+    assert!(
+        valid
+            .graph
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|n| n.description.contains("FileSystem")),
+        "expected a FileSystem source node in the query plan"
+    );
+
+    let pipeline_id = start_pipeline(test_id, &query, &[])
+        .await
+        .expect("failed to start pipeline");
+
+    let run_id = wait_for_state(&api_client, None, &pipeline_id, "Finished")
+        .await
+        .expect("pipeline should finish reading the avro file without error");
+
+    let jobs = api_client
+        .get_pipeline_jobs()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
+    let job = jobs.data.first().unwrap();
+    assert_eq!(job.run_id, run_id);
+
+    let errors = api_client
+        .get_job_errors()
+        .pipeline_id(&pipeline_id)
+        .job_id(&job.id)
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(
+        errors.data.len(),
+        0,
+        "avro source should decode the file without errors"
+    );
+
+    api_client
+        .delete_pipeline()
+        .id(&pipeline_id)
+        .send()
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+}
