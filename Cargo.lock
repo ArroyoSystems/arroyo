@@ -629,6 +629,7 @@ dependencies = [
  "tokio-rustls 0.25.0",
  "tokio-stream",
  "tokio-tungstenite",
+ "tokio-util",
  "tonic",
  "tracing",
  "typify 0.0.13",

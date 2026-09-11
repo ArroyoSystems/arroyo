@@ -5,6 +5,8 @@ use std::hash::{Hash, Hasher};
 use std::time::SystemTime;
 
 use anyhow::Result;
+use apache_avro::types::Value as AvroValue;
+use apache_avro::{Reader as AvroReader, Schema as AvroSchema, Writer as AvroWriter};
 use arrow::array::RecordBatch;
 
 use arrow::datatypes::SchemaRef;
@@ -22,8 +24,10 @@ use arroyo_operator::context::{SourceCollector, SourceContext};
 use regex::Regex;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::select;
+use tokio::sync::mpsc;
 use tokio_stream::Stream;
-use tokio_stream::wrappers::LinesStream;
+use tokio_stream::wrappers::{LinesStream, ReceiverStream};
+use tokio_util::io::{StreamReader, SyncIoBridge};
 use tracing::info;
 
 use crate::filesystem::config;
@@ -279,7 +283,12 @@ impl FileSystemSourceFunc {
                     .await
             }
             Format::Avro(_) => {
-                self.read_avro_file(ctx, collector, storage_provider, obj_key)
+                let avro_batch_stream = self
+                    .get_avro_batch_stream(storage_provider, obj_key.to_string())
+                    .await?
+                    .skip(records_read);
+
+                self.read_avro_file(ctx, collector, avro_batch_stream, obj_key, records_read)
                     .await
             }
             Format::Parquet(_) => {
@@ -336,52 +345,156 @@ impl FileSystemSourceFunc {
         }
     }
 
+    /// Number of Avro records re-encoded into each self-contained batch handed to the
+    /// deserializer; keeps memory bounded (independent of file size) and gives the
+    /// select! loop in `read_avro_file` regular opportunities to service checkpoint/stop
+    /// control messages while a large file is still being read. Matches the batch size
+    /// Parquet already uses (`with_batch_size(8192)` above).
+    const AVRO_BATCH_SIZE: usize = 8192;
+
+    async fn get_avro_batch_stream(
+        &mut self,
+        storage_provider: &StorageProvider,
+        path: String,
+    ) -> Result<Box<dyn Stream<Item = Result<Vec<u8>, DataflowError>> + Unpin + Send>, DataflowError>
+    {
+        // path is already fully qualified (it came from storage_provider.list()), so we
+        // read it via the backing store directly rather than storage_provider.get_as_stream(),
+        // which would re-apply the configured path prefix and look up the wrong key.
+        let get_result = storage_provider
+            .get_backing_store()
+            .get(&path.as_str().into())
+            .await
+            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not read file {path}"))?;
+
+        let stream_reader = StreamReader::new(get_result.into_stream());
+        let compression_reader: Box<dyn AsyncRead + Unpin + Send> =
+            match self.source.compression_format {
+                SourceFileCompressionFormat::Zstd => {
+                    Box::new(ZstdDecoder::new(BufReader::new(stream_reader)))
+                }
+                SourceFileCompressionFormat::Gzip => {
+                    Box::new(GzipDecoder::new(BufReader::new(stream_reader)))
+                }
+                SourceFileCompressionFormat::None => Box::new(BufReader::new(stream_reader)),
+            };
+        // apache_avro's Reader is a synchronous, blocking Iterator, so we bridge the async
+        // (decompressed) byte stream to a sync Read and decode it on a blocking thread,
+        // streaming bounded batches back re-encoded as small self-contained Avro object
+        // container files, so they can go through the same deserialize_slice() path a
+        // whole file would.
+        let sync_reader = SyncIoBridge::new(compression_reader);
+
+        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, DataflowError>>(2);
+        let path_for_errors = path;
+
+        tokio::task::spawn_blocking(move || {
+            let mut reader = match AvroReader::new(sync_reader) {
+                Ok(reader) => reader,
+                Err(err) => {
+                    let _ = tx.blocking_send(Err(connector_err!(
+                        User, NoRetry, source: err.into(),
+                        "invalid avro file {path_for_errors}"
+                    )));
+                    return;
+                }
+            };
+            let schema = reader.writer_schema().clone();
+
+            let mut batch = Vec::with_capacity(Self::AVRO_BATCH_SIZE);
+            for value in &mut reader {
+                let value = match value {
+                    Ok(value) => value,
+                    Err(err) => {
+                        let _ = tx.blocking_send(Err(connector_err!(
+                            User, NoRetry, source: err.into(),
+                            "invalid avro record in {path_for_errors}"
+                        )));
+                        return;
+                    }
+                };
+                batch.push(value);
+                if batch.len() >= Self::AVRO_BATCH_SIZE
+                    && !Self::send_avro_batch(&tx, &schema, std::mem::take(&mut batch))
+                {
+                    return;
+                }
+            }
+            if !batch.is_empty() {
+                Self::send_avro_batch(&tx, &schema, batch);
+            }
+        });
+
+        Ok(Box::new(ReceiverStream::new(rx)))
+    }
+
+    /// Re-encodes a batch of already-decoded Avro values as a fresh, self-contained object
+    /// container file and sends it to the async side. Returns `false` if the receiver has
+    /// gone away and decoding should stop.
+    fn send_avro_batch(
+        tx: &mpsc::Sender<Result<Vec<u8>, DataflowError>>,
+        schema: &AvroSchema,
+        batch: Vec<AvroValue>,
+    ) -> bool {
+        let mut buf = Vec::new();
+        let mut writer = AvroWriter::new(schema, &mut buf);
+        for value in batch {
+            if let Err(err) = writer.append(value) {
+                return tx
+                    .blocking_send(Err(connector_err!(
+                        User, NoRetry, source: err.into(), "failed to re-encode avro batch"
+                    )))
+                    .is_ok();
+            }
+        }
+        if let Err(err) = writer.flush() {
+            return tx
+                .blocking_send(Err(connector_err!(
+                    User, NoRetry, source: err.into(), "failed to flush avro batch"
+                )))
+                .is_ok();
+        }
+        drop(writer);
+        tx.blocking_send(Ok(buf)).is_ok()
+    }
+
     async fn read_avro_file(
         &mut self,
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
-        storage_provider: &StorageProvider,
+        mut avro_batch_stream: impl Stream<Item = Result<Vec<u8>, DataflowError>> + Unpin + Send,
         obj_key: &String,
+        mut records_read: usize,
     ) -> Result<Option<SourceFinishType>, DataflowError> {
-        // Avro files are self-describing object container files (header + embedded
-        // writer schema + one or more, possibly compressed, record blocks), so unlike
-        // JSON/Parquet we decode the whole file in a single call rather than streaming
-        // individual records/batches. This means checkpointing and resume happen at
-        // file granularity: a checkpoint can't land mid-file, and a restart re-reads
-        // any file that was in progress from the start.
-        // obj_key is already fully qualified (it came from storage_provider.list()), so we
-        // read it via the backing store directly rather than storage_provider.get(), which
-        // would re-apply the configured path prefix and look up the wrong key.
-        let bytes = storage_provider
-            .get_backing_store()
-            .get(&obj_key.as_str().into())
-            .await
-            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not read file {obj_key}"))?
-            .bytes()
-            .await
-            .map_err(|err| connector_err!(External, WithBackoff, source: err.into(), "could not read file {obj_key}"))?;
-
-        collector
-            .deserialize_slice(&bytes, SystemTime::now(), None)
-            .await?;
-        collector.flush_buffer().await?;
-
-        info!("finished reading file {}", obj_key);
-        self.file_states
-            .insert(obj_key.to_string(), FileReadState::Finished);
-
-        // whole-file decoding above never yields to check for control messages, so give
-        // the framework a chance to process a pending checkpoint/stop before moving on
-        // to the next file.
-        if let Ok(control_message) = ctx.control_rx.try_recv()
-            && let Some(finish_type) = self
-                .process_control_message(ctx, collector, control_message)
-                .await
-        {
-            return Ok(Some(finish_type));
+        loop {
+            select! {
+                item = avro_batch_stream.next() => {
+                    match item.transpose()? {
+                        Some(batch_bytes) => {
+                            collector.deserialize_slice(&batch_bytes, SystemTime::now(), None).await?;
+                            records_read += 1;
+                            if collector.should_flush() {
+                                collector.flush_buffer().await?;
+                            }
+                        }
+                        None => {
+                            info!("finished reading file {}", obj_key);
+                            collector.flush_buffer().await?;
+                            self.file_states.insert(obj_key.to_string(), FileReadState::Finished);
+                            return Ok(None);
+                        }
+                    }
+                },
+                msg_res = ctx.control_rx.recv() => {
+                    if let Some(control_message) = msg_res {
+                        self.file_states.insert(obj_key.to_string(), FileReadState::RecordsRead(records_read));
+                        if let Some(finish_type) = self.process_control_message(ctx, collector, control_message).await {
+                            return Ok(Some(finish_type))
+                        }
+                    }
+                }
+            }
         }
-
-        Ok(None)
     }
 
     async fn read_line_file(
