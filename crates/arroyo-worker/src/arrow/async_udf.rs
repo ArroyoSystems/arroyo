@@ -342,11 +342,7 @@ impl ArrowOperator for AsyncUdfOperator {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let Some((ids, results)) = self
-            .udf
-            .drain_results()
-            .expect("failed to get results from async UDF executor")
-        else {
+        let Some((ids, results)) = self.udf.drain_results()? else {
             return Ok(());
         };
 
