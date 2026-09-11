@@ -10,12 +10,15 @@ use arroyo_openapi::types::{
     PipelinePatch, PipelinePost, SchemaDefinition, StopType, Udf, ValidateQueryPost,
     ValidateUdfPost, builder,
 };
+use prost::Message as ProstMessage;
 use rand::random;
 use rdkafka::Message;
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic};
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{ClientConfig, ClientContext};
 use serde_json::json;
+use substrait::proto::Plan;
 use tracing::info;
 
 async fn wait_for_state(
@@ -372,6 +375,207 @@ async fn basic_pipeline() {
         .send()
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn substrait_pipeline() {
+    const SOURCE_UUID: &str = "2a2d2bf8-b03b-4f32-a53a-2ed07fa183ab";
+
+    let api_client = get_client();
+    let test_id: u32 = random();
+    let topic = format!("substrait_source_{test_id}");
+    let source_name = format!("substrait_source_{test_id}");
+    let sink_name = format!("substrait_sink_{test_id}");
+    let kafka_admin = create_kafka_admin();
+    create_topic(&kafka_admin, &topic).await;
+
+    let schema = r#"{
+        "type": "object",
+        "properties": {"a": {"type": "string"}},
+        "required": []
+    }"#;
+    let connection_schema: ConnectionSchema = ConnectionSchema::builder()
+        .fields(vec![])
+        .format(Format::Json {
+            compression: None,
+            confluent_schema_registry: None,
+            debezium: None,
+            decimal_encoding: None,
+            include_schema: None,
+            schema_id: None,
+            timestamp_format: None,
+            type_: JsonType::Json,
+            unstructured: None,
+        })
+        .definition(SchemaDefinition::JsonSchema {
+            schema: schema.to_string(),
+        })
+        .try_into()
+        .unwrap();
+    let profile = api_client
+        .create_connection_profile()
+        .body(
+            ConnectionProfilePost::builder()
+                .name(format!("substrait_kafka_{test_id}"))
+                .connector("kafka")
+                .config(json!({
+                    "authentication": {},
+                    "bootstrapServers": "localhost:9092",
+                    "schemaRegistryEnum": {}
+                })),
+        )
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    let source = api_client
+        .create_connection_table()
+        .body(
+            ConnectionTablePost::builder()
+                .name(source_name.clone())
+                .connector("kafka")
+                .schema(Some(connection_schema.clone()))
+                .config(json!({
+                    "type": {"offset": "earliest", "read_mode": "read_uncommitted"},
+                    "topic": topic
+                }))
+                .connection_profile_id(Some(profile.id.clone())),
+        )
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+    let sink = api_client
+        .create_connection_table()
+        .body(
+            ConnectionTablePost::builder()
+                .name(sink_name.clone())
+                .connector("blackhole")
+                .schema(Some(connection_schema))
+                .config(json!({})),
+        )
+        .send()
+        .await
+        .unwrap()
+        .into_inner();
+
+    let plan: Plan = serde_json::from_str(include_str!(
+        "../../arroyo-planner/src/test/fixtures/filter.substrait.json"
+    ))
+    .unwrap();
+    let metadata = json!({
+        "name": format!("substrait_pipeline_{test_id}"),
+        "source_bindings": {(SOURCE_UUID): source_name},
+        "sink": {"type": "named", "table": sink_name},
+        "parallelism": 1,
+        "checkpoint_interval_micros": 1_000_000
+    });
+    let endpoint = format!(
+        "{}/api/v1/pipelines/substrait",
+        env::var("API_ENDPOINT").unwrap_or_else(|_| "http://localhost:5115".to_string())
+    );
+    let pipeline: arroyo_openapi::types::Pipeline = reqwest::Client::new()
+        .post(endpoint)
+        .multipart(
+            reqwest::multipart::Form::new()
+                .part(
+                    "plan",
+                    reqwest::multipart::Part::bytes(plan.encode_to_vec())
+                        .file_name("plan.substrait"),
+                )
+                .text("metadata", metadata.to_string()),
+        )
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    wait_for_state(&api_client, None, &pipeline.id, "Running")
+        .await
+        .unwrap();
+    let producer: FutureProducer = ClientConfig::new()
+        .set("bootstrap.servers", "localhost:9092")
+        .create()
+        .unwrap();
+    producer
+        .send(
+            FutureRecord::to(&topic)
+                .payload(r#"{"a":"HELLO"}"#)
+                .key("substrait-test"),
+            Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+
+    let jobs = api_client
+        .get_pipeline_jobs()
+        .id(&pipeline.id)
+        .send()
+        .await
+        .unwrap();
+    let job = jobs.data.first().unwrap();
+    loop {
+        let metrics = api_client
+            .get_operator_metric_groups()
+            .pipeline_id(&pipeline.id)
+            .job_id(&job.id)
+            .send()
+            .await
+            .unwrap()
+            .into_inner();
+        if metrics.data.iter().any(|operator| {
+            operator.metric_groups.iter().any(|group| {
+                group.name == MetricName::MessagesSent
+                    && group.subtasks.iter().any(|subtask| {
+                        subtask
+                            .metrics
+                            .last()
+                            .is_some_and(|metric| metric.value > 0.0)
+                    })
+            })
+        }) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    patch_and_wait(
+        &pipeline.id,
+        None,
+        PipelinePatch::builder().stop(StopType::Immediate),
+        "Stopped",
+    )
+    .await
+    .unwrap();
+    api_client
+        .delete_pipeline()
+        .id(&pipeline.id)
+        .send()
+        .await
+        .unwrap();
+    api_client
+        .delete_connection_table()
+        .id(&source.id)
+        .send()
+        .await
+        .unwrap();
+    api_client
+        .delete_connection_table()
+        .id(&sink.id)
+        .send()
+        .await
+        .unwrap();
+    api_client
+        .delete_connection_profile()
+        .id(&profile.id)
+        .send()
+        .await
+        .unwrap();
+    delete_topic(&kafka_admin, &topic).await;
 }
 
 #[tokio::test]

@@ -14,6 +14,34 @@ pub struct ValidateQueryPost {
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
+pub struct ValidateSubstraitMetadata {
+    pub source_bindings: HashMap<String, String>,
+    pub sink: SubstraitSinkBinding,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct CreateSubstraitMetadata {
+    pub name: String,
+    pub source_bindings: HashMap<String, String>,
+    pub sink: SubstraitSinkBinding,
+    pub parallelism: u64,
+    pub checkpoint_interval_micros: Option<u64>,
+    pub state_url: Option<String>,
+    pub tags: Option<HashMap<String, String>>,
+    pub env_vars: Option<HashMap<String, String>>,
+    pub scheduler_config: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SubstraitSinkBinding {
+    Preview,
+    Named { table: String },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
     pub errors: Vec<SqlDiagnostic>,

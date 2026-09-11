@@ -15,6 +15,7 @@ arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
 
 datafusion = { workspace = true }
 datafusion-proto = { workspace = true }
+datafusion-substrait = { workspace = true }
 datafusion-functions = { workspace = true }
 datafusion-functions-json = { workspace = true }
 

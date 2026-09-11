@@ -9,6 +9,7 @@ pub mod physical;
 mod plan;
 mod rewriters;
 pub mod schemas;
+pub mod substrait;
 mod tables;
 pub mod types;
 pub mod udafs;
@@ -301,6 +302,20 @@ impl ArroyoSchemaProvider {
         self.tables.get_mut(&UniCase::new(table_name.into()))
     }
 
+    pub fn add_table_alias(&mut self, alias: impl Into<String>, table_name: &str) -> Result<()> {
+        let alias = alias.into();
+        if self.tables.contains_key(&UniCase::new(alias.clone())) {
+            return plan_err!("Table alias {alias} already exists");
+        }
+
+        let table = self
+            .get_table(table_name)
+            .cloned()
+            .ok_or_else(|| DataFusionError::Plan(format!("Table {table_name} not found")))?;
+        self.tables.insert(UniCase::new(alias), table);
+        Ok(())
+    }
+
     pub fn add_rust_udf(&mut self, body: &str, url: &str) -> anyhow::Result<String> {
         let parsed = ParsedUdfFile::try_parse(body)?;
 
@@ -554,6 +569,34 @@ pub struct PlannerError {
     pub diagnostics: Vec<SqlDiagnostic>,
 }
 
+fn planner_error(error: DataFusionError) -> PlannerError {
+    let diagnostics = error
+        .iter()
+        .map(|error| {
+            let diagnostic = error.diagnostic();
+            SqlDiagnostic {
+                message: diagnostic
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .unwrap_or_else(|| error.to_string()),
+                span: diagnostic.and_then(|diagnostic| {
+                    diagnostic.span.map(|span| SqlSpan {
+                        start: SqlLocation {
+                            line: span.start.line,
+                            column: span.start.column,
+                        },
+                        end: SqlLocation {
+                            line: span.end.line,
+                            column: span.end.column,
+                        },
+                    })
+                }),
+            }
+        })
+        .collect();
+
+    PlannerError { diagnostics }
+}
+
 pub async fn parse_and_get_program(
     query: &str,
     schema_provider: ArroyoSchemaProvider,
@@ -568,33 +611,7 @@ pub async fn parse_and_get_program(
     }
     parse_and_get_arrow_program(query, schema_provider, config)
         .await
-        .map_err(|e| {
-            let diagnostics = e
-                .iter()
-                .map(|error| {
-                    let diagnostic = error.diagnostic();
-                    SqlDiagnostic {
-                        message: diagnostic
-                            .map(|diagnostic| diagnostic.message.clone())
-                            .unwrap_or_else(|| error.to_string()),
-                        span: diagnostic.and_then(|diagnostic| {
-                            diagnostic.span.map(|span| SqlSpan {
-                                start: SqlLocation {
-                                    line: span.start.line,
-                                    column: span.start.column,
-                                },
-                                end: SqlLocation {
-                                    line: span.end.line,
-                                    column: span.end.column,
-                                },
-                            })
-                        }),
-                    }
-                })
-                .collect();
-
-            PlannerError { diagnostics }
-        })
+        .map_err(planner_error)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -822,12 +839,7 @@ pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
     Parser::parse_sql(&ArroyoDialect {}, sql)
 }
 
-pub async fn parse_and_get_arrow_program(
-    query: String,
-    mut schema_provider: ArroyoSchemaProvider,
-    // TODO: use config
-    _config: SqlConfig,
-) -> Result<CompiledSql> {
+fn planning_session_state() -> datafusion::execution::SessionState {
     let mut config = SessionConfig::new();
     config
         .options_mut()
@@ -839,32 +851,18 @@ pub async fn parse_and_get_arrow_program(
     config.options_mut().optimizer.repartition_joins = false;
     config.options_mut().execution.target_partitions = 1;
 
-    let session_state = SessionStateBuilder::new()
+    SessionStateBuilder::new()
         .with_config(config)
         .with_default_features()
         .with_physical_optimizer_rules(vec![])
-        .build();
+        .build()
+}
 
-    let mut inserts = vec![];
-    for statement in parse_sql(&query)? {
-        if try_handle_set_variable(&statement, &mut schema_provider)? {
-            continue;
-        }
-
-        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
-            schema_provider.insert_table(table);
-        } else {
-            inserts.push(Insert::try_from_statement(
-                &statement,
-                &mut schema_provider,
-            )?);
-        };
-    }
-
-    if inserts.is_empty() {
-        return plan_err!("The provided SQL does not contain a query");
-    }
-
+async fn compile_logical_plans(
+    inserts: Vec<Insert>,
+    mut schema_provider: ArroyoSchemaProvider,
+    session_state: datafusion::execution::SessionState,
+) -> Result<CompiledSql> {
     let mut used_connections = HashSet::new();
     let mut extensions = vec![];
 
@@ -975,6 +973,37 @@ pub async fn parse_and_get_arrow_program(
         program,
         connection_ids: used_connections.into_iter().collect(),
     })
+}
+
+pub async fn parse_and_get_arrow_program(
+    query: String,
+    mut schema_provider: ArroyoSchemaProvider,
+    // TODO: use config
+    _config: SqlConfig,
+) -> Result<CompiledSql> {
+    let session_state = planning_session_state();
+
+    let mut inserts = vec![];
+    for statement in parse_sql(&query)? {
+        if try_handle_set_variable(&statement, &mut schema_provider)? {
+            continue;
+        }
+
+        if let Some(table) = Table::try_from_statement(&statement, &schema_provider)? {
+            schema_provider.insert_table(table);
+        } else {
+            inserts.push(Insert::try_from_statement(
+                &statement,
+                &mut schema_provider,
+            )?);
+        };
+    }
+
+    if inserts.is_empty() {
+        return plan_err!("The provided SQL does not contain a query");
+    }
+
+    compile_logical_plans(inserts, schema_provider, session_state).await
 }
 
 #[derive(Clone)]

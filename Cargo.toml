@@ -51,6 +51,7 @@ ahash = { version = "=0.8.7" }
 datafusion = { version = "48.0.1" }
 datafusion-common = { version = "48.0.0" }
 datafusion-proto = { version = "48.0.0" }
+datafusion-substrait = { version = "48.0.1", features = ["protoc"] }
 datafusion-functions = { version = "48.0.0", features = ["crypto_expressions"] }
 datafusion-functions-window = {version = "48.0.0"}
 datafusion-functions-json = { version = "0.48.0" }
@@ -125,6 +126,7 @@ datafusion-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', br
 datafusion-physical-expr = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-physical-plan = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-proto = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
+datafusion-substrait = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-functions = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 datafusion-functions-window = {git = 'https://github.com/ArroyoSystems/arrow-datafusion', branch = '48.0.1/arroyo'}
 

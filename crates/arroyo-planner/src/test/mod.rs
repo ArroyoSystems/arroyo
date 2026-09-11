@@ -11,13 +11,17 @@ use test_log::test;
 
 use crate::{ArroyoSchemaProvider, SqlConfig, parse_and_get_program};
 
-fn get_test_schema_provider() -> ArroyoSchemaProvider {
+pub(crate) fn get_test_schema_provider() -> ArroyoSchemaProvider {
+    get_test_schema_provider_named("nexmark")
+}
+
+pub(crate) fn get_test_schema_provider_named(name: &str) -> ArroyoSchemaProvider {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     let nexmark = (NexmarkConnector {})
         .from_config(
             Some(1),
-            "nexmark",
+            name,
             EmptyConfig {},
             NexmarkTable {
                 event_rate: 10.0,
