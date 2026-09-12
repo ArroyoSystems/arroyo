@@ -22,7 +22,7 @@ use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{ArrowError, DataType, Field, Fields};
-use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
+use arroyo_types::{CheckpointBarrier, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
@@ -436,8 +436,8 @@ impl Converter {
     }
 }
 
-pub fn get_hasher() -> ahash::RandomState {
-    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
+pub fn get_hasher() -> datafusion::common::hash_utils::RandomState {
+    datafusion::common::hash_utils::RandomState::with_seed(0)
 }
 
 #[derive(Default)]
