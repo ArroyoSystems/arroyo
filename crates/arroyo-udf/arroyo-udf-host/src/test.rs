@@ -60,6 +60,7 @@ fn test_udf() {
         arg_fields: vec![],
         number_rows: 3,
         return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+        config_options: Arc::default(),
     };
 
     let result = sync_udf.invoke_with_args(args).unwrap();
@@ -89,6 +90,7 @@ fn test_optional_arg() {
         arg_fields: vec![],
         number_rows: 1,
         return_field: Field::new("return", (*sync_udf.return_type).clone(), false).into(),
+        config_options: Arc::default(),
     };
 
     let result = sync_udf.invoke_with_args(args).unwrap();
