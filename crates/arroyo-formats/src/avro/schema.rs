@@ -36,7 +36,7 @@ pub fn to_arrow(schema: &str) -> anyhow::Result<arrow_schema::Schema> {
 }
 
 fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
-    let next_name = format!("{}_{}", name, &field.name());
+    let next_name = format!("{}_{}", name, field.name());
     let mut schema = arrow_to_avro(&next_name, field.data_type());
 
     if field.is_nullable() {
@@ -100,6 +100,10 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         }
         DataType::Union(_, _) => unimplemented!("unions are not supported"),
         DataType::Dictionary(_, _) => unimplemented!("dictionaries are not supported"),
+        // Keep schema support aligned with the Decimal128-only Avro value encoder.
+        DataType::Decimal32(_, _) | DataType::Decimal64(_, _) => {
+            unimplemented!("decimal32 and decimal64 are not supported")
+        }
         DataType::Decimal128(precision, scale) => {
             return json!({
                 "type": "bytes",

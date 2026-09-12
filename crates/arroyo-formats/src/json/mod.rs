@@ -58,6 +58,10 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::Struct(s) => arrow_to_json_schema(s),
         arrow::datatypes::DataType::Union(_, _) => todo!(),
         arrow::datatypes::DataType::Dictionary(_, _) => todo!(),
+        // Custom string/bytes decimal encoding currently supports only Decimal128.
+        DataType::Decimal32(_, _) | DataType::Decimal64(_, _) => {
+            unimplemented!("decimal32 and decimal64 are not supported")
+        }
         arrow::datatypes::DataType::Decimal256(_, _) => todo!(),
         arrow::datatypes::DataType::Map(_, _) => todo!(),
         arrow::datatypes::DataType::RunEndEncoded(_, _) => todo!(),
@@ -139,6 +143,10 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         }
         Union(_, _) => todo!(),
         Dictionary(_, _) => todo!(),
+        // Kafka decimal schemas require the matching custom bytes encoder.
+        Decimal32(_, _) | Decimal64(_, _) => {
+            unimplemented!("decimal32 and decimal64 are not supported")
+        }
         Decimal128(_, scale) => {
             return json! {{
                 "type": "bytes",
