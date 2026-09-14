@@ -1,6 +1,7 @@
 pub mod api_types;
 pub mod checkpoints;
 pub mod formats;
+pub mod program;
 pub mod public_ids;
 pub mod schema_resolver;
 pub mod var_str;

@@ -20,7 +20,6 @@ use crate::{
     states::{StateError, fatal},
 };
 use anyhow::{anyhow, bail};
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::api;
 use arroyo_rpc::{LeaderContext, grpc_channel_builder};
@@ -53,27 +52,19 @@ enum WorkerState {
 #[derive(Debug)]
 pub struct Scheduling {}
 
-fn slots_for_job(job: &LogicalProgram) -> usize {
-    job.graph
-        .node_weights()
-        .map(|n| n.parallelism)
-        .max()
-        .unwrap_or(0)
-}
-
 fn compute_assignments(
     workers: Vec<&WorkerStatus>,
-    program: &LogicalProgram,
+    program: &api::ArrowProgram,
 ) -> Vec<TaskAssignment> {
     let mut assignments = vec![];
-    for node in program.graph.node_weights() {
+    for node in &program.nodes {
         let mut worker_idx = 0;
         let mut current_count = 0;
 
         for i in 0..node.parallelism {
             assignments.push(TaskAssignment {
                 task_id: node.node_id,
-                subtask_idx: i as u32,
+                subtask_idx: i,
                 worker_id: workers[worker_idx].id.0,
                 worker_addr: workers[worker_idx].data_address.clone(),
                 worker_rpc: workers[worker_idx].rpc_address.clone(),
@@ -317,14 +308,12 @@ impl Scheduling {
             match ctx
                 .scheduler
                 .start_workers(StartPipelineReq {
-                    program: ctx.program.clone(),
                     wasm_path: "".to_string(),
                     pipeline_id: ctx.pipeline_info.pipeline_id.clone(),
                     organization_id: ctx.config.organization_id.clone(),
                     job_id: JobId(ctx.config.id.clone()),
                     generation: ctx.status.generation,
                     name: ctx.config.pipeline_name.clone(),
-                    hash: ctx.program.get_hash(),
                     slots: slots_needed,
                     env_vars: env_vars.clone(),
                     pipeline_tags: ctx.pipeline_info.tags.clone(),
@@ -404,9 +393,10 @@ impl State for Scheduling {
         }
 
         ctx.program
-            .update_parallelism(&ctx.config.parallelism_overrides);
-
-        let slots_needed: usize = slots_for_job(&*ctx.program);
+            .decoded
+            .update_parallelism(&ctx.config.parallelism_overrides)
+            .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
+        let slots_needed = ctx.program.decoded.slots_required();
         self = self.start_workers(ctx, slots_needed).await?;
 
         let checkpoint_info = match get_and_register_checkpoint_info_leader(ctx).await {
@@ -474,9 +464,8 @@ impl State for Scheduling {
 
         // Compute assignments and send to workers
 
-        let assignments = compute_assignments(workers.values().collect(), &*ctx.program);
+        let assignments = compute_assignments(workers.values().collect(), &ctx.program.decoded);
         let worker_connects = Arc::try_unwrap(worker_connects).unwrap().into_inner();
-        let program = api::ArrowProgram::from(ctx.program.clone());
 
         let start_epoch = checkpoint_info.as_ref().map(|info| info.epoch).unwrap_or(0);
         let min_epoch = checkpoint_info
@@ -499,7 +488,8 @@ impl State for Scheduling {
                 let job_id = ctx.config.id.clone();
                 let pipeline_id = ctx.pipeline_info.pipeline_id.clone();
                 let restore_epoch = checkpoint_info.as_ref().map(|info| info.epoch);
-                let program = program.clone();
+                let program = ctx.program.decoded.clone();
+                let program_version = ctx.program.program_version;
                 let machine_id = workers.get(&id).as_ref().unwrap().machine_id.clone();
                 let leader_addr = leader_addr.clone();
                 let checkpoint_manifest_ref = checkpoint_info.as_ref().map(|ci| ci.id.clone());
@@ -517,7 +507,8 @@ impl State for Scheduling {
                             restore_epoch,
                             start_epoch,
                             min_epoch,
-                            program: Some(program.clone()),
+                            program: Some(program),
+                            program_version: Some(program_version),
                             tasks: assignments.clone(),
                             job_controller_addr: leader_addr,
                             is_leader: leader_id == id,
@@ -535,7 +526,7 @@ impl State for Scheduling {
                                 worker_id = id.0,
                                 machine_id = *machine_id.0,
                             );
-                            id
+                            Ok(id)
                         }
                         Err(e) => {
                             error!(
@@ -546,7 +537,7 @@ impl State for Scheduling {
                                 machine_id = *machine_id.0,
                                 error = format!("{:?}", e),
                             );
-                            panic!("Failed to start execution on worker {id:?}: {e}");
+                            Err(e)
                         }
                     }
                 })
@@ -555,10 +546,24 @@ impl State for Scheduling {
 
         for t in tasks {
             match t.await {
-                Ok(id) => {
+                Ok(Ok(id)) => {
                     if let Some(worker) = workers.get_mut(&id) {
                         worker.state = WorkerState::Initializing;
                     }
+                }
+                Ok(Err(e))
+                    if matches!(
+                        e.code(),
+                        tonic::Code::InvalidArgument | tonic::Code::FailedPrecondition
+                    ) =>
+                {
+                    return Err(fatal(
+                        format!("worker rejected program: {}", e.message()),
+                        e.into(),
+                    ));
+                }
+                Ok(Err(e)) => {
+                    return Err(ctx.retryable(self, "failed to initialize workers", e.into(), 10));
                 }
                 Err(e) => {
                     return Err(ctx.retryable(self, "failed to initialize workers", e.into(), 10));
@@ -569,7 +574,7 @@ impl State for Scheduling {
         // Now wait until all tasks are running
         let start = Instant::now();
         let mut started_tasks = HashSet::new();
-        while started_tasks.len() < ctx.program.task_count() {
+        while started_tasks.len() < ctx.program.decoded.task_count() {
             let timeout = pipeline_config
                 .task_startup_time
                 .min(ctx.config.ttl.unwrap_or(*pipeline_config.task_startup_time))
@@ -670,7 +675,7 @@ impl State for Scheduling {
             }
         }
 
-        ctx.status.tasks = Some(ctx.program.task_count() as i32);
+        ctx.status.tasks = Some(ctx.program.decoded.task_count() as i32);
 
         let leader_manager = match LeaderManager::connect(
             JobId(ctx.config.id.clone()),

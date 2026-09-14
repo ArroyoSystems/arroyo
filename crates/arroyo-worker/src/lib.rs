@@ -6,6 +6,7 @@ use crate::job_controller::{
     CheckpointHistory, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
 };
 use crate::network_manager::NetworkManager;
+use crate::program::{ProgramAdmissionError, validate_start_execution_program};
 use anyhow::{Context, Result, anyhow};
 
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
@@ -76,6 +77,7 @@ pub mod arrow;
 pub mod engine;
 pub mod job_controller;
 mod network_manager;
+mod program;
 pub mod utils;
 
 pub static TIMER_TABLE: char = '[';
@@ -866,17 +868,20 @@ impl WorkerGrpc for WorkerServer {
         &self,
         request: Request<StartExecutionReq>,
     ) -> Result<Response<StartExecutionResp>, Status> {
+        let req = request.into_inner();
         let mut phase = self.state.phase.lock().unwrap();
 
         match &*phase {
             WorkerExecutionPhase::Idle => {
+                validate_start_execution_program(&req)
+                    .map_err(ProgramAdmissionError::into_status)?;
+
                 *phase = WorkerExecutionPhase::Initializing {
                     started_at: SystemTime::now(),
                 };
 
                 // Spawn async initialization
                 let state = self.state.clone();
-                let req = request.into_inner();
                 let shutdown_guard = self.shutdown_guard.clone_temporary();
 
                 self.shutdown_guard.spawn_temporary(async move {

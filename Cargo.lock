@@ -642,7 +642,6 @@ name = "arroyo-controller"
 version = "0.17.0-dev"
 dependencies = [
  "anyhow",
- "arroyo-datastream",
  "arroyo-rpc",
  "arroyo-server-common",
  "arroyo-state",
@@ -657,7 +656,6 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "lazy_static",
- "petgraph 0.8.2",
  "postgres",
  "postgres-types",
  "prometheus",

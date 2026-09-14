@@ -479,6 +479,9 @@ message TaskAssignment {
 }
 
 message StartExecutionReq {
+  // Controllers decode/re-encode this protobuf, leaving runtime payloads opaque.
+  // Prost drops unknown protobuf fields: upgrade controllers before the API/planner
+  // emits new fields, and account for newer persisted programs before rolling back.
   api.ArrowProgram program = 1;
   optional uint64 restore_epoch = 2;
   uint64 start_epoch = 6;
@@ -492,6 +495,10 @@ message StartExecutionReq {
   uint64 checkpoint_interval_micros = 9;
   // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;
+  // Arroyo serialization version (pipelines.proto_version), not a DataFusion version.
+  // Older controllers omit this field and send v2 programs. Older workers ignore
+  // it, so deployments must still ensure their runtime supports the programs sent.
+  optional uint32 program_version = 11;
 }
 
 message StartExecutionResp {

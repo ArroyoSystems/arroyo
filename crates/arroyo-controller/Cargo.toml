@@ -8,7 +8,6 @@ default = []
 
 [dependencies]
 arroyo-types = { path = "../arroyo-types" }
-arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-state = { path = "../arroyo-state" }
 arroyo-server-common = { path = "../arroyo-server-common" }
@@ -20,7 +19,6 @@ prost = {workspace = true}
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 rand = { workspace = true }
-petgraph = {workspace = true, features = ["serde-1"]}
 prometheus = {workspace = true}
 async-trait = { workspace = true }
 lazy_static = { workspace = true }

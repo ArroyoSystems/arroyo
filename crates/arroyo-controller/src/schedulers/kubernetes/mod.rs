@@ -361,7 +361,6 @@ mod test {
     use crate::schedulers::SchedulerError;
     use crate::schedulers::StartPipelineReq;
     use crate::schedulers::kubernetes::{JOB_ID_LABEL, KubernetesScheduler};
-    use arroyo_datastream::logical::LogicalProgram;
     use arroyo_rpc::config::config;
     use arroyo_types::{JobId, PipelineId};
     use serde_json::json;
@@ -369,12 +368,10 @@ mod test {
     fn base_req(overlay: serde_json::Value) -> StartPipelineReq {
         StartPipelineReq {
             name: "test_pipeline".to_string(),
-            program: LogicalProgram::default(),
             wasm_path: "file:///wasm".to_string(),
             pipeline_id: PipelineId("pipe-123".to_string().into()),
             organization_id: "org-123".to_string(),
             job_id: JobId("job123".to_string().into()),
-            hash: "12123123h".to_string(),
             generation: 1,
             slots: 8,
             env_vars: Default::default(),
