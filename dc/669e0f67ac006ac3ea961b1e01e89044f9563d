@@ -1,0 +1,23 @@
+crates/arroyo-api/src/connection_tables.rs
+  s_7b7cd2b9cca758::t_ce8c137621eebd 8,16,36-38,46,316-448
+crates/arroyo-api/src/lib.rs
+  s_7b7cd2b9cca758::t_2fcf2bb23491a4 26-27,274,319
+crates/arroyo-api/src/rest.rs
+  s_7b7cd2b9cca758::t_cde2f2c73569e5 20-21,227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dc669e0f67ac006ac3ea961b1e01e89044f9563d",
+  "prompts": {},
+  "sessions": {
+    "s_7b7cd2b9cca758": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a18c-6a55-7e03-b106-22f5d0b0b87f",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
