@@ -148,6 +148,16 @@ mod test_async_udf {
     }
 }
 
+mod test_panicking_async_udf {
+    use crate as arroyo_udf_host;
+    use arroyo_udf_macros::local_udf;
+
+    #[local_udf]
+    async fn panic_udf(_x: u64) -> u64 {
+        panic!("intentional async UDF panic");
+    }
+}
+
 use arrow::array::PrimitiveArray;
 use arrow::datatypes::{UInt32Type, UInt64Type};
 use datafusion::common::ScalarValue;
@@ -190,5 +200,37 @@ async fn test_async() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn test_async_panic_returns_error() {
+    for ordered in [true, false] {
+        let config = test_panicking_async_udf::__local().config;
+        let mut udf: AsyncUdfDylib = (&config).try_into().unwrap();
+        udf.start(ordered, Duration::from_secs(1), 1);
+        assert!(udf.drain_results().unwrap().is_none());
+
+        udf.send(42, vec![UInt64Array::from(vec![42]).to_data()])
+            .await
+            .unwrap();
+
+        let error = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                match udf.drain_results() {
+                    Err(error) => return error,
+                    Ok(Some(_)) => panic!("panicking UDF unexpectedly returned a result"),
+                    Ok(None) => tokio::time::sleep(Duration::from_millis(10)).await,
+                }
+            }
+        })
+        .await
+        .expect("async UDF panic must report an error instead of waiting indefinitely");
+
+        assert!(
+            error
+                .to_string()
+                .contains("error fetching results from async UDF panic_udf")
+        );
     }
 }
