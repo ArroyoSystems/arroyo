@@ -5,6 +5,7 @@ use axum::response::Sse;
 use axum::response::sse::Event;
 use axum_extra::extract::WithRejection;
 use futures_util::stream::Stream;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -12,6 +13,7 @@ use tokio::sync::mpsc::channel;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
+use utoipa::ToSchema;
 
 use arroyo_connectors::confluent::ConfluentProfile;
 use arroyo_connectors::connector_for_type;
@@ -31,8 +33,9 @@ use arroyo_rpc::schema_resolver::{
 
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, internal_server_error, log_and_map,
-    map_delete_err, map_insert_err, not_found, paginate_results, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, authenticate, bad_request, conflict, internal_server_error,
+    log_and_map, map_delete_err, map_insert_err, not_found, paginate_results,
+    validate_pagination_params,
 };
 use crate::{
     AuthData,
@@ -40,7 +43,7 @@ use crate::{
     to_micros,
 };
 use arroyo_formats::proto::schema::{protobuf_to_arrow, schema_file_to_descriptor};
-use cornucopia_async::{Database, DatabaseSource};
+use cornucopia_async::{Database, DatabaseSource, DbError};
 
 async fn get_and_validate_connector(
     req: &ConnectionTablePost,
@@ -306,6 +309,139 @@ pub async fn create_connection_table(
             .ok_or_else(|| internal_server_error("Could not create connection table"))?
             .try_into()
             .map_err(log_and_map)?;
+
+    Ok(Json(table))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ConnectionTablePatch {
+    pub config: Value,
+}
+
+/// Update a connection table by creating a new version.
+#[utoipa::path(
+    patch,
+    path = "/v1/connection_tables/{id}",
+    tag = "connection_tables",
+    params(
+        ("id" = String, Path, description = "Connection Table id")
+    ),
+    request_body = ConnectionTablePatch,
+    responses(
+        (status = 200, description = "Updated connection table", body = ConnectionTable),
+        (status = 400, description = "Invalid connection table update", body = ErrorResp),
+        (status = 404, description = "Connection table not found", body = ErrorResp),
+        (status = 409, description = "Connection table was updated concurrently", body = ErrorResp),
+    ),
+)]
+pub async fn patch_connection_table(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    Path(pub_id): Path<String>,
+    WithRejection(Json(patch), _): WithRejection<Json<ConnectionTablePatch>, ApiError>,
+) -> Result<Json<ConnectionTable>, ErrorResp> {
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+    let client = state.database.client().await?;
+
+    let current =
+        api_queries::fetch_get_connection_table(&client, &auth_data.organization_id, &pub_id)
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| not_found("Connection table"))?;
+
+    // Schema changes remain outside the patch contract until compatibility rules define whether
+    // dependent pipelines must be revalidated or recompiled.
+    let stored_schema = current
+        .schema
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(log_and_map)?;
+    let req = ConnectionTablePost {
+        name: current.name.clone(),
+        connector: current.connector.clone(),
+        connection_profile_id: current.profile_id.clone(),
+        config: patch.config,
+        schema: stored_schema,
+    };
+
+    let (connector, _, profile, schema) =
+        get_and_validate_connector(&req, &auth_data, &state.database).await?;
+    let table_type = connector
+        .table_type(&profile, &req.config)
+        .map_err(|e| bad_request(format!("Failed to determine table type: {e}")))?;
+    if current.table_type != table_type.to_string() {
+        return Err(bad_request(
+            "An update cannot change a connection table between source and sink",
+        ));
+    }
+
+    let schema = schema
+        .map(serde_json::to_value)
+        .transpose()
+        .map_err(log_and_map)?;
+
+    if current.schema != schema {
+        return Err(bad_request(
+            "Connection update resolves to a different schema; schema updates are not supported",
+        ));
+    }
+
+    let version = current
+        .latest
+        .checked_add(1)
+        .ok_or_else(|| internal_server_error("Connection table version limit reached"))?;
+
+    let created = api_queries::execute_create_connection_table_version(
+        &client,
+        &version,
+        &req.config,
+        &schema,
+        &auth_data.user_id,
+        &auth_data.organization_id,
+        &pub_id,
+    )
+    .await
+    .map_err(|err| match err {
+        DbError::DuplicateViolation => {
+            conflict("Connection table was updated concurrently; reload it and retry the update")
+        }
+        err => err.into(),
+    })?;
+
+    if created == 0 {
+        return Err(not_found("Connection table"));
+    }
+
+    let updated = api_queries::execute_set_current_connection_table_version(
+        &client,
+        &version,
+        &auth_data.organization_id,
+        &pub_id,
+        &current.latest,
+    )
+    .await?;
+
+    if updated == 0 {
+        return Err(conflict(
+            "Connection table was updated concurrently; reload it and retry the update",
+        ));
+    }
+
+    let table = api_queries::fetch_get_connection_table_version(
+        &client,
+        &version,
+        &auth_data.organization_id,
+        &pub_id,
+    )
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| internal_server_error("Could not load updated connection table"))?
+    .try_into()
+    .map_err(log_and_map)?;
 
     Ok(Json(table))
 }
