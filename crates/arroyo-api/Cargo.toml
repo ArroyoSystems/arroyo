@@ -28,6 +28,8 @@ tower = {workspace = true}
 
 arrow = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
+bytes = { workspace = true }
+parquet = { workspace = true }
 
 petgraph = {workspace = true, features = ["serde-1"]}
 

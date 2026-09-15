@@ -2,7 +2,7 @@ use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -83,8 +83,6 @@ pub struct BatchPreviewPost {
     /// Maps each source table name to a file path accessible to the pipeline worker.
     #[serde(alias = "inputs", alias = "tables")]
     pub input_files: HashMap<String, String>,
-    /// Local or object-storage base path where the preview pipeline should write its output.
-    pub output_path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -150,6 +148,7 @@ pub struct PipelineGraph {
 #[serde(rename_all = "snake_case")]
 pub struct PipelineNode {
     pub node_id: u32,
+    pub operator_id: String,
     pub operator: String,
     pub description: String,
     pub parallelism: u32,
@@ -232,5 +231,13 @@ pub struct OutputData {
     pub subtask_idx: u32,
     pub timestamps: Vec<u64>,
     pub start_id: u64,
-    pub batch: String,
+    pub batch: serde_json::Value,
+}
+
+#[derive(Deserialize, Clone, Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "snake_case")]
+pub struct JobOutputQuery {
+    pub operator_id: String,
+    pub offset: u64,
 }

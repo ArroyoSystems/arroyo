@@ -8,9 +8,8 @@ use anyhow::Result;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    HeartbeatNodeReq, HeartbeatNodeResp, RegisterNodeReq,
-    RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp,
-    TaskStartedReq, TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
+    HeartbeatNodeReq, HeartbeatNodeResp, RegisterNodeReq, RegisterNodeResp, RegisterWorkerReq,
+    RegisterWorkerResp, TaskStartedReq, TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
     WorkerInitializationCompleteReq, WorkerInitializationCompleteResp,
 };
 use arroyo_rpc::{StateContext, config};

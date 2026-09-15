@@ -1,23 +1,42 @@
 import { Text, Button, Stack, Box, HStack, Spacer, Spinner } from '@chakra-ui/react';
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Job, OutputData } from '../../lib/data_fetching';
+import { get, Job, OutputData } from '../../lib/data_fetching';
 import { AgGridReact } from 'ag-grid-react';
 import 'ag-grid-community/styles/ag-grid.css';
 import '@fontsource/ibm-plex-mono';
 import '../../styles/data-grid-style.css';
 
+const MAX_ROWS = 10_000;
+const REFILL_BUFFER_MS = 150;
+const EMPTY_POLL_DELAY_MS = 50;
+const TARGET_DRAIN_FRAMES = 30;
+const MAX_ROWS_PER_FRAME = 500;
+
+type QueuedRow = {
+  data: any;
+  timestamp: number;
+};
+
 export function PipelineOutputs({
   pipelineId,
   job,
+  operatorId,
   onDemand = false,
 }: {
   pipelineId: string;
   job: Job;
+  operatorId: string;
   onDemand: boolean;
 }) {
   const gridRef = useRef<AgGridReact>(null);
-  const outputSource = useRef<EventSource | undefined>(undefined);
-  const currentJobId = useRef<string | undefined>(undefined);
+  const nextOffset = useRef(0);
+  const currentOutput = useRef<string | undefined>(undefined);
+  const lastTimestamp = useRef<number | undefined>(undefined);
+  const queuedRows = useRef<QueuedRow[]>([]);
+  const pollGeneration = useRef(0);
+  const rendererGeneration = useRef<number | undefined>(undefined);
+  const jobState = useRef(job.state);
+  jobState.current = job.state;
   const [cols, setCols] = useState<any | undefined>(undefined);
   const [rows, _setRows] = useState<any[]>([]);
   const [subscribed, setSubscribed] = useState<boolean>(false);
@@ -25,113 +44,193 @@ export function PipelineOutputs({
   const rowsInTable = useRef(0);
   const rowRef = useRef<HTMLSpanElement | null>(null);
 
-  const MAX_ROWS = 10_000;
-
-  const sseHandler = (event: MessageEvent) => {
-    const record = JSON.parse(event.data) as OutputData;
+  const enqueueOutput = useCallback((record: OutputData) => {
     const id = record.start_id;
-    const batch: any[] = JSON.parse(record.batch);
+    const batch = record.batch as any[];
 
-    if (cols == undefined && batch.length > 0) {
-      setCols([
-        {
-          headerName: '',
-          field: 'id',
-          width: 70,
-          resizable: false,
-          pinned: 'left',
-          cellStyle: { color: 'var(--chakra-colors-purple-500)' },
-        },
-        { field: 'timestamp', width: 210, cellStyle: { color: 'var(--chakra-colors-green-500)' } },
-        ...Object.keys(batch[0]).map(k => {
-          return {
-            headerName: k,
-            field: k,
-          };
-        }),
-      ]);
+    if (batch.length > 0) {
+      setCols(
+        (current: any | undefined) =>
+          current ?? [
+            {
+              headerName: '',
+              field: 'id',
+              width: 70,
+              resizable: false,
+              pinned: 'left',
+              cellStyle: { color: 'var(--chakra-colors-purple-500)' },
+            },
+            {
+              field: 'timestamp',
+              width: 210,
+              cellStyle: { color: 'var(--chakra-colors-green-500)' },
+            },
+            ...Object.keys(batch[0]).map(k => ({
+              headerName: k,
+              field: k,
+            })),
+          ]
+      );
     }
 
-    rowsRead.current = rowsRead.current + batch.length;
-    rowsInTable.current = rowsInTable.current + batch.length;
+    for (const [i, row] of batch.entries()) {
+      const timestamp = record.timestamps[i];
+      Object.keys(row).forEach(k => {
+        if (typeof row[k] === 'object') {
+          row[k] = JSON.stringify(row[k]);
+        }
+      });
 
+      row.id = id + i;
+      row.timestamp = new Date(timestamp / 1000).toISOString();
+      queuedRows.current.push({ data: row, timestamp });
+    }
+
+    return batch.length;
+  }, []);
+
+  const renderRows = useCallback((rows: any[]) => {
+    rowsRead.current += rows.length;
+    rowsInTable.current += rows.length;
     if (rowRef.current) {
       rowRef.current.innerText = String(rowsRead.current);
     }
 
-    batch.forEach((r, i) => {
-      Object.keys(r).forEach(k => {
-        if (typeof r[k] === 'object') {
-          r[k] = JSON.stringify(r[k]);
-        }
-      });
-
-      r.id = id + i;
-      r.timestamp = new Date(record.timestamps[i] / 1000).toISOString();
-    });
-
-    batch.reverse();
-
-    let op: any = {
-      add: batch,
-      addIndex: 0,
-    };
+    const api = gridRef.current!.api;
+    api.applyTransaction({ add: [...rows].reverse(), addIndex: 0 })!;
 
     if (rowsInTable.current > MAX_ROWS) {
-      let remove: any[] = [];
-      gridRef.current!.api.forEachNode((node, idx) => {
-        if (idx > rowsInTable.current - MAX_ROWS) {
+      const remove: any[] = [];
+      api.forEachNode((node, idx) => {
+        if (idx >= MAX_ROWS) {
           remove.push(node.data);
         }
       });
-      op.remove = remove;
-      rowsInTable.current = rowsInTable.current - remove.length;
+      api.applyTransaction({ remove })!;
+      rowsInTable.current -= remove.length;
     }
-
-    gridRef.current!.api.applyTransaction(op)!;
-  };
-
-  const close = () => {
-    if (outputSource.current) {
-      outputSource.current.removeEventListener('message', sseHandler);
-      outputSource.current.close();
-    }
-  };
+  }, []);
 
   const clearData = useCallback(() => {
     const rowData: any[] = [];
     gridRef.current!.api.forEachNode(function (node) {
       rowData.push(node.data);
     });
-    const res = gridRef.current!.api.applyTransaction({
+    gridRef.current!.api.applyTransaction({
       remove: rowData,
     })!;
+    rowsInTable.current = 0;
   }, []);
 
   useEffect(() => {
-    if ((onDemand && !subscribed) || job.state != 'Running') {
-      close();
+    const generation = ++pollGeneration.current;
+    const outputKey = `${job.id}:${operatorId}`;
+    if (currentOutput.current !== outputKey) {
+      currentOutput.current = outputKey;
+      nextOffset.current = 0;
+      lastTimestamp.current = undefined;
+      queuedRows.current = [];
+    }
+
+    if (onDemand && !subscribed) {
       return;
     }
 
-    if (outputSource.current?.readyState != EventSource.CLOSED && currentJobId.current == job.id) {
-      return;
-    }
+    let cancelled = false;
 
-    close();
+    const wait = (delay: number) => new Promise<void>(resolve => window.setTimeout(resolve, delay));
 
-    if (pipelineId && job.id) {
-      const url = `/api/v1/pipelines/${pipelineId}/jobs/${job.id}/output`;
-      const eventSource = new EventSource(url);
-      eventSource.onerror = () => {
-        setSubscribed(false);
-        eventSource.close();
-      };
-      outputSource.current = eventSource;
-      eventSource.addEventListener('message', sseHandler);
-      currentJobId.current = job.id;
-    }
-  }, [job, subscribed]);
+    const waitForFrame = (delay: number) =>
+      new Promise<void>(resolve => {
+        window.setTimeout(() => window.requestAnimationFrame(() => resolve()), delay);
+      });
+
+    const render = async () => {
+      if (rendererGeneration.current === generation || queuedRows.current.length === 0) {
+        return;
+      }
+
+      rendererGeneration.current = generation;
+      await wait(REFILL_BUFFER_MS);
+      let firstRow = true;
+
+      while (pollGeneration.current === generation && queuedRows.current.length > 0) {
+        const rowsThisFrame = Math.min(
+          MAX_ROWS_PER_FRAME,
+          Math.max(1, Math.ceil(queuedRows.current.length / TARGET_DRAIN_FRAMES))
+        );
+        const row = queuedRows.current[0];
+        const timestampDelay =
+          lastTimestamp.current === undefined ? 0 : (row.timestamp - lastTimestamp.current) / 1000;
+        const renderDelay =
+          firstRow || rowsThisFrame > 1 ? 0 : Math.min(250, Math.max(16, timestampDelay));
+        await waitForFrame(renderDelay);
+
+        if (pollGeneration.current !== generation) {
+          break;
+        }
+
+        const rows = queuedRows.current.splice(0, rowsThisFrame);
+        lastTimestamp.current = rows[rows.length - 1].timestamp;
+        renderRows(rows.map(row => row.data));
+        firstRow = false;
+      }
+
+      if (rendererGeneration.current === generation) {
+        rendererGeneration.current = undefined;
+      }
+    };
+
+    const poll = async () => {
+      while (!cancelled) {
+        const { data, error } = await get('/v1/pipelines/{pipeline_id}/jobs/{job_id}/output', {
+          params: {
+            path: { pipeline_id: pipelineId, job_id: job.id },
+            query: { operator_id: operatorId, offset: nextOffset.current },
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (error) {
+          console.error('Failed to read preview output', error);
+          if (onDemand) {
+            setSubscribed(false);
+          }
+          return;
+        }
+
+        let receivedRows = 0;
+        for (const record of data ?? []) {
+          const rows = enqueueOutput(record);
+          receivedRows += rows;
+          if (currentOutput.current === outputKey) {
+            nextOffset.current = Math.max(nextOffset.current, record.start_id + rows);
+          }
+        }
+        render();
+
+        if (['Finished', 'Failed', 'Stopped'].includes(jobState.current)) {
+          return;
+        }
+        if (receivedRows === 0) {
+          await wait(EMPTY_POLL_DELAY_MS);
+        }
+      }
+    };
+
+    render();
+    poll();
+
+    return () => {
+      cancelled = true;
+      if (pollGeneration.current === generation) {
+        pollGeneration.current++;
+      }
+    };
+  }, [enqueueOutput, job.id, onDemand, operatorId, pipelineId, renderRows, subscribed]);
 
   return (
     <Stack h="100%">

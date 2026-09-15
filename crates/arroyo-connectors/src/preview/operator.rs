@@ -1,21 +1,21 @@
-use arrow::array::{RecordBatch};
+use super::{PreviewFilePath, PreviewMetadata, PreviewTable};
+use arrow::array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::connector_err;
+use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
 use arroyo_storage::StorageProvider;
 use arroyo_types::{CheckpointBarrier, SignalMessage, TaskInfo};
+use itertools::Itertools;
+use parquet::arrow::AsyncArrowWriter;
+use parquet::basic::ZstdLevel;
+use parquet::file::properties::WriterProperties;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use itertools::Itertools;
-use parquet::arrow::{AsyncArrowWriter};
-use parquet::basic::ZstdLevel;
-use parquet::file::properties::WriterProperties;
-use arroyo_rpc::df::ArroyoSchema;
-use super::{PreviewMetadata, PreviewTable};
 
 pub struct PreviewSink {
     config: PreviewTable,
@@ -23,6 +23,7 @@ pub struct PreviewSink {
     row: usize,
     pending_start_id: Option<u64>,
     pending_batches: Vec<RecordBatch>,
+    pending_bytes: usize,
     last_flush: Instant,
 }
 
@@ -34,11 +35,16 @@ impl PreviewSink {
             row: 0,
             pending_start_id: None,
             pending_batches: vec![],
+            pending_bytes: 0,
             last_flush: Instant::now(),
         }
     }
 
-    async fn flush(&mut self, input: &ArroyoSchema, task_info: Arc<TaskInfo>) -> DataflowResult<()> {
+    async fn flush(
+        &mut self,
+        input: &ArroyoSchema,
+        task_info: Arc<TaskInfo>,
+    ) -> DataflowResult<()> {
         if self.pending_batches.is_empty() {
             return Ok(());
         }
@@ -48,14 +54,20 @@ impl PreviewSink {
         };
 
         let batches = self.pending_batches.drain(..).collect_vec();
+        self.pending_bytes = 0;
 
-        let path = format!(
-            "{}/{}/{}/{start_id:020}.parquet",
-            task_info.job_id, task_info.operator_id, task_info.task_index,
+        let path = PreviewFilePath::new(
+            &task_info.job_id,
+            &task_info.operator_id,
+            task_info.task_index,
+            start_id,
         );
 
-        let mut file = self.storage.as_mut().expect("storage must have been initialized")
-            .buf_writer(path);
+        let mut file = self
+            .storage
+            .as_mut()
+            .expect("storage must have been initialized")
+            .buf_writer(path.to_string());
 
         let metadata = PreviewMetadata {
             start_row: start_id,
@@ -65,7 +77,9 @@ impl PreviewSink {
         };
 
         let props = WriterProperties::builder()
-            .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+            .set_compression(parquet::basic::Compression::ZSTD(
+                ZstdLevel::try_new(3).unwrap(),
+            ))
             .set_key_value_metadata(Some(metadata.into()))
             .build();
 
@@ -131,14 +145,30 @@ impl ArrowOperator for PreviewSink {
     async fn process_batch(
         &mut self,
         batch: RecordBatch,
-        _ctx: &mut OperatorContext,
+        ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
         if batch.num_rows() == 0 {
             return Ok(());
         }
 
+        let batch_bytes = batch.get_array_memory_size();
+        if !self.pending_batches.is_empty()
+            && self.pending_bytes.saturating_add(batch_bytes) > self.config.max_buffer_bytes
+        {
+            self.flush(&ctx.in_schemas[0], ctx.task_info.clone())
+                .await?;
+        }
+
+        self.pending_start_id.get_or_insert(self.row as u64);
+        self.row += batch.num_rows();
+        self.pending_bytes = self.pending_bytes.saturating_add(batch_bytes);
         self.pending_batches.push(batch);
+
+        if self.pending_bytes >= self.config.max_buffer_bytes {
+            self.flush(&ctx.in_schemas[0], ctx.task_info.clone())
+                .await?;
+        }
 
         Ok(())
     }
@@ -154,7 +184,8 @@ impl ArrowOperator for PreviewSink {
             .flush_interval_millis
             .is_some_and(|millis| self.last_flush.elapsed() >= Duration::from_millis(millis))
         {
-            self.flush(&ctx.in_schemas[0], ctx.task_info.clone()).await?;
+            self.flush(&ctx.in_schemas[0], ctx.task_info.clone())
+                .await?;
             self.last_flush = Instant::now();
         }
         Ok(())
@@ -166,7 +197,8 @@ impl ArrowOperator for PreviewSink {
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        self.flush(&ctx.in_schemas[0], ctx.task_info.clone()).await?;
+        self.flush(&ctx.in_schemas[0], ctx.task_info.clone())
+            .await?;
 
         let table = ctx
             .table_manager

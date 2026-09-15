@@ -3,7 +3,9 @@ use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
     Checkpoint, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
-use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, StopType};
+use arroyo_rpc::api_types::pipelines::{
+    JobLogLevel, JobLogMessage, JobOutputQuery, OutputData, StopType,
+};
 use arroyo_rpc::api_types::{
     CheckpointCollection, JobCollection, JobLogMessageCollection,
     OperatorCheckpointGroupCollection, PaginationQueryParams,
@@ -13,19 +15,14 @@ use arroyo_rpc::public_ids::{IdTypes, generate_id};
 use arroyo_rpc::{LeaderContext, StateContext, get_event_spans, job_status_client};
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::response::sse::{Event, Sse};
-use futures_util::stream::Stream;
-use std::convert::Infallible;
 use std::str::FromStr;
 use std::{collections::HashMap, time::Duration};
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Code;
-use tracing::{info, warn};
 
 const PREVIEW_TTL: Duration = Duration::from_secs(60);
 
 use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
-use crate::preview_output::PreviewOutputPoller;
+use crate::preview_output::PreviewOutputReader;
 use crate::rest::AppState;
 use crate::rest_utils::{
     BearerAuth, ErrorResp, PipelineJobCheckpointPath, PipelineJobPath, authenticate, bad_request,
@@ -521,17 +518,18 @@ pub async fn get_checkpoint_details(
     Ok(Json(OperatorCheckpointGroupCollection { data: operators }))
 }
 
-/// Subscribe to a job's output
+/// Read a job's available output
 #[utoipa::path(
     get,
     path = "/v1/pipelines/{pipeline_id}/jobs/{job_id}/output",
     tag = "jobs",
     params(
         ("pipeline_id" = String, Path, description = "Pipeline id"),
-        ("job_id" = String, Path, description = "Job id")
+        ("job_id" = String, Path, description = "Job id"),
+        JobOutputQuery
     ),
     responses(
-        (status = 200, description = "Job output as 'text/event-stream'"),
+        (status = 200, description = "Currently available job output", body = [OutputData]),
     ),
 )]
 pub async fn get_job_output(
@@ -541,12 +539,13 @@ pub async fn get_job_output(
         id: pipeline_pub_id,
         job_id: job_pub_id,
     }): Path<PipelineJobPath>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ErrorResp> {
+    Query(query): Query<JobOutputQuery>,
+) -> Result<Json<Vec<OutputData>>, ErrorResp> {
     let db = state.database.client().await?;
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     // validate that the job exists, the user has access, and the graph has a preview sink
-    let job = query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
+    query_job_by_pub_id(&pipeline_pub_id, &job_pub_id, &db, &auth_data).await?;
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
@@ -554,88 +553,19 @@ pub async fn get_job_output(
         .graph
         .nodes
         .iter()
-        .any(|n| n.operator.contains("preview"))
+        .any(|node| node.operator.contains("preview") && node.operator_id == query.operator_id)
     {
-        // TODO: make this check more robust
-        return Err(bad_request("Job does not have a preview sink".to_string()));
+        return Err(bad_request(format!(
+            "Job does not have preview operator '{}'",
+            query.operator_id
+        )));
     }
-    let mut output = PreviewOutputPoller::new(&config().preview_url, &job_pub_id).await?;
-    let (tx, rx) = tokio::sync::mpsc::channel(32);
-    let database = state.database.clone();
-    let organization_id = auth_data.organization_id.clone();
-    let initially_terminal = matches!(job.state.as_str(), "Finished" | "Failed" | "Stopped");
 
-    info!("Subscribed to output");
-    tokio::spawn(async move {
-        let mut message_count = 0;
-        loop {
-            let chunks = match output.poll().await {
-                Ok(chunks) => chunks,
-                Err(e) => {
-                    warn!(job_id = %job_pub_id, error = %e.message, "failed to poll preview output");
-                    break;
-                }
-            };
-            let had_output = !chunks.is_empty();
+    let output =
+        PreviewOutputReader::new(&config().preview_url, &job_pub_id, Some(&query.operator_id))
+            .await?;
 
-            for output_data in chunks {
-                let e = Ok(Event::default()
-                    .json_data(output_data)
-                    .unwrap()
-                    .id(message_count.to_string()));
-
-                if tx.send(e).await.is_err() {
-                    info!("Closing watch stream for {}", job_pub_id);
-                    return;
-                }
-
-                message_count += 1;
-            }
-
-            if had_output {
-                continue;
-            }
-
-            if initially_terminal {
-                break;
-            }
-
-            let terminal = match database.client().await {
-                Ok(client) => match api_queries::fetch_get_pipeline_job(
-                    &client,
-                    &organization_id,
-                    &pipeline_pub_id,
-                    &job_pub_id,
-                )
-                .await
-                {
-                    Ok(jobs) => jobs.first().is_none_or(|job| {
-                        matches!(
-                            job.state.as_deref(),
-                            Some("Finished" | "Failed" | "Stopped")
-                        )
-                    }),
-                    Err(e) => {
-                        warn!(job_id = %job_pub_id, error = %e, "failed to query preview job state");
-                        true
-                    }
-                },
-                Err(e) => {
-                    warn!(job_id = %job_pub_id, error = %e, "failed to connect while querying preview job state");
-                    true
-                }
-            };
-            if terminal {
-                break;
-            }
-
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-
-        info!("Closing watch stream for {}", job_pub_id);
-    });
-
-    Ok(Sse::new(ReceiverStream::new(rx)))
+    Ok(Json(output.read(query.offset).await?))
 }
 
 /// Get all jobs

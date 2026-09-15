@@ -42,7 +42,7 @@ use tracing::warn;
 
 use crate::AuthData;
 use crate::jobs::get_action;
-use crate::preview_output::{PreviewOutputPoller, flatten_preview_output};
+use crate::preview_output::{PreviewOutputReader, flatten_preview_output};
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
@@ -338,7 +338,6 @@ fn single_file_source_op(
 fn rewrite_batch_preview_graph(
     compiled: &mut CompiledSql,
     input_files: &HashMap<String, String>,
-    output_path: &str,
 ) -> Result<(), ErrorResp> {
     let mut source_tables = Vec::new();
     let mut sink_count = 0;
@@ -418,7 +417,8 @@ fn rewrite_batch_preview_graph(
                     operator.operator_config = rewritten.encode_to_vec();
                 }
                 OperatorName::ConnectorSink => {
-                    operator.operator_config = preview_sink(output_path, None).encode_to_vec();
+                    operator.operator_config =
+                        preview_sink(&config().preview_url, None).encode_to_vec();
                 }
                 _ => {}
             }
@@ -975,14 +975,8 @@ pub async fn create_batch_preview(
     )
     .await??;
 
-    if req.output_path.is_empty() {
-        return Err(bad_request(
-            "the batch preview output path must not be empty".to_string(),
-        ));
-    }
-
     let pipeline_id = generate_id(IdTypes::Pipeline);
-    rewrite_batch_preview_graph(&mut compiled, &req.input_files, &req.output_path)?;
+    rewrite_batch_preview_graph(&mut compiled, &req.input_files)?;
 
     create_pipeline_int(
         format!("batch_preview_{}", to_millis(SystemTime::now())),
@@ -1005,10 +999,10 @@ pub async fn create_batch_preview(
     .await?;
 
     let job_id = wait_for_batch_preview(&pipeline_id, &auth_data, &state.database).await?;
-    let mut output = PreviewOutputPoller::new(&req.output_path, &job_id).await?;
+    let output = PreviewOutputReader::new(&config().preview_url, &job_id, None).await?;
 
     Ok(Json(BatchPreviewResponse {
-        output: flatten_preview_output(output.poll().await?)?,
+        output: flatten_preview_output(output.read(0).await?)?,
     }))
 }
 
@@ -1432,17 +1426,14 @@ mod tests {
     #[test]
     fn batch_preview_rewrites_sources_and_sink() {
         let mut compiled = compiled_program(&["orders", "customers"], 1);
+        let preview_url = config().preview_url.clone();
+        let preview_max_buffer_bytes = config().pipeline.preview_output_max_buffer_bytes;
         let input_files = HashMap::from([
             ("orders".to_string(), "/input/orders.json".to_string()),
             ("customers".to_string(), "/input/customers.json".to_string()),
         ]);
 
-        rewrite_batch_preview_graph(
-            &mut compiled,
-            &input_files,
-            "s3://preview-bucket/output/result",
-        )
-        .unwrap();
+        rewrite_batch_preview_graph(&mut compiled, &input_files).unwrap();
 
         assert!(compiled.connection_ids.is_empty());
         for node in compiled.program.graph.node_weights() {
@@ -1465,8 +1456,9 @@ mod tests {
                         .unwrap()
                         .validate_table(&config.table)
                         .unwrap();
-                    assert_eq!(config.table["path"], "s3://preview-bucket/output/result");
+                    assert_eq!(config.table["path"], preview_url);
                     assert!(config.table["flush_interval_millis"].is_null());
+                    assert_eq!(config.table["max_buffer_bytes"], preview_max_buffer_bytes);
                 }
                 _ => unreachable!(),
             }
@@ -1479,7 +1471,6 @@ mod tests {
         let error = rewrite_batch_preview_graph(
             &mut compiled,
             &HashMap::from([("orders".to_string(), "/input/orders.json".to_string())]),
-            "/output/result",
         )
         .unwrap_err();
 
@@ -1496,7 +1487,6 @@ mod tests {
                 ("orders".to_string(), "/input/orders.json".to_string()),
                 ("unknown".to_string(), "/input/unknown.json".to_string()),
             ]),
-            "/output/result",
         )
         .unwrap_err();
 

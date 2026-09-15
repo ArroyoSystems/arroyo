@@ -93,6 +93,12 @@ impl TryFrom<LogicalProgram> for PipelineGraph {
             .node_weights()
             .map(|node| Ok(PipelineNode {
                 node_id: node.node_id,
+                operator_id: node
+                    .operator_chain
+                    .operators
+                    .first()
+                    .map(|operator| operator.operator_id.clone())
+                    .unwrap_or_default(),
                 operator: match node.operator_chain.operators.first() {
                     Some(ChainedLogicalOperator { operator_name: OperatorName::ConnectorSource | OperatorName::ConnectorSink, operator_config, .. }) => {
                         ConnectorOp::decode(&operator_config[..])

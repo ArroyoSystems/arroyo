@@ -404,7 +404,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Subscribe to a job's output */
+        /** Read a job's available output */
         get: operations["get_job_output"];
         put?: never;
         post?: never;
@@ -490,8 +490,6 @@ export interface components {
             input_files: {
                 [key: string]: string;
             };
-            /** @description Local or object-storage base path where the preview pipeline should write its output. */
-            output_path: string;
             query: string;
             udfs?: components["schemas"]["Udf"][] | null;
         };
@@ -822,7 +820,7 @@ export interface components {
             data: components["schemas"]["OperatorMetricGroup"][];
         };
         OutputData: {
-            batch: string;
+            batch: unknown;
             operator_id: string;
             /** Format: int64 */
             start_id: number;
@@ -886,6 +884,7 @@ export interface components {
             /** Format: int32 */
             node_id: number;
             operator: string;
+            operator_id: string;
             /** Format: int32 */
             parallelism: number;
         };
@@ -1757,7 +1756,10 @@ export interface operations {
     };
     get_job_output: {
         parameters: {
-            query?: never;
+            query: {
+                operator_id: string;
+                offset: number;
+            };
             header?: never;
             path: {
                 /** @description Pipeline id */
@@ -1769,12 +1771,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Job output as 'text/event-stream' */
+            /** @description Currently available job output */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OutputData"][];
+                };
             };
         };
     };

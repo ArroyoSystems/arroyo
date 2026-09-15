@@ -225,6 +225,7 @@ pub fn preview_sink(path: &str, flush_interval: Option<Duration>) -> api::Connec
             table: json!({
                 "path": path,
                 "flush_interval_millis": flush_interval.map(|d| d.as_millis() as u64),
+                "max_buffer_bytes": config().pipeline.preview_output_max_buffer_bytes,
             }),
             ..Default::default()
         })

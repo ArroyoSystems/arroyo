@@ -250,12 +250,18 @@ export function PipelineDetails() {
     </TabPanel>
   );
 
+  const previewOperator = pipeline.graph.nodes.find(n => n.operator.includes('preview'));
   const outputsTab = (
     <TabPanel w={'100%'} h={'100%'}>
-      {pipeline.graph.nodes.find(n => n.operator.includes('preview')) == null ? (
+      {previewOperator == null ? (
         <Text>Pipeline does not have a web sink</Text>
       ) : (
-        <PipelineOutputs pipelineId={pipeline.id} job={job} onDemand={true} />
+        <PipelineOutputs
+          pipelineId={pipeline.id}
+          job={job}
+          operatorId={previewOperator.operator_id}
+          onDemand={true}
+        />
       )}
     </TabPanel>
   );

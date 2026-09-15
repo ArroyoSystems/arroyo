@@ -563,6 +563,9 @@ pub struct PipelineConfig {
     /// How often streaming preview sinks write an output file
     pub preview_output_flush_interval: HumanReadableDuration,
 
+    /// Maximum number of bytes a preview sink buffers before writing an output file
+    pub preview_output_max_buffer_bytes: usize,
+
     /// How many restarts to allow before moving to failed (-1 for infinite)
     pub allowed_restarts: i32,
 

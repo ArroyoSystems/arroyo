@@ -74,7 +74,7 @@ export interface PreviewOptions {
 
 export function CreatePipeline() {
   const [pipelineId, setPipelineId] = useState<string | undefined>(undefined);
-  const { updatePipeline } = usePipeline(pipelineId);
+  const { pipeline: previewPipeline, updatePipeline } = usePipeline(pipelineId);
   const { jobs } = usePipelineJobs(pipelineId, true, 500);
   const job = jobs?.length ? jobs[0] : undefined;
   const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
@@ -403,8 +403,11 @@ export function CreatePipeline() {
 
   let previewResultsTabContent = <Text>Preview your SQL to see outputs.</Text>;
   const previewing = job?.running_desired && job?.state != 'Failed' && !job?.finish_time;
+  const previewOperatorId = previewPipeline?.graph.nodes.find(node =>
+    node.operator.includes('preview')
+  )?.operator_id;
 
-  if (pipelineId != null && jobs != null && jobs[0] != null) {
+  if (pipelineId != null && jobs != null && jobs[0] != null && previewOperatorId != null) {
     setTourStep(TourSteps.TourCompleted);
     previewResultsTabContent = (
       <Box
@@ -417,7 +420,12 @@ export function CreatePipeline() {
         }}
         overflow="auto"
       >
-        <PipelineOutputs pipelineId={pipelineId} job={jobs[0]} onDemand={false} />
+        <PipelineOutputs
+          pipelineId={pipelineId}
+          job={jobs[0]}
+          operatorId={previewOperatorId}
+          onDemand={false}
+        />
       </Box>
     );
   } else {
