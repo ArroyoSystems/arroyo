@@ -8,16 +8,16 @@ use http::StatusCode;
 
 use petgraph::visit::NodeRef;
 use petgraph::{Direction, EdgeDirection};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use crate::{compiler_service, connection_profiles, jobs, types};
-use arroyo_datastream::default_sink;
+use arroyo_datastream::{default_sink, preview_sink};
 use arroyo_rpc::api_types::pipelines::{
-    FailureReason, Job, Pipeline, PipelinePatch, PipelinePost, PipelineRestart, PreviewPost,
-    QueryValidationResult, StopType, ValidateQueryPost,
+    BatchPreviewPost, BatchPreviewResponse, FailureReason, Job, Pipeline, PipelinePatch,
+    PipelinePost, PipelineRestart, PreviewPost, QueryValidationResult, StopType, ValidateQueryPost,
 };
 use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
@@ -42,6 +42,7 @@ use tracing::warn;
 
 use crate::AuthData;
 use crate::jobs::get_action;
+use crate::preview_output::{PreviewOutputPoller, flatten_preview_output};
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
@@ -57,6 +58,9 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
+
+const BATCH_PREVIEW_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+const BATCH_PREVIEW_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 async fn compile_sql(
     query: String,
@@ -289,6 +293,142 @@ async fn register_schemas(compiled_sql: &mut CompiledSql) -> anyhow::Result<()> 
     Ok(())
 }
 
+fn decode_connector_op(operator: &ChainedLogicalOperator) -> Result<ConnectorOp, ErrorResp> {
+    ConnectorOp::decode(&operator.operator_config[..]).map_err(|e| {
+        log_and_map(anyhow!(
+            "failed to decode connector operator '{}': {e}",
+            operator.operator_id
+        ))
+    })
+}
+
+fn single_file_source_op(
+    mut connector: ConnectorOp,
+    path: &str,
+    original_config: &str,
+) -> Result<ConnectorOp, ErrorResp> {
+    let mut config: OperatorConfig = serde_json::from_str(original_config).map_err(|e| {
+        log_and_map(anyhow!(
+            "failed to decode configuration for source table '{}': {e}",
+            connector.table_name
+        ))
+    })?;
+
+    if config.format.is_none() {
+        return Err(bad_request(format!(
+            "source table '{}' does not have a data format",
+            connector.table_name
+        )));
+    }
+
+    config.connection = json!({});
+    config.table = json!({
+        "path": path,
+        "table_type": "source",
+        "wait_for_control": false,
+    });
+    config.rate_limit = None;
+
+    connector.connector = "single_file".to_string();
+    connector.config = serde_json::to_string(&config).map_err(log_and_map)?;
+    connector.description = format!("SingleFileSource<{path}>");
+    Ok(connector)
+}
+
+fn rewrite_batch_preview_graph(
+    compiled: &mut CompiledSql,
+    input_files: &HashMap<String, String>,
+    output_path: &str,
+) -> Result<(), ErrorResp> {
+    let mut source_tables = Vec::new();
+    let mut sink_count = 0;
+
+    for node in compiled.program.graph.node_weights() {
+        for (operator, _) in node.operator_chain.iter() {
+            match operator.operator_name {
+                OperatorName::ConnectorSource => {
+                    let connector = decode_connector_op(operator)?;
+                    if connector.table_name.is_empty() {
+                        return Err(log_and_map(anyhow!(
+                            "source operator '{}' does not have a table name",
+                            operator.operator_id
+                        )));
+                    }
+                    source_tables.push(connector.table_name);
+                }
+                OperatorName::ConnectorSink => sink_count += 1,
+                _ => {}
+            }
+        }
+    }
+
+    if source_tables.is_empty() {
+        return Err(bad_request(
+            "batch previews require at least one source table".to_string(),
+        ));
+    }
+    if sink_count != 1 {
+        return Err(bad_request(format!(
+            "batch previews require exactly one sink, but the query has {sink_count}"
+        )));
+    }
+
+    let source_table_set: HashSet<_> = source_tables.iter().map(String::as_str).collect();
+    let missing: Vec<_> = source_tables
+        .iter()
+        .filter(|table| !input_files.contains_key(*table))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        return Err(bad_request(format!(
+            "missing input files for source tables: {}",
+            missing.join(", ")
+        )));
+    }
+
+    let mut unknown: Vec<_> = input_files
+        .keys()
+        .filter(|table| !source_table_set.contains(table.as_str()))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        unknown.sort();
+        return Err(bad_request(format!(
+            "input files were provided for unknown source tables: {}",
+            unknown.join(", ")
+        )));
+    }
+
+    for (table, path) in input_files {
+        if path.is_empty() {
+            return Err(bad_request(format!(
+                "input file path for source table '{table}' must not be empty"
+            )));
+        }
+    }
+
+    for node in compiled.program.graph.node_weights_mut() {
+        for (operator, _) in node.operator_chain.iter_mut() {
+            match operator.operator_name {
+                OperatorName::ConnectorSource => {
+                    let connector = decode_connector_op(operator)?;
+                    let path = &input_files[&connector.table_name];
+                    let rewritten =
+                        single_file_source_op(connector.clone(), path, &connector.config)?;
+                    operator.operator_config = rewritten.encode_to_vec();
+                }
+                OperatorName::ConnectorSink => {
+                    operator.operator_config = preview_sink(output_path, None).encode_to_vec();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    compiled.connection_ids.clear();
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_pipeline_int(
     name: String,
@@ -297,6 +437,7 @@ pub(crate) async fn create_pipeline_int(
     parallelism: u64,
     checkpoint_interval: Duration,
     is_preview: bool,
+    rewrite_preview_sinks: bool,
     enable_sinks: bool,
     auth: AuthData,
     db: &DatabaseSource,
@@ -326,7 +467,7 @@ pub(crate) async fn create_pipeline_int(
 
     set_parallelism(&mut compiled.program, parallelism as usize);
 
-    if is_preview {
+    if is_preview && rewrite_preview_sinks {
         // in Preview, we either replace sinks with a preview sink, or add a preview sink
         // next to them depending on the `enable_sinks` option
         let g = &mut compiled.program.graph;
@@ -673,6 +814,7 @@ async fn create_pipeline_inner(
         pipeline_post.parallelism,
         checkpoint_interval,
         /* is_preview */ false,
+        /* rewrite_preview_sinks */ false,
         /* enable_sinks */ true,
         auth_data.clone(),
         &state.database,
@@ -731,6 +873,7 @@ pub async fn create_preview_pipeline(
         1,
         Duration::MAX,
         /* is_preview */ true,
+        /* rewrite_preview_sinks */ true,
         req.enable_sinks,
         auth_data.clone(),
         &state.database,
@@ -747,6 +890,126 @@ pub async fn create_preview_pipeline(
         query_pipeline_by_pub_id(&pipeline_id, &state.database.client().await?, &auth_data).await?;
 
     Ok(Json(pipeline))
+}
+
+async fn wait_for_batch_preview(
+    pipeline_id: &str,
+    auth_data: &AuthData,
+    database: &DatabaseSource,
+) -> Result<String, ErrorResp> {
+    let started = Instant::now();
+
+    loop {
+        let jobs = api_queries::fetch_get_pipeline_jobs(
+            &database.client().await?,
+            &auth_data.organization_id,
+            &pipeline_id,
+        )
+        .await?;
+
+        if jobs.len() != 1 {
+            return Err(log_and_map(anyhow!(
+                "expected one job for batch preview pipeline '{pipeline_id}', found {}",
+                jobs.len()
+            )));
+        }
+
+        let job = jobs.into_iter().next().unwrap();
+        match job.state.as_deref().unwrap_or("Created") {
+            "Finished" => return Ok(job.id),
+            "Failed" => {
+                return Err(bad_request(format!(
+                    "batch preview failed: {}",
+                    job.failure_message.unwrap_or_else(|| {
+                        "the pipeline failed without an error message".to_string()
+                    })
+                )));
+            }
+            "Stopped" => {
+                return Err(ErrorResp {
+                    status_code: StatusCode::GATEWAY_TIMEOUT,
+                    message: "batch preview exceeded the preview pipeline TTL".to_string(),
+                });
+            }
+            _ if started.elapsed() >= BATCH_PREVIEW_TIMEOUT => {
+                return Err(ErrorResp {
+                    status_code: StatusCode::GATEWAY_TIMEOUT,
+                    message: format!(
+                        "batch preview did not finish within {} seconds",
+                        BATCH_PREVIEW_TIMEOUT.as_secs()
+                    ),
+                });
+            }
+            _ => tokio::time::sleep(BATCH_PREVIEW_POLL_INTERVAL).await,
+        }
+    }
+}
+
+/// Run a query to completion against local input files and return all output rows
+#[utoipa::path(
+    post,
+    path = "/v1/pipelines/batch_preview",
+    tag = "pipelines",
+    request_body = BatchPreviewPost,
+    responses(
+        (status = 200, description = "Batch preview completed", body = BatchPreviewResponse),
+        (status = 400, description = "Bad request", body = ErrorResp),
+        (status = 504, description = "Batch preview timed out", body = ErrorResp),
+    ),
+)]
+pub async fn create_batch_preview(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+    WithRejection(Json(req), _): WithRejection<Json<BatchPreviewPost>, ApiError>,
+) -> Result<Json<BatchPreviewResponse>, ErrorResp> {
+    let auth_data = authenticate(&state.database, bearer_auth).await?;
+    let udfs = req.udfs.unwrap_or_default();
+
+    let mut compiled = compile_sql(
+        req.query.clone(),
+        &udfs,
+        1,
+        &auth_data,
+        false,
+        &state.database,
+    )
+    .await??;
+
+    if req.output_path.is_empty() {
+        return Err(bad_request(
+            "the batch preview output path must not be empty".to_string(),
+        ));
+    }
+
+    let pipeline_id = generate_id(IdTypes::Pipeline);
+    rewrite_batch_preview_graph(&mut compiled, &req.input_files, &req.output_path)?;
+
+    create_pipeline_int(
+        format!("batch_preview_{}", to_millis(SystemTime::now())),
+        req.query,
+        udfs,
+        1,
+        Duration::MAX,
+        /* is_preview */ true,
+        /* rewrite_preview_sinks */ false,
+        /* enable_sinks */ false,
+        auth_data.clone(),
+        &state.database,
+        compiled,
+        Some(pipeline_id.clone()),
+        None,
+        HashMap::default(),
+        HashMap::default(),
+        serde_json::Value::Object(Default::default()),
+    )
+    .await?;
+
+    let job_id = wait_for_batch_preview(&pipeline_id, &auth_data, &state.database).await?;
+    let mut output = PreviewOutputPoller::new(&req.output_path, &job_id).await?;
+
+    Ok(Json(BatchPreviewResponse {
+        output: flatten_preview_output(output.poll().await?)?,
+    }))
 }
 
 /// Update a pipeline
@@ -1112,4 +1375,132 @@ pub async fn query_job_by_pub_id<'a>(
     .next()
     .ok_or_else(|| not_found("Job"))?
     .into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arroyo_rpc::formats::JsonFormat;
+
+    fn connector_operator(id: u32, table_name: &str, operator_name: OperatorName) -> LogicalNode {
+        let config = OperatorConfig {
+            connection: json!({"original": true}),
+            table: json!({"original": true}),
+            format: Some(Format::Json(JsonFormat::default())),
+            ..Default::default()
+        };
+        let connector = ConnectorOp {
+            connector: "kafka".to_string(),
+            config: serde_json::to_string(&config).unwrap(),
+            description: format!("original {table_name}"),
+            table_name: table_name.to_string(),
+        };
+
+        LogicalNode::single(
+            id,
+            format!("operator_{id}"),
+            operator_name,
+            connector.encode_to_vec(),
+            connector.description,
+            1,
+        )
+    }
+
+    fn compiled_program(source_tables: &[&str], sinks: usize) -> CompiledSql {
+        let mut program = LogicalProgram::default();
+        for (index, table) in source_tables.iter().enumerate() {
+            program.graph.add_node(connector_operator(
+                index as u32,
+                table,
+                OperatorName::ConnectorSource,
+            ));
+        }
+        for index in 0..sinks {
+            program.graph.add_node(connector_operator(
+                (source_tables.len() + index) as u32,
+                "output",
+                OperatorName::ConnectorSink,
+            ));
+        }
+
+        CompiledSql {
+            program,
+            connection_ids: vec![1, 2],
+        }
+    }
+
+    #[test]
+    fn batch_preview_rewrites_sources_and_sink() {
+        let mut compiled = compiled_program(&["orders", "customers"], 1);
+        let input_files = HashMap::from([
+            ("orders".to_string(), "/input/orders.json".to_string()),
+            ("customers".to_string(), "/input/customers.json".to_string()),
+        ]);
+
+        rewrite_batch_preview_graph(
+            &mut compiled,
+            &input_files,
+            "s3://preview-bucket/output/result",
+        )
+        .unwrap();
+
+        assert!(compiled.connection_ids.is_empty());
+        for node in compiled.program.graph.node_weights() {
+            let operator = node.operator_chain.first();
+            let connector = decode_connector_op(operator).unwrap();
+            let config: OperatorConfig = serde_json::from_str(&connector.config).unwrap();
+
+            match operator.operator_name {
+                OperatorName::ConnectorSource => {
+                    assert!(matches!(config.format, Some(Format::Json(_))));
+                    assert_eq!(connector.connector, "single_file");
+                    assert_eq!(config.table["path"], input_files[&connector.table_name]);
+                    assert_eq!(config.table["table_type"], "source");
+                    assert_eq!(config.table["wait_for_control"], false);
+                }
+                OperatorName::ConnectorSink => {
+                    assert!(config.format.is_none());
+                    assert_eq!(connector.connector, "preview");
+                    connector_for_type("preview")
+                        .unwrap()
+                        .validate_table(&config.table)
+                        .unwrap();
+                    assert_eq!(config.table["path"], "s3://preview-bucket/output/result");
+                    assert!(config.table["flush_interval_millis"].is_null());
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn batch_preview_requires_an_input_for_every_source() {
+        let mut compiled = compiled_program(&["orders", "customers"], 1);
+        let error = rewrite_batch_preview_graph(
+            &mut compiled,
+            &HashMap::from([("orders".to_string(), "/input/orders.json".to_string())]),
+            "/output/result",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("customers"));
+    }
+
+    #[test]
+    fn batch_preview_rejects_inputs_for_unknown_tables() {
+        let mut compiled = compiled_program(&["orders"], 1);
+        let error = rewrite_batch_preview_graph(
+            &mut compiled,
+            &HashMap::from([
+                ("orders".to_string(), "/input/orders.json".to_string()),
+                ("unknown".to_string(), "/input/unknown.json".to_string()),
+            ]),
+            "/output/result",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::BAD_REQUEST);
+        assert!(error.message.contains("unknown"));
+    }
 }

@@ -8,8 +8,8 @@ use anyhow::Result;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, OutputData, RegisterNodeReq,
-    RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp, SinkDataReq, SinkDataResp,
+    HeartbeatNodeReq, HeartbeatNodeResp, RegisterNodeReq,
+    RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp,
     TaskStartedReq, TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
     WorkerInitializationCompleteReq, WorkerInitializationCompleteResp,
 };
@@ -21,7 +21,7 @@ use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
 use prometheus::{IntGaugeVec, register_int_gauge_vec};
 use states::{Created, State, StateMachine};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -29,12 +29,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::codec::CompressionEncoding;
 use tonic::{Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 //pub mod compiler;
 pub mod leader_manager;
@@ -195,7 +193,6 @@ pub enum JobMessage {
 #[derive(Clone)]
 pub struct ControllerServer {
     job_state: Arc<tokio::sync::Mutex<HashMap<String, StateMachine>>>,
-    data_txs: Arc<tokio::sync::Mutex<HashMap<String, Vec<Sender<Result<OutputData, Status>>>>>>,
     scheduler: Arc<dyn Scheduler>,
     db: DatabaseSource,
 }
@@ -296,76 +293,6 @@ impl ControllerGrpc for ControllerServer {
         Ok(Response::new(WorkerFinishedResp {}))
     }
 
-    async fn send_sink_data(
-        &self,
-        request: Request<SinkDataReq>,
-    ) -> Result<Response<SinkDataResp>, Status> {
-        let req = request.into_inner();
-        let mut data_txs = self.data_txs.lock().await;
-        if let Some(v) = data_txs.get_mut(&req.job_id) {
-            let output = OutputData {
-                operator_id: req.operator_id,
-                subtask_idx: req.subtask_idx,
-                timestamps: req.timestamps,
-                batch: req.batch,
-                start_id: req.start_id,
-                done: req.done,
-            };
-
-            let mut remove = HashSet::new();
-            for (i, tx) in v.iter().enumerate() {
-                match tx.try_send(Ok(output.clone())) {
-                    Ok(_) => {}
-                    Err(TrySendError::Closed(_)) => {
-                        remove.insert(i);
-                    }
-                    Err(TrySendError::Full(_)) => {
-                        debug!("queue full");
-                    }
-                }
-            }
-
-            let mut i = 0;
-            v.retain(|_tx| {
-                i += 1;
-                !remove.contains(&(i - 1))
-            });
-        }
-        Ok(Response::new(SinkDataResp::default()))
-    }
-
-    type SubscribeToOutputStream = ReceiverStream<Result<OutputData, Status>>;
-
-    async fn subscribe_to_output(
-        &self,
-        request: Request<GrpcOutputSubscription>,
-    ) -> Result<Response<Self::SubscribeToOutputStream>, Status> {
-        let job_id = request.into_inner().job_id;
-        if self
-            .job_state
-            .lock()
-            .await
-            .get(&job_id)
-            .ok_or_else(|| Status::not_found(format!("Job {job_id} does not exist")))?
-            .state
-            .read()
-            .unwrap()
-            .as_str()
-            != "Running"
-        {
-            return Err(Status::failed_precondition(
-                "Job must be running to read output",
-            ));
-        }
-
-        let (tx, rx) = tokio::sync::mpsc::channel(32);
-
-        let mut data_txs = self.data_txs.lock().await;
-        data_txs.entry(job_id).or_default().push(tx);
-
-        Ok(Response::new(ReceiverStream::new(rx)))
-    }
-
     async fn worker_initialization_complete(
         &self,
         request: Request<WorkerInitializationCompleteReq>,
@@ -424,7 +351,6 @@ impl ControllerServer {
 
         Self {
             scheduler,
-            data_txs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             job_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db: database,
         }

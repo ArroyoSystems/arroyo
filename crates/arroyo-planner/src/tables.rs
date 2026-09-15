@@ -514,6 +514,7 @@ impl ConnectorTable {
             connector: self.connector.clone(),
             config: self.config.clone(),
             description: self.description.clone(),
+            table_name: self.name.clone(),
         }
     }
 

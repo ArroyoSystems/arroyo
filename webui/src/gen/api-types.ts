@@ -216,6 +216,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pipelines/batch_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a query to completion against local input files and return all output rows */
+        post: operations["create_batch_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pipelines/preview": {
         parameters: {
             query?: never;
@@ -467,6 +484,20 @@ export interface components {
         } | {
             /** @enum {string} */
             behavior: "drop";
+        };
+        BatchPreviewPost: {
+            /** @description Maps each source table name to a file path accessible to the pipeline worker. */
+            input_files: {
+                [key: string]: string;
+            };
+            /** @description Local or object-storage base path where the preview pipeline should write its output. */
+            output_path: string;
+            query: string;
+            udfs?: components["schemas"]["Udf"][] | null;
+        };
+        BatchPreviewResponse: {
+            /** @description Query results in sink arrival order. */
+            output: unknown[];
         };
         Checkpoint: {
             backend: string;
@@ -861,8 +892,19 @@ export interface components {
         PipelinePatch: {
             /** Format: int64 */
             checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             /** Format: int64 */
             parallelism?: number | null;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
@@ -1341,6 +1383,48 @@ export interface operations {
             };
             /** @description Bad request */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+        };
+    };
+    create_batch_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchPreviewPost"];
+            };
+        };
+        responses: {
+            /** @description Batch preview completed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchPreviewResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+            /** @description Batch preview timed out */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };

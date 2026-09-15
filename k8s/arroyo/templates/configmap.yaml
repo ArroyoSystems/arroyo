@@ -5,6 +5,7 @@ metadata:
 data:
   config.yaml: |-
     checkpoint-url: "{{ required "A valid .Values.checkpointUrl entry required!" .Values.checkpointUrl }}"
+    preview-url: "{{ required "A valid .Values.previewUrl entry required!" .Values.previewUrl }}"
     controller-endpoint: "http://{{ include "arroyo.fullname" . }}:{{ .Values.controller.service.grpcPort }}"
     
     logging:

@@ -236,6 +236,9 @@ pub struct Config {
     /// URL of an object store or filesystem for storing checkpoints
     pub checkpoint_url: String,
 
+    /// URL of an object store or filesystem for storing preview output
+    pub preview_url: String,
+
     /// Default interval for checkpointing
     pub default_checkpoint_interval: HumanReadableDuration,
 
@@ -556,6 +559,9 @@ pub struct PipelineConfig {
 
     /// How often to flush aggregates
     pub update_aggregate_flush_interval: HumanReadableDuration,
+
+    /// How often streaming preview sinks write an output file
+    pub preview_output_flush_interval: HumanReadableDuration,
 
     /// How many restarts to allow before moving to failed (-1 for infinite)
     pub allowed_restarts: i32,

@@ -1,12 +1,16 @@
 mod operator;
 
 use anyhow::{anyhow, bail};
+use parquet::format::KeyValue;
+use arroyo_rpc::config::config;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use tokio::sync::mpsc::Sender;
 
 use crate::EmptyConfig;
@@ -17,9 +21,77 @@ use arroyo_operator::operator::ConstructedOperator;
 
 pub struct PreviewConnector {}
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "snake_case", deny_unknown_fields)]
+pub struct PreviewTable {
+    pub path: String,
+    pub flush_interval_millis: Option<u64>,
+}
+
+impl Default for PreviewTable {
+    fn default() -> Self {
+        Self {
+            path: config().preview_url.clone(),
+            flush_interval_millis: Some(
+                config().pipeline.preview_output_flush_interval.as_millis() as u64,
+            ),
+        }
+    }
+}
+
+pub struct PreviewMetadata {
+    pub start_row: u64,
+    pub operator_id: String,
+    pub subtask_idx: u64,
+    pub timestamp_idx: u64,
+}
+
+impl From<PreviewMetadata> for Vec<KeyValue> {
+    fn from(value: PreviewMetadata) -> Self {
+        vec![
+            KeyValue::new("dev.arroyo.preview.start_row".to_string(), value.start_row.to_string()),
+            KeyValue::new("dev.arroyo.preview.operator_id".to_string(), value.operator_id),
+            KeyValue::new("dev.arroyo.preview.subtask_idx".to_string(), value.subtask_idx.to_string()),
+            KeyValue::new("dev.arroyo.preview.timestamp_idx".to_string(), value.timestamp_idx.to_string()),
+        ]
+    }
+}
+
+fn extract_metadata<T>(metadata: &[KeyValue], key: &str) -> anyhow::Result<T>
+where
+    T: FromStr,
+    T::Err: std::fmt::Display,
+{
+    let value = metadata
+        .iter()
+        .find(|value| value.key == key)
+        .ok_or_else(|| anyhow!("missing {key} metadata"))?
+        .value
+        .as_deref()
+        .ok_or_else(|| anyhow!("{key} metadata has no value"))?;
+
+    value
+        .parse()
+        .map_err(|error| anyhow!("invalid {key} metadata: {error}"))
+}
+
+impl TryFrom<Vec<KeyValue>> for PreviewMetadata {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<KeyValue>) -> Result<Self, Self::Error> {
+        Ok(Self {
+            start_row: extract_metadata(&value, "dev.arroyo.preview.start_row")?,
+            operator_id: extract_metadata(&value, "dev.arroyo.preview.operator_id")?,
+            subtask_idx: extract_metadata(&value, "dev.arroyo.preview.subtask_idx")?,
+            timestamp_idx: extract_metadata(&value, "dev.arroyo.preview.timestamp_idx")?,
+        })
+    }
+}
+
+
 impl Connector for PreviewConnector {
     type ProfileT = EmptyConfig;
-    type TableT = EmptyConfig;
+    type TableT = PreviewTable;
     fn name(&self) -> &'static str {
         "preview"
     }
@@ -111,11 +183,17 @@ impl Connector for PreviewConnector {
     fn make_operator(
         &self,
         _: Self::ProfileT,
-        _: Self::TableT,
+        table: Self::TableT,
         _: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        Ok(ConstructedOperator::from_operator(
-            Box::<PreviewSink>::default(),
-        ))
+        if table.path.is_empty() {
+            bail!("preview output path must not be empty");
+        }
+        if table.flush_interval_millis == Some(0) {
+            bail!("preview output flush interval must be greater than zero");
+        }
+        Ok(ConstructedOperator::from_operator(Box::new(
+            PreviewSink::new(table),
+        )))
     }
 }

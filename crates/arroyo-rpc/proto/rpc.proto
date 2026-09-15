@@ -144,19 +144,6 @@ message HeartbeatNodeReq {
 message HeartbeatNodeResp {
 }
 
-message SinkDataReq {
-  string job_id = 1;
-  string operator_id = 2;
-  uint32 subtask_idx = 3;
-  repeated uint64 timestamps = 4;
-  uint64 start_id = 6;
-  string batch = 7;
-  bool done = 8;
-}
-
-message SinkDataResp {
-}
-
 message WorkerFinishedReq {
   WorkerContext worker_context = 1;
   uint64  time = 2;
@@ -166,18 +153,6 @@ message WorkerFinishedReq {
 message WorkerFinishedResp {
 }
 
-message GrpcOutputSubscription {
-  string job_id = 1;
-}
-
-message OutputData {
-  string operator_id = 1;
-  uint32 subtask_idx = 2;
-  repeated uint64 timestamps = 3;
-  uint64 start_id = 4;
-  string batch = 5;
-  bool done = 6;
-}
 
 message NonfatalErrorReq {
   WorkerContext worker_context = 1;
@@ -230,12 +205,9 @@ service ControllerGrpc {
   rpc HeartbeatNode(HeartbeatNodeReq) returns (HeartbeatNodeResp);
   rpc RegisterWorker(RegisterWorkerReq) returns (RegisterWorkerResp);
   rpc TaskStarted(TaskStartedReq) returns (TaskStartedResp);
-  rpc SendSinkData(SinkDataReq) returns (SinkDataResp);
   // sent from the node to the controller when a worker process exits
   rpc WorkerFinished(WorkerFinishedReq) returns (WorkerFinishedResp);
   rpc WorkerInitializationComplete(WorkerInitializationCompleteReq) returns (WorkerInitializationCompleteResp);
-
-  rpc SubscribeToOutput(GrpcOutputSubscription) returns (stream OutputData);
 }
 
 service JobControllerGrpc {

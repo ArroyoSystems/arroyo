@@ -26,8 +26,9 @@ use crate::jobs::{
 };
 use crate::metrics::get_operator_metric_groups;
 use crate::pipelines::{
-    create_pipeline, create_preview_pipeline, delete_pipeline, get_pipeline, get_pipeline_jobs,
-    get_pipelines, patch_pipeline, put_pipeline, restart_pipeline, validate_query,
+    create_batch_preview, create_pipeline, create_preview_pipeline, delete_pipeline, get_pipeline,
+    get_pipeline_jobs, get_pipelines, patch_pipeline, put_pipeline, restart_pipeline,
+    validate_query,
 };
 use crate::rest_utils::not_found;
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
@@ -82,6 +83,7 @@ fn pipeline_and_job_routes() -> Router<AppState> {
     Router::new()
         .route("/pipelines", post(create_pipeline))
         .route("/pipelines/preview", post(create_preview_pipeline))
+        .route("/pipelines/batch_preview", post(create_batch_preview))
         .route("/pipelines", get(get_pipelines))
         .route("/jobs", get(get_jobs))
         .route("/pipelines/validate_query", post(validate_query))

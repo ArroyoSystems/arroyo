@@ -217,20 +217,29 @@ pub enum ImpulseSpec {
     EventsPerSecond(f32),
 }
 
+pub fn preview_sink(path: &str, flush_interval: Option<Duration>) -> api::ConnectorOp {
+    api::ConnectorOp {
+        connector: "preview".to_string(),
+        config: serde_json::to_string(&arroyo_rpc::OperatorConfig {
+            connection: json!({}),
+            table: json!({
+                "path": path,
+                "flush_interval_millis": flush_interval.map(|d| d.as_millis() as u64),
+            }),
+            ..Default::default()
+        })
+        .unwrap(),
+        description: "PreviewSink".to_string(),
+        table_name: "preview".to_string(),
+    }
+}
+
 pub fn default_sink() -> api::ConnectorOp {
     match config().pipeline.default_sink {
-        DefaultSink::Preview => api::ConnectorOp {
-            connector: "preview".to_string(),
-            config: json!({
-                "connection": {},
-                "table": {},
-                "connection_schema": {
-                    "fields": [],
-                }
-            })
-            .to_string(),
-            description: "PreviewSink".to_string(),
-        },
+        DefaultSink::Preview => preview_sink(
+            &config().preview_url,
+            Some(*config().pipeline.preview_output_flush_interval),
+        ),
         DefaultSink::Stdout => api::ConnectorOp {
             connector: "stdout".to_string(),
             config: json!({
@@ -242,6 +251,7 @@ pub fn default_sink() -> api::ConnectorOp {
             })
             .to_string(),
             description: "StdoutSink".to_string(),
+            table_name: "stdout".to_string(),
         },
     }
 }

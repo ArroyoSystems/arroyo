@@ -98,6 +98,7 @@ impl ArroyoExtension for LookupJoin {
                 connector: self.connector.connector.clone(),
                 config: self.connector.config.clone(),
                 description: self.connector.description.clone(),
+                table_name: self.connector.name.clone(),
             }),
             key_exprs: self
                 .on

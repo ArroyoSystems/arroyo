@@ -88,6 +88,7 @@ s3:
 
 artifactUrl: ""
 checkpointUrl: ""
+previewUrl: ""
 
 serviceAccount:
   # Specifies whether a service account should be created
@@ -131,4 +132,4 @@ volumeMounts: []
 
 existingConfigMap: ""
 
-env: []  
+env: []

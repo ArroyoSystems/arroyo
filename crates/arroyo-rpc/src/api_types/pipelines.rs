@@ -1,6 +1,5 @@
 use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
-use crate::grpc as grpc_proto;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
@@ -74,6 +73,25 @@ pub struct PreviewPost {
     pub udfs: Option<Vec<Udf>>,
     #[serde(default)]
     pub enable_sinks: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct BatchPreviewPost {
+    pub query: String,
+    pub udfs: Option<Vec<Udf>>,
+    /// Maps each source table name to a file path accessible to the pipeline worker.
+    #[serde(alias = "inputs", alias = "tables")]
+    pub input_files: HashMap<String, String>,
+    /// Local or object-storage base path where the preview pipeline should write its output.
+    pub output_path: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct BatchPreviewResponse {
+    /// Query results in sink arrival order.
+    pub output: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -215,16 +233,4 @@ pub struct OutputData {
     pub timestamps: Vec<u64>,
     pub start_id: u64,
     pub batch: String,
-}
-
-impl From<grpc_proto::rpc::OutputData> for OutputData {
-    fn from(value: grpc_proto::rpc::OutputData) -> Self {
-        OutputData {
-            operator_id: value.operator_id,
-            subtask_idx: value.subtask_idx,
-            timestamps: value.timestamps,
-            start_id: value.start_id,
-            batch: value.batch,
-        }
-    }
 }

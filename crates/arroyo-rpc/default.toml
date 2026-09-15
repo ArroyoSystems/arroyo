@@ -1,9 +1,11 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
+preview-url = "/tmp/arroyo/previews"
 default-checkpoint-interval = "10s"
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"
 update-aggregate-flush-interval = "1s"
+preview-output-flush-interval = "1s"
 allowed-restarts = 20
 worker-heartbeat-timeout = "30s"
 healthy-duration = "2m"

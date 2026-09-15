@@ -1,25 +1,94 @@
-use arrow::array::{RecordBatch, TimestampNanosecondArray};
-use arrow::json::writer::JsonArray;
-use arrow::json::{Writer, WriterBuilder};
-use arroyo_formats::json::encoders::ArroyoEncoderFactory;
+use arrow::array::{RecordBatch};
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
-use arroyo_rpc::config::config;
-use arroyo_rpc::controller_client;
+use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
-use arroyo_rpc::formats::TimestampFormat;
-use arroyo_rpc::grpc::rpc::controller_grpc_client::ControllerGrpcClient;
-use arroyo_rpc::grpc::rpc::{SinkDataReq, TableConfig};
+use arroyo_rpc::grpc::rpc::TableConfig;
 use arroyo_state::global_table_config;
-use arroyo_types::{CheckpointBarrier, SignalMessage, from_nanos, to_micros};
+use arroyo_storage::StorageProvider;
+use arroyo_types::{CheckpointBarrier, SignalMessage, TaskInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tonic::transport::Channel;
+use std::time::{Duration, Instant};
+use itertools::Itertools;
+use parquet::arrow::{AsyncArrowWriter};
+use parquet::basic::ZstdLevel;
+use parquet::file::properties::WriterProperties;
+use arroyo_rpc::df::ArroyoSchema;
+use super::{PreviewMetadata, PreviewTable};
 
-#[derive(Default)]
 pub struct PreviewSink {
-    client: Option<ControllerGrpcClient<Channel>>,
+    config: PreviewTable,
+    storage: Option<StorageProvider>,
     row: usize,
+    pending_start_id: Option<u64>,
+    pending_batches: Vec<RecordBatch>,
+    last_flush: Instant,
+}
+
+impl PreviewSink {
+    pub fn new(config: PreviewTable) -> Self {
+        Self {
+            config,
+            storage: None,
+            row: 0,
+            pending_start_id: None,
+            pending_batches: vec![],
+            last_flush: Instant::now(),
+        }
+    }
+
+    async fn flush(&mut self, input: &ArroyoSchema, task_info: Arc<TaskInfo>) -> DataflowResult<()> {
+        if self.pending_batches.is_empty() {
+            return Ok(());
+        }
+
+        let Some(start_id) = self.pending_start_id.take() else {
+            return Ok(());
+        };
+
+        let batches = self.pending_batches.drain(..).collect_vec();
+
+        let path = format!(
+            "{}/{}/{}/{start_id:020}.parquet",
+            task_info.job_id, task_info.operator_id, task_info.task_index,
+        );
+
+        let mut file = self.storage.as_mut().expect("storage must have been initialized")
+            .buf_writer(path);
+
+        let metadata = PreviewMetadata {
+            start_row: start_id,
+            operator_id: task_info.operator_id.clone(),
+            subtask_idx: task_info.task_index as u64,
+            timestamp_idx: input.timestamp_index as u64,
+        };
+
+        let props = WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::ZSTD(ZstdLevel::try_new(3).unwrap()))
+            .set_key_value_metadata(Some(metadata.into()))
+            .build();
+
+        let mut writer = AsyncArrowWriter::try_new(&mut file, batches.first().unwrap().schema().clone(), Some(props))
+            .map_err(|e| connector_err!(Internal, NoRetry, source: e.into(), "failed to construct parquet writer"))?;
+
+        for batch in batches {
+            writer.write(&batch).await
+                .map_err(|e| connector_err!(Internal, NoRetry, source: e.into(), "failed to write preview output"))?;
+        }
+
+        writer.close().await
+            .map_err(|e| connector_err!(Internal, NoRetry, source: e.into(), "failed to close parquet writer"))?;
+
+        self.last_flush = Instant::now();
+        Ok(())
+    }
+}
+
+impl Default for PreviewSink {
+    fn default() -> Self {
+        Self::new(PreviewTable::default())
+    }
 }
 
 #[async_trait::async_trait]
@@ -35,67 +104,59 @@ impl ArrowOperator for PreviewSink {
         )
     }
 
+    fn tick_interval(&self) -> Option<Duration> {
+        self.config.flush_interval_millis.map(Duration::from_millis)
+    }
+
     async fn on_start(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
-        let table = ctx.table_manager.get_global_keyed_state("s").await.unwrap();
-
+        let table = ctx.table_manager.get_global_keyed_state("s").await?;
         self.row = *table.get(&ctx.task_info.task_index).unwrap_or(&0);
-
-        self.client = Some(
-            controller_client("worker", &config().worker.tls)
+        self.storage = Some(
+            StorageProvider::for_url(&self.config.path)
                 .await
-                .expect("could not connect to controller"),
+                .map_err(|e| {
+                    connector_err!(
+                        Internal,
+                        NoRetry,
+                        source: e.into(),
+                        "invalid path for preview: {}",
+                        self.config.path
+                    )
+                })?,
         );
+
         Ok(())
     }
 
     async fn process_batch(
         &mut self,
-        mut batch: RecordBatch,
+        batch: RecordBatch,
+        _ctx: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) -> DataflowResult<()> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+
+        self.pending_batches.push(batch);
+
+        Ok(())
+    }
+
+    async fn handle_tick(
+        &mut self,
+        _: u64,
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let ts = ctx.in_schemas[0].timestamp_index;
-        let timestamps: Vec<_> = batch
-            .column(ts)
-            .as_any()
-            .downcast_ref::<TimestampNanosecondArray>()
-            .unwrap()
-            .iter()
-            .map(|t| to_micros(from_nanos(t.unwrap_or(0).max(0) as u128)))
-            .collect();
-
-        batch.remove_column(ts);
-
-        let mut buf = Vec::with_capacity(batch.get_array_memory_size());
-
-        let mut writer: Writer<_, JsonArray> = WriterBuilder::new()
-            .with_explicit_nulls(true)
-            .with_encoder_factory(Arc::new(ArroyoEncoderFactory {
-                timestamp_format: TimestampFormat::RFC3339,
-                decimal_encoding: Default::default(),
-            }))
-            .build(&mut buf);
-
-        writer.write(&batch).unwrap();
-
-        writer.finish().unwrap();
-
-        self.client
-            .as_mut()
-            .unwrap()
-            .send_sink_data(SinkDataReq {
-                job_id: ctx.task_info.job_id.clone(),
-                operator_id: ctx.task_info.operator_id.clone(),
-                subtask_idx: ctx.task_info.task_index,
-                timestamps,
-                batch: String::from_utf8(buf).unwrap_or_else(|_| String::new()),
-                start_id: self.row as u64,
-                done: false,
-            })
-            .await
-            .unwrap();
-
-        self.row += batch.num_rows();
+        if self
+            .config
+            .flush_interval_millis
+            .is_some_and(|millis| self.last_flush.elapsed() >= Duration::from_millis(millis))
+        {
+            self.flush(&ctx.in_schemas[0], ctx.task_info.clone()).await?;
+            self.last_flush = Instant::now();
+        }
         Ok(())
     }
 
@@ -105,12 +166,13 @@ impl ArrowOperator for PreviewSink {
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
+        self.flush(&ctx.in_schemas[0], ctx.task_info.clone()).await?;
+
         let table = ctx
             .table_manager
             .get_global_keyed_state::<u32, usize>("s")
             .await
             .unwrap();
-
         table.insert(ctx.task_info.task_index, self.row).await;
         Ok(())
     }
@@ -121,20 +183,6 @@ impl ArrowOperator for PreviewSink {
         ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        self.client
-            .as_mut()
-            .unwrap()
-            .send_sink_data(SinkDataReq {
-                job_id: ctx.task_info.job_id.clone(),
-                operator_id: ctx.task_info.operator_id.clone(),
-                subtask_idx: ctx.task_info.task_index,
-                timestamps: vec![],
-                batch: "[]".to_string(),
-                start_id: self.row as u64,
-                done: true,
-            })
-            .await
-            .unwrap();
-        Ok(())
+        self.flush(&ctx.in_schemas[0], ctx.task_info.clone()).await
     }
 }
