@@ -1,0 +1,19 @@
+crates/arroyo-api/sqlite_migrations/V11__connection_table_versions.sql
+  s_08ae5baf5cb306::t_1ff178b6e7d473 24-38,40,42-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "600aa51871df8b5959c2f0dc7a948d938762774b",
+  "prompts": {},
+  "sessions": {
+    "s_08ae5baf5cb306": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0a62a-84cc-7ca3-b518-dd8f353dcbb1",
+        "model": "unknown"
+      },
+      "human_author": "Cole MacKenzie <cole@cloudflare.com>"
+    }
+  }
+}
