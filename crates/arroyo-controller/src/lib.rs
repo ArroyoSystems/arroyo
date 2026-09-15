@@ -94,7 +94,7 @@ pub struct JobConfig {
     stop_mode: StopMode,
     checkpoint_interval: Duration,
     ttl: Option<Duration>,
-    parallelism_overrides: HashMap<u32, usize>,
+    parallelism_overrides: HashMap<u32, u32>,
     restart_nonce: i32,
     restart_mode: RestartMode,
     /// Per-job environment variables forwarded to workers at scheduling time.
@@ -493,7 +493,7 @@ impl ControllerServer {
                             .unwrap()
                             .into_iter()
                             .filter_map(|(k, v)| {
-                                Some((u32::from_str(k).ok()?, v.as_u64()? as usize))
+                                Some((u32::from_str(k).ok()?, u32::try_from(v.as_u64()?).ok()?))
                             })
                             .collect(),
                         restart_nonce: p.config_restart_nonce,

@@ -1,10 +1,10 @@
 use super::{JobContext, State, Transition, controller_job_failure};
 use crate::JobMessage;
-use crate::states::StateError;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
+use crate::states::{StateError, fatal};
 use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
@@ -65,7 +65,7 @@ impl State for LeaderRunning {
                 .await;
         }
 
-        let operator_parallelism = ctx.program.tasks_per_node();
+        let operator_parallelism = ctx.program.decoded.tasks_per_node();
 
         loop {
             if ctx.leader_manager().last_heartbeat.elapsed()
@@ -125,14 +125,10 @@ impl State for LeaderRunning {
                                 ));
                             }
 
-                            for (node_id, p) in &c.parallelism_overrides {
-                                if let Some(actual) = operator_parallelism.get(node_id)
-                                    && *actual != *p {
-                                    return Ok(Transition::next(
-                                        *self,
-                                        LeaderRescaling {},
-                                    ));
-                                }
+                            let desired = ctx.program.decoded.effective_parallelism(&c.parallelism_overrides)
+                                .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
+                            if desired != operator_parallelism {
+                                return Ok(Transition::next(*self, LeaderRescaling {}));
                             }
 
                         }

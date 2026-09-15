@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use tracing::{debug, error, info, warn};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use cornucopia_async::DatabaseSource;
 
 use self::compiling::Compiling;
@@ -28,7 +28,6 @@ use self::stopping::Stopping;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
 use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
@@ -400,11 +399,32 @@ use crate::leader_manager::LeaderManager;
 pub(crate) use leader_stop_if_desired_running;
 pub(crate) use stop_if_desired_non_running;
 
+/// The persisted program's protobuf scheduling view and serialization version.
+/// Runtime payloads remain opaque to the controller.
+/// Scheduling updates the decoded program's parallelism in memory.
+#[derive(Debug)]
+pub struct ControllerProgram {
+    pub decoded: ArrowProgram,
+    pub program_version: u32,
+}
+
+impl ControllerProgram {
+    pub fn from_bytes(program_version: i32, program_bytes: &[u8]) -> Result<Self> {
+        let program_version = u32::try_from(program_version).context("negative program version")?;
+        ensure!(program_version > 0, "program version must be non-zero");
+        let decoded = ArrowProgram::decode(program_bytes).context("decoding program topology")?;
+        Ok(Self {
+            decoded,
+            program_version,
+        })
+    }
+}
+
 pub struct JobContext<'a> {
     pub config: JobConfig,
     pub pipeline_info: Arc<PipelineInfo>,
     pub status: &'a mut JobStatus,
-    pub program: &'a mut LogicalProgram,
+    pub program: &'a mut ControllerProgram,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
@@ -734,7 +754,7 @@ pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeli
 async fn run_to_completion(
     job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
-    mut program: LogicalProgram,
+    mut program: ControllerProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
     db: DatabaseSource,
@@ -828,18 +848,11 @@ impl StateMachine {
         this
     }
 
-    fn decode_program(bs: &[u8]) -> anyhow::Result<LogicalProgram> {
-        ArrowProgram::decode(bs)
-            .map_err(|e| anyhow!("Failed to decode program: {:?}", e))?
-            .try_into()
-            .map_err(|e| anyhow!("Failed to construct graph from program: {:?}", e))
-    }
-
     async fn get_program(
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<(LogicalProgram, PipelineInfo)>> {
+    ) -> anyhow::Result<Option<(ControllerProgram, PipelineInfo)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?
@@ -860,9 +873,9 @@ impl StateMachine {
             tags,
         };
 
-        Ok(if res.proto_version == 2 {
-            match Self::decode_program(&res.program) {
-                Ok(p) => Some((p, info)),
+        Ok(
+            match ControllerProgram::from_bytes(res.proto_version, &res.program) {
+                Ok(program) => Some((program, info)),
                 Err(e) => {
                     warn!(
                         %job_id,
@@ -872,10 +885,8 @@ impl StateMachine {
                     );
                     None
                 }
-            }
-        } else {
-            None
-        })
+            },
+        )
     }
 
     async fn start(&mut self, mut status: JobStatus, shutdown_guard: ShutdownGuard) {
