@@ -21,29 +21,23 @@ DROP COLUMN config;
 ALTER TABLE connection_tables
 DROP COLUMN schema;
 
-ALTER TABLE connection_table_pipelines
-ADD COLUMN connection_version INTEGER NOT NULL DEFAULT 1;
+CREATE TABLE connection_table_pipelines_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_table_id INTEGER NOT NULL,
+    connection_version INTEGER NOT NULL DEFAULT 1,
+    pub_id TEXT NOT NULL UNIQUE,
+    pipeline_id INTEGER,
+    FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE,
+    FOREIGN KEY (connection_table_id, connection_version)
+        REFERENCES connection_table_versions(connection_table_id, version)
+);
 
-CREATE TRIGGER connection_table_pipeline_version_insert
-BEFORE INSERT ON connection_table_pipelines
-WHEN NOT EXISTS (
-    SELECT 1
-    FROM connection_table_versions
-    WHERE connection_table_id = NEW.connection_table_id
-      AND version = NEW.connection_version
-)
-BEGIN
-    SELECT RAISE(ABORT, 'connection table version does not exist');
-END;
+INSERT INTO connection_table_pipelines_new
+    (id, connection_table_id, connection_version, pub_id, pipeline_id)
+SELECT id, connection_table_id, 1, pub_id, pipeline_id
+FROM connection_table_pipelines;
 
-CREATE TRIGGER connection_table_pipeline_version_update
-BEFORE UPDATE OF connection_table_id, connection_version ON connection_table_pipelines
-WHEN NOT EXISTS (
-    SELECT 1
-    FROM connection_table_versions
-    WHERE connection_table_id = NEW.connection_table_id
-      AND version = NEW.connection_version
-)
-BEGIN
-    SELECT RAISE(ABORT, 'connection table version does not exist');
-END;
+DROP TABLE connection_table_pipelines;
+
+ALTER TABLE connection_table_pipelines_new
+RENAME TO connection_table_pipelines;
