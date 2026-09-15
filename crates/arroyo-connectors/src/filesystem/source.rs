@@ -71,6 +71,24 @@ impl SourceOperator for FileSystemSourceFunc {
         ctx: &mut SourceContext,
         collector: &mut SourceCollector,
     ) -> Result<SourceFinishType, DataflowError> {
+        // Avro files are read and re-encoded as self-describing object container files (see
+        // get_avro_batch_stream), which the shared deserializer only decodes correctly when
+        // avro.raw_datums and avro.confluent_schema_registry are both left at their default
+        // (false): with either set, it instead tries to parse a single Confluent-wire-format
+        // or raw-datum record starting at each container's magic-byte header, which is not
+        // meaningful for a batch of records we've re-encoded as a full container.
+        if let Format::Avro(avro) = &self.format
+            && (avro.raw_datums || avro.confluent_schema_registry)
+        {
+            return Err(connector_err!(
+                User,
+                NoRetry,
+                "the FileSystem Avro source does not support avro.raw_datums or \
+                 avro.confluent_schema_registry; it reads self-describing Avro object \
+                 container files"
+            ));
+        }
+
         let storage_provider = StorageProvider::for_url_with_options(
             &self.source.path,
             self.source.storage_options.clone(),
@@ -392,9 +410,9 @@ impl FileSystemSourceFunc {
             let mut reader = match AvroReader::new(sync_reader) {
                 Ok(reader) => reader,
                 Err(err) => {
-                    let _ = tx.blocking_send(Err(connector_err!(
-                        User, NoRetry, source: err.into(),
-                        "invalid avro file {path_for_errors}"
+                    let _ = tx.blocking_send(Err(Self::classify_avro_read_error(
+                        err,
+                        format!("invalid avro file {path_for_errors}"),
                     )));
                     return;
                 }
@@ -406,9 +424,9 @@ impl FileSystemSourceFunc {
                 let value = match value {
                     Ok(value) => value,
                     Err(err) => {
-                        let _ = tx.blocking_send(Err(connector_err!(
-                            User, NoRetry, source: err.into(),
-                            "invalid avro record in {path_for_errors}"
+                        let _ = tx.blocking_send(Err(Self::classify_avro_read_error(
+                            err,
+                            format!("invalid avro record in {path_for_errors}"),
                         )));
                         return;
                     }
@@ -426,6 +444,22 @@ impl FileSystemSourceFunc {
         });
 
         Ok(Box::new(ReceiverStream::new(rx)))
+    }
+
+    /// apache_avro's Reader reports failures from the underlying byte stream (a transient
+    /// object-store error surfaced through SyncIoBridge as a std::io::Error) using the same
+    /// error type as genuine format/schema corruption, so we can't just treat every read
+    /// failure as a permanent, non-retryable one: that would turn a flaky S3 read into a
+    /// dead job instead of a retry. apache_avro wraps I/O failures in a handful of `Read*`
+    /// variants that carry the io::Error as their `source()`; anything else is real
+    /// corruption (bad magic bytes, invalid schema, bad block CRC, etc).
+    fn classify_avro_read_error(err: apache_avro::Error, context: String) -> DataflowError {
+        let is_io_error = std::error::Error::source(&err).is_some_and(|s| s.is::<std::io::Error>());
+        if is_io_error {
+            connector_err!(External, WithBackoff, source: err.into(), "{context}")
+        } else {
+            connector_err!(User, NoRetry, source: err.into(), "{context}")
+        }
     }
 
     /// Re-encodes a batch of already-decoded Avro values as a fresh, self-contained object
@@ -571,5 +605,40 @@ impl FileSystemSourceFunc {
             }
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileSystemSourceFunc;
+    use arroyo_rpc::errors::{DataflowError, ErrorDomain, RetryHint};
+
+    #[test]
+    fn classifies_io_errors_as_retryable() {
+        let io_err = apache_avro::Error::ReadHeader(std::io::Error::other("connection reset"));
+        let err =
+            FileSystemSourceFunc::classify_avro_read_error(io_err, "reading avro file".to_string());
+        let DataflowError::ConnectorError { domain, retry, .. } = err else {
+            panic!("expected a ConnectorError");
+        };
+        assert_eq!(domain, ErrorDomain::External);
+        assert_eq!(retry, RetryHint::WithBackoff);
+    }
+
+    #[test]
+    fn classifies_format_errors_as_non_retryable() {
+        let corrupt_err = apache_avro::Error::SnappyCrc32 {
+            expected: 1,
+            actual: 2,
+        };
+        let err = FileSystemSourceFunc::classify_avro_read_error(
+            corrupt_err,
+            "reading avro file".to_string(),
+        );
+        let DataflowError::ConnectorError { domain, retry, .. } = err else {
+            panic!("expected a ConnectorError");
+        };
+        assert_eq!(domain, ErrorDomain::User);
+        assert_eq!(retry, RetryHint::NoRetry);
     }
 }
