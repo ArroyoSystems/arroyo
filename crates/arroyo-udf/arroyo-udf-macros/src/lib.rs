@@ -70,7 +70,7 @@ pub fn udf(
         }
     };
 
-    let mangle = Some(quote! { #[no_mangle] });
+    let mangle = Some(quote! { #[unsafe(no_mangle)] });
     let tokens = if parsed.0.udf_type.is_async() {
         async_udf(parsed, mangle)
     } else {
