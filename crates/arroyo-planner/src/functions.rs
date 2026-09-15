@@ -4,7 +4,7 @@ use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{AsArray, as_string_array};
 use arrow_array::types::{Float64Type, Int64Type};
 use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
-use arrow_schema::{DataType, Field, UnionFields, UnionMode};
+use arrow_schema::{DataType, Field};
 use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
@@ -15,9 +15,8 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{Expr, col};
 use serde_json_path::JsonPath;
-use std::collections::HashMap;
 use std::fmt::{Debug, Write};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 
@@ -85,7 +84,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
     registry
         .register_udf(Arc::new(create_udf(
             SERIALIZE_JSON_UNION,
-            vec![DataType::Union(union_fields(), UnionMode::Sparse)],
+            vec![datafusion_functions_json::JSON_UNION_DATA_TYPE.clone()],
             DataType::Utf8,
             Volatility::Immutable,
             Arc::new(serialize_json_union),
@@ -312,15 +311,8 @@ pub fn extract_json_string(args: &[ColumnarValue]) -> Result<ColumnarValue> {
     )
 }
 
-// This code is vendored from
-// https://github.com/datafusion-contrib/datafusion-functions-json/blob/main/src/common_union.rs
-// as the `is_json_union` function is not public. It should be kept in sync with that code so
-// that we are able to detect JSON unions and rewrite them to serialized JSON for sinks.
 pub(crate) fn is_json_union(data_type: &DataType) -> bool {
-    match data_type {
-        DataType::Union(fields, UnionMode::Sparse) => fields == &union_fields(),
-        _ => false,
-    }
+    data_type == &*datafusion_functions_json::JSON_UNION_DATA_TYPE
 }
 
 pub(crate) const TYPE_ID_NULL: i8 = 0;
@@ -330,53 +322,6 @@ const TYPE_ID_FLOAT: i8 = 3;
 const TYPE_ID_STR: i8 = 4;
 const TYPE_ID_ARRAY: i8 = 5;
 const TYPE_ID_OBJECT: i8 = 6;
-
-fn union_fields() -> UnionFields {
-    static FIELDS: OnceLock<UnionFields> = OnceLock::new();
-    FIELDS
-        .get_or_init(|| {
-            let json_metadata: HashMap<String, String> =
-                HashMap::from_iter(vec![("is_json".to_string(), "true".to_string())]);
-            UnionFields::from_iter([
-                (
-                    TYPE_ID_NULL,
-                    Arc::new(Field::new("null", DataType::Null, true)),
-                ),
-                (
-                    TYPE_ID_BOOL,
-                    Arc::new(Field::new("bool", DataType::Boolean, false)),
-                ),
-                (
-                    TYPE_ID_INT,
-                    Arc::new(Field::new("int", DataType::Int64, false)),
-                ),
-                (
-                    TYPE_ID_FLOAT,
-                    Arc::new(Field::new("float", DataType::Float64, false)),
-                ),
-                (
-                    TYPE_ID_STR,
-                    Arc::new(Field::new("str", DataType::Utf8, false)),
-                ),
-                (
-                    TYPE_ID_ARRAY,
-                    Arc::new(
-                        Field::new("array", DataType::Utf8, false)
-                            .with_metadata(json_metadata.clone()),
-                    ),
-                ),
-                (
-                    TYPE_ID_OBJECT,
-                    Arc::new(
-                        Field::new("object", DataType::Utf8, false)
-                            .with_metadata(json_metadata.clone()),
-                    ),
-                ),
-            ])
-        })
-        .clone()
-}
-// End vendored code
 
 pub fn serialize_json_union(args: &[ColumnarValue]) -> Result<ColumnarValue> {
     assert_eq!(args.len(), 1);
