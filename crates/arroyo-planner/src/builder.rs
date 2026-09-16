@@ -12,8 +12,8 @@ use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor
 use datafusion::common::{
     DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference, plan_err,
 };
+use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
@@ -161,11 +161,20 @@ impl<'a> Planner<'a> {
             .ok_or_else(|| DataFusionError::Plan("missing input".to_string()))?;
 
         // need to convert to ExecutionPlan to get the partial schema.
-        let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            self.schema_provider,
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &codec,
-        )?;
+        // Decoding resolves functions through TaskContext. Retain the
+        // same custom UDFs that were used to build the logical plan.
+        let task_context = TaskContext::new(
+            None,
+            self.session_state.session_id().to_string(),
+            self.session_state.config().clone(),
+            self.schema_provider.functions.clone(),
+            HashMap::new(),
+            self.schema_provider.aggregate_functions.clone(),
+            self.schema_provider.window_functions.clone(),
+            self.session_state.runtime_env().clone(),
+        );
+        let partial_aggregation_exec_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = partial_aggregation_exec_plan.schema();
         let final_input_table_provider =
@@ -244,7 +253,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         physical_inputs: &[Arc<dyn ExecutionPlan>],
         _session_state: &SessionState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
-        let schema = node.schema().as_ref().into();
+        let schema = node.schema().inner().clone();
         if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into()
             && arroyo_extension.transparent()
         {
@@ -275,7 +284,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
             };
         Ok(Some(Arc::new(ArroyoMemExec::new(
             name.unwrap_or("memory".to_string()),
-            Arc::new(schema),
+            schema,
         ))))
     }
 }

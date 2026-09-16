@@ -116,6 +116,6 @@ impl ArroyoExtension for TableSourceExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_keys(Arc::new(self.schema.as_ref().into()), vec![]).unwrap()
+        ArroyoSchema::from_schema_keys(self.schema.inner().clone(), vec![]).unwrap()
     }
 }

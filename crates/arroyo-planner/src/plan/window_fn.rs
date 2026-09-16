@@ -111,6 +111,8 @@ impl TreeNodeRewriter for WindowFunctionRewriter {
             order_by: params.order_by,
             window_frame: params.window_frame,
             null_treatment: params.null_treatment,
+            distinct: params.distinct,
+            filter: params.filter,
         };
 
         let new_window_func = WindowFunction { fun, params };
