@@ -29,6 +29,7 @@ const ICON: &str = include_str!("./sse.svg");
 
 pub struct SSEConnector {}
 
+#[async_trait::async_trait]
 impl Connector for SSEConnector {
     type ProfileT = EmptyConfig;
 
@@ -144,7 +145,7 @@ impl Connector for SSEConnector {
         )
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

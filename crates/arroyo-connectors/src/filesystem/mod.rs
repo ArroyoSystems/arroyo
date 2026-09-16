@@ -143,6 +143,7 @@ pub fn make_sink(
 
 pub struct FileSystemConnector {}
 
+#[async_trait::async_trait]
 impl Connector for FileSystemConnector {
     type ProfileT = EmptyConfig;
 
@@ -272,7 +273,7 @@ impl Connector for FileSystemConnector {
         self.from_config(None, name, EmptyConfig {}, options.pull_struct()?, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

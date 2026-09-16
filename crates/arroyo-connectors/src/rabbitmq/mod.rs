@@ -21,6 +21,7 @@ const ICON: &str = include_str!("./rabbitmq.svg");
 import_types!(schema = "src/rabbitmq/profile.json");
 import_types!(schema = "src/rabbitmq/table.json");
 
+#[async_trait::async_trait]
 impl Connector for RabbitmqConnector {
     type ProfileT = RabbitmqStreamConfig;
     type TableT = RabbitmqStreamTable;
@@ -217,7 +218,7 @@ impl Connector for RabbitmqConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,

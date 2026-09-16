@@ -25,6 +25,7 @@ mod source;
 
 pub struct KinesisConnector {}
 
+#[async_trait::async_trait]
 impl Connector for KinesisConnector {
     type ProfileT = EmptyConfig;
 
@@ -169,7 +170,7 @@ impl Connector for KinesisConnector {
         Self::from_config(self, None, name, EmptyConfig {}, table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

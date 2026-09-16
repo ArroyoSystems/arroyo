@@ -17,6 +17,7 @@ use arroyo_operator::operator::ConstructedOperator;
 
 pub struct PreviewConnector {}
 
+#[async_trait::async_trait]
 impl Connector for PreviewConnector {
     type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
@@ -108,7 +109,7 @@ impl Connector for PreviewConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         _: Self::TableT,

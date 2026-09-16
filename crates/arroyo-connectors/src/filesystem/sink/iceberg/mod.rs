@@ -1,5 +1,6 @@
 pub mod metadata;
 pub mod schema;
+mod storage;
 pub mod transforms;
 
 use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
@@ -15,8 +16,8 @@ use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
-use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
+use iceberg::{Catalog, CatalogBuilder, ErrorKind, TableCreation, TableIdent};
+use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
 use itertools::Itertools;
 use regex::Regex;
 use reqwest::Client;
@@ -27,14 +28,16 @@ use std::future::Future;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
+use storage::ArroyoStorageFactory;
 use tracing::{debug, info};
 use uuid::Uuid;
 
-const CONFIG_MAPPINGS: [(&str, &str); 4] = [
+const CONFIG_MAPPINGS: [(&str, &str); 5] = [
     ("s3.region", "aws_region"),
     ("s3.endpoint", "aws_endpoint"),
     ("s3.access-key-id", "aws_access_key_id"),
     ("s3.secret-access-key", "aws_secret_access_key"),
+    ("s3.session-token", "aws_session_token"),
 ];
 
 const ARROYO_COMMIT_ID: &str = "arroyo.commit-id";
@@ -181,10 +184,13 @@ async fn run_with_iceberg_timeout<T>(
 }
 
 impl IcebergTable {
-    pub fn new(catalog: &IcebergCatalog, sink: &IcebergSink) -> anyhow::Result<Self> {
+    pub async fn new(catalog: &IcebergCatalog, sink: &IcebergSink) -> anyhow::Result<Self> {
         match catalog {
             IcebergCatalog::Rest(rest) => {
-                let mut props = HashMap::new();
+                let mut props = HashMap::from([("uri".to_string(), rest.url.clone())]);
+                if let Some(warehouse) = &rest.warehouse {
+                    props.insert("warehouse".to_string(), warehouse.clone());
+                }
                 if let Some(token) = &rest.token {
                     props.insert("token".to_string(), token.sub_env_vars()?);
                 }
@@ -195,16 +201,11 @@ impl IcebergTable {
                     }
                 }
 
-                let config = RestCatalogConfig::builder()
-                    .uri(rest.url.clone())
-                    .warehouse_opt(rest.warehouse.clone())
-                    .props(props)
-                    .client(Some(
-                        Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?,
-                    ))
-                    .build();
-
-                let catalog = RestCatalog::new(config);
+                let catalog = RestCatalogBuilder::default()
+                    .with_client(Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?)
+                    .with_storage_factory(Arc::new(ArroyoStorageFactory))
+                    .load("arroyo", props)
+                    .await?;
 
                 let table_ident = TableIdent::from_strs(
                     sink.namespace
@@ -309,7 +310,7 @@ impl IcebergTable {
     ) -> Result<StorageProvider, DataflowError> {
         let storage_options = self.storage_options.clone();
         let table = self.load_or_create(task_info, schema).await?;
-        let (_, mut config) = table.file_io().clone().into_builder().into_parts();
+        let mut config = table.file_io().config().props().clone();
 
         let mut our_config = HashMap::new();
         for (from, to) in CONFIG_MAPPINGS {
@@ -407,15 +408,6 @@ impl IcebergTable {
             })
             .try_collect()?;
 
-        // Workaround for iceberg-rust 0.6.0 bug: SnapshotProducer drains added_data_files
-        // before computing the summary, producing all-zero added-* stats. We inject the
-        // correct values via set_snapshot_properties so they appear in the snapshot summary.
-        // Fixed upstream in 0.8.0 (https://github.com/apache/iceberg-rust/pull/1767);
-        // this workaround can be removed when iceberg-rust is upgraded.
-        let added_data_files = files.len().to_string();
-        let added_records: u64 = files.iter().map(|f| f.record_count()).sum();
-        let added_files_size: u64 = files.iter().map(|f| f.file_size_in_bytes()).sum();
-
         // commit the transaction in the rest catalog
         debug!(
             message = "starting iceberg commit",
@@ -426,14 +418,9 @@ impl IcebergTable {
         let tx = tx
             .fast_append()
             .set_snapshot_properties(
-                [
-                    (ARROYO_COMMIT_ID.to_string(), tx_id),
-                    ("added-data-files".to_string(), added_data_files),
-                    ("added-records".to_string(), added_records.to_string()),
-                    ("added-files-size".to_string(), added_files_size.to_string()),
-                ]
-                .into_iter()
-                .collect(),
+                [(ARROYO_COMMIT_ID.to_string(), tx_id)]
+                    .into_iter()
+                    .collect(),
             )
             .add_data_files(files)
             .with_check_duplicate(false)

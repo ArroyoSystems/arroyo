@@ -65,9 +65,10 @@ pub struct MetadataDef {
 }
 
 #[allow(clippy::wrong_self_convention)]
-pub trait Connector: Send {
-    type ProfileT: DeserializeOwned + Serialize;
-    type TableT: DeserializeOwned + Serialize;
+#[async_trait]
+pub trait Connector: Send + Sync {
+    type ProfileT: DeserializeOwned + Serialize + Send;
+    type TableT: DeserializeOwned + Serialize + Send;
 
     fn name(&self) -> &'static str;
 
@@ -152,7 +153,7 @@ pub trait Connector: Send {
     ) -> anyhow::Result<Connection>;
 
     #[allow(unused)]
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,
@@ -172,7 +173,8 @@ pub trait Connector: Send {
 }
 #[allow(clippy::type_complexity)]
 #[allow(clippy::wrong_self_convention)]
-pub trait ErasedConnector: Send {
+#[async_trait]
+pub trait ErasedConnector: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn metadata(&self) -> arroyo_rpc::api_types::connections::Connector;
@@ -239,7 +241,7 @@ pub trait ErasedConnector: Send {
         schema: Option<&ConnectionSchema>,
     ) -> anyhow::Result<Connection>;
 
-    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator>;
+    async fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator>;
 
     fn make_lookup(
         &self,
@@ -248,6 +250,7 @@ pub trait ErasedConnector: Send {
     ) -> anyhow::Result<Box<dyn LookupConnector + Send>>;
 }
 
+#[async_trait]
 impl<C: Connector> ErasedConnector for C {
     fn name(&self) -> &'static str {
         self.name()
@@ -383,7 +386,7 @@ impl<C: Connector> ErasedConnector for C {
         )
     }
 
-    fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator> {
+    async fn make_operator(&self, config: OperatorConfig) -> anyhow::Result<ConstructedOperator> {
         self.make_operator(
             self.parse_config(&config.connection).map_err(|e| {
                 anyhow!(
@@ -397,6 +400,7 @@ impl<C: Connector> ErasedConnector for C {
             })?,
             config,
         )
+        .await
     }
 
     fn make_lookup(

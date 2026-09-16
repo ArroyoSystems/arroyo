@@ -167,6 +167,7 @@ impl KafkaConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for KafkaConnector {
     type ProfileT = KafkaConfig;
     type TableT = KafkaTable;
@@ -367,7 +368,7 @@ impl Connector for KafkaConnector {
         Self::from_config(self, None, name, connection, table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,

@@ -78,6 +78,7 @@ impl WebhookConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for WebhookConnector {
     type ProfileT = EmptyConfig;
 
@@ -204,7 +205,7 @@ impl Connector for WebhookConnector {
         self.from_config(None, name, EmptyConfig {}, table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

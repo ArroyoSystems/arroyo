@@ -25,6 +25,7 @@ mod source;
 
 pub struct SingleFileConnector {}
 
+#[async_trait::async_trait]
 impl Connector for SingleFileConnector {
     type ProfileT = EmptyConfig;
 
@@ -143,7 +144,7 @@ impl Connector for SingleFileConnector {
         )
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

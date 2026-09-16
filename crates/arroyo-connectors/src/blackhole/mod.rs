@@ -15,6 +15,7 @@ pub struct BlackholeConnector {}
 
 const ICON: &str = include_str!("./blackhole.svg");
 
+#[async_trait::async_trait]
 impl Connector for BlackholeConnector {
     type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
@@ -113,7 +114,7 @@ impl Connector for BlackholeConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         _: Self::TableT,

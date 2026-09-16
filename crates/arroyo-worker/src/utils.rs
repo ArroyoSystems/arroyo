@@ -15,8 +15,14 @@ fn format_arrow_schema_fields(schema: &Schema) -> Vec<(String, String)> {
         .collect()
 }
 
-fn write_op(d2: &mut String, registry: &Arc<Registry>, idx: usize, el: &ChainedLogicalOperator) {
-    let operator = construct_operator(el.operator_name, &el.operator_config, registry.clone());
+async fn write_op(
+    d2: &mut String,
+    registry: &Arc<Registry>,
+    idx: usize,
+    el: &ChainedLogicalOperator,
+) {
+    let operator =
+        construct_operator(el.operator_name, &el.operator_config, registry.clone()).await;
     let display = operator.display();
 
     let mut label = format!(
@@ -101,11 +107,11 @@ pub async fn to_d2(logical: &LogicalProgram) -> anyhow::Result<String> {
 
         if node.operator_chain.len() == 1 {
             let el = node.operator_chain.first();
-            write_op(&mut d2, &registry, idx.index(), el);
+            write_op(&mut d2, &registry, idx.index(), el).await;
         } else {
             writeln!(d2, "{}: {{", idx.index()).unwrap();
             for (i, (el, edge)) in node.operator_chain.iter().enumerate() {
-                write_op(&mut d2, &registry, i, el);
+                write_op(&mut d2, &registry, i, el).await;
                 if let Some(edge) = edge {
                     write_edge(
                         &mut d2,
