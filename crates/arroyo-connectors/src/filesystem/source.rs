@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use bincode::{Decode, Encode};
 use datafusion::common::ScalarValue;
 use futures::StreamExt;
+use object_store::ObjectStoreExt;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 use parquet::arrow::async_reader::ParquetObjectReader;
 

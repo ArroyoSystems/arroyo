@@ -234,10 +234,10 @@ impl PartitioningConfig {
                 let column_expr = col(field.name());
                 let expr = match field.data_type() {
                     DataType::Utf8 => column_expr,
-                    _ => Expr::Cast(datafusion::logical_expr::Cast {
-                        expr: Box::new(column_expr),
-                        data_type: DataType::Utf8,
-                    }),
+                    _ => Expr::Cast(datafusion::logical_expr::Cast::new(
+                        Box::new(column_expr),
+                        DataType::Utf8,
+                    )),
                 };
                 Ok((field.name(), expr))
             })
