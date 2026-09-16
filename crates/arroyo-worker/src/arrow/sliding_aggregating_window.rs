@@ -1,3 +1,5 @@
+use super::new_task_context;
+use super::reset_execution_plan;
 use anyhow::{Result, anyhow, bail};
 use arrow::compute::{partition, sort_to_indices, take};
 use arrow_array::{Array, PrimitiveArray, RecordBatch, types::TimestampNanosecondType};
@@ -11,7 +13,8 @@ use arroyo_rpc::grpc::{api, rpc::TableConfig};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
 use datafusion::common::ScalarValue;
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use datafusion::execution::TaskContext;
+use datafusion::physical_plan::ExecutionPlan;
 use std::borrow::Cow;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -28,7 +31,6 @@ use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::ArroyoSchema;
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::{
@@ -42,6 +44,7 @@ use tokio_stream::StreamExt;
 use tracing::info;
 
 pub struct SlidingAggregatingWindowFunc<K: Copy> {
+    task_context: Arc<TaskContext>,
     slide: Duration,
     width: Duration,
     binning_function: Arc<dyn PhysicalExpr>,
@@ -166,10 +169,10 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
                 .tiered_record_batches
                 .batches_for_interval(interval_start, interval_end)?;
         }
-        self.finish_execution_plan.reset()?;
+        reset_execution_plan(&mut self.finish_execution_plan)?;
         let mut final_exec = self
             .finish_execution_plan
-            .execute(0, SessionContext::new().task_ctx())?;
+            .execute(0, self.task_context.clone())?;
         self.tiered_record_batches
             .delete_before(bin_end + self.slide - self.width)?;
 
@@ -198,10 +201,10 @@ impl SlidingAggregatingWindowFunc<SystemTime> {
             let mut batches = self.final_batches_passer.write().unwrap();
             *batches = aggregate_results;
         }
-        self.final_projection.reset()?;
+        reset_execution_plan(&mut self.final_projection)?;
         let mut final_projection_exec = self
             .final_projection
-            .execute(0, SessionContext::new().task_ctx())?;
+            .execute(0, self.task_context.clone())?;
         while let Some(batch) = final_projection_exec.next().await {
             collector.collect(batch?).await?;
         }
@@ -453,6 +456,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let width = Duration::from_micros(config.width_micros);
         let input_schema: ArroyoSchema = config
             .input_schema
@@ -462,7 +466,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         let binning_function = PhysicalExprNode::decode(&mut config.binning_function.as_slice())?;
         let binning_function = parse_physical_expr(
             &binning_function,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;
@@ -476,11 +480,8 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         let partial_aggregation_plan =
             PhysicalPlanNode::decode(&mut config.partial_aggregation_plan.as_slice())?;
 
-        let partial_aggregation_plan = partial_aggregation_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
-            &codec,
-        )?;
+        let partial_aggregation_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = config
             .partial_schema
@@ -491,18 +492,12 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
         let final_codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::LockedBatchVec(final_batches_passer.clone()),
         };
-        let finish_execution_plan = finish_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &final_codec,
-        )?;
+        let finish_execution_plan =
+            finish_plan.try_into_physical_plan(&task_context, &final_codec)?;
 
         let final_projection = PhysicalPlanNode::decode(&mut config.final_projection.as_slice())?;
-        let final_projection = final_projection.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &final_codec,
-        )?;
+        let final_projection =
+            final_projection.try_into_physical_plan(&task_context, &final_codec)?;
 
         Ok(ConstructedOperator::from_operator(Box::new(
             SlidingAggregatingWindowFunc {
@@ -510,6 +505,7 @@ impl OperatorConstructor for SlidingAggregatingWindowConstructor {
                 width,
                 binning_function,
                 partial_aggregation_plan,
+                task_context,
                 partial_schema,
                 finish_execution_plan,
                 receiver,
@@ -654,10 +650,10 @@ impl ArrowOperator for SlidingAggregatingWindowFunc<SystemTime> {
                     let mut internal_receiver = self.receiver.write().unwrap();
                     *internal_receiver = Some(unbounded_receiver);
                 }
-                self.partial_aggregation_plan.reset().expect("reset plan");
+                reset_execution_plan(&mut self.partial_aggregation_plan).expect("reset plan");
                 let new_exec = self
                     .partial_aggregation_plan
-                    .execute(0, SessionContext::new().task_ctx())
+                    .execute(0, self.task_context.clone())
                     .unwrap();
                 let next_batch_future = NextBatchFuture::new(bin_start, new_exec);
                 self.futures.push(next_batch_future.clone());

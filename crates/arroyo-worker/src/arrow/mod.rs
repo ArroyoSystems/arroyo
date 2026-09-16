@@ -12,15 +12,17 @@ use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::api;
 use datafusion::common::Result as DFResult;
 use datafusion::common::internal_err;
-use datafusion::execution::context::SessionContext;
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::{FunctionRegistry, SendableRecordBatchStream, TaskContext};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
-use datafusion::physical_expr::{LexOrdering, PhysicalExpr};
+use datafusion::physical_plan::execution_plan::reset_plan_states;
 use datafusion::physical_plan::{ExecutionPlan, displayable};
+use datafusion::prelude::SessionConfig;
 use datafusion_proto::physical_plan::from_proto::{parse_physical_expr, parse_physical_sort_expr};
 use datafusion_proto::physical_plan::{
-    AsExecutionPlan, DefaultPhysicalExtensionCodec, PhysicalExtensionCodec,
+    AsExecutionPlan, DefaultPhysicalExtensionCodec, DefaultPhysicalProtoConverter,
+    PhysicalExtensionCodec, PhysicalPlanDecodeContext,
 };
 use datafusion_proto::protobuf::physical_aggregate_expr_node::AggregateFunction;
 use datafusion_proto::protobuf::physical_expr_node::ExprType;
@@ -44,6 +46,45 @@ pub mod tumbling_aggregating_window;
 mod updating_cache;
 pub mod watermark_generator;
 pub mod window_fn;
+
+/// Use the same registry and runtime to decode and execute an operator's DF plans.
+fn new_task_context(registry: &dyn FunctionRegistry) -> DFResult<Arc<TaskContext>> {
+    Ok(Arc::new(TaskContext::new(
+        None,
+        "arroyo-worker".into(),
+        SessionConfig::new(),
+        registry
+            .udfs()
+            .into_iter()
+            .map(|name| Ok((name.clone(), registry.udf(&name)?)))
+            .collect::<DFResult<_>>()?,
+        registry
+            .higher_order_function_names()
+            .into_iter()
+            .map(|name| Ok((name.clone(), registry.higher_order_function(&name)?)))
+            .collect::<DFResult<_>>()?,
+        registry
+            .udafs()
+            .into_iter()
+            .map(|name| Ok((name.clone(), registry.udaf(&name)?)))
+            .collect::<DFResult<_>>()?,
+        registry
+            .udwfs()
+            .into_iter()
+            .map(|name| Ok((name.clone(), registry.udwf(&name)?)))
+            .collect::<DFResult<_>>()?,
+        Arc::new(RuntimeEnvBuilder::new().build()?),
+    )))
+}
+
+/// Reset a physical plan before reusing it.
+///
+/// DataFusion returns a new plan tree, so store the returned root for the next
+/// execution. Streams created from the previous tree continue independently.
+fn reset_execution_plan(plan: &mut Arc<dyn ExecutionPlan>) -> DFResult<()> {
+    *plan = reset_plan_states(plan.clone())?;
+    Ok(())
+}
 
 pub struct ValueExecutionOperator {
     name: String,
@@ -111,6 +152,7 @@ impl OperatorConstructor for ProjectionConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let output_schema: ArroyoSchema = config.output_schema.unwrap().try_into()?;
 
@@ -120,7 +162,7 @@ impl OperatorConstructor for ProjectionConstructor {
             .map(|expr| {
                 Ok(parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice())?,
-                    registry.as_ref(),
+                    &task_context,
                     &input_schema.schema,
                     &DefaultPhysicalExtensionCodec {},
                 )?)
@@ -250,6 +292,7 @@ pub struct StatelessPhysicalExecutor {
 
 impl StatelessPhysicalExecutor {
     pub fn new(mut proto: &[u8], registry: &Registry) -> anyhow::Result<Self> {
+        let task_context = new_task_context(registry)?;
         let batch = Arc::new(RwLock::default());
 
         let plan = PhysicalPlanNode::decode(&mut proto).unwrap();
@@ -257,13 +300,12 @@ impl StatelessPhysicalExecutor {
             context: DecodingContext::SingleLockedBatch(batch.clone()),
         };
 
-        let plan =
-            plan.try_into_physical_plan(registry, &RuntimeEnvBuilder::new().build()?, &codec)?;
+        let plan = plan.try_into_physical_plan(&task_context, &codec)?;
 
         Ok(Self {
             batch,
             plan,
-            task_context: SessionContext::new().task_ctx(),
+            task_context,
         })
     }
 
@@ -272,7 +314,7 @@ impl StatelessPhysicalExecutor {
             let mut writer = self.batch.write().unwrap();
             *writer = Some(batch);
         }
-        self.plan.reset().expect("reset execution plan");
+        reset_execution_plan(&mut self.plan).expect("reset execution plan");
         self.plan
             .execute(0, self.task_context.clone())
             .unwrap_or_else(|e| {
@@ -299,7 +341,7 @@ pub fn decode_aggregate(
     schema: &SchemaRef,
     name: &str,
     expr: &PhysicalExprNode,
-    registry: &dyn FunctionRegistry,
+    task_context: &TaskContext,
 ) -> DFResult<Arc<AggregateFunctionExpr>> {
     let codec = &DefaultPhysicalExtensionCodec {};
     let expr_type = expr
@@ -312,13 +354,20 @@ pub fn decode_aggregate(
             let input_phy_expr: Vec<Arc<dyn PhysicalExpr>> = agg_node
                 .expr
                 .iter()
-                .map(|e| parse_physical_expr(e, registry, schema, codec))
+                .map(|e| parse_physical_expr(e, task_context, schema, codec))
                 .collect::<DFResult<Vec<_>>>()?;
-            let ordering_req: LexOrdering = agg_node
+            let ordering_req = agg_node
                 .ordering_req
                 .iter()
-                .map(|e| parse_physical_sort_expr(e, registry, schema, codec))
-                .collect::<DFResult<LexOrdering>>()?;
+                .map(|e| {
+                    parse_physical_sort_expr(
+                        e,
+                        &PhysicalPlanDecodeContext::new(task_context, codec),
+                        schema,
+                        &DefaultPhysicalProtoConverter {},
+                    )
+                })
+                .collect::<DFResult<Vec<_>>>()?;
             agg_node
                 .aggregate_function
                 .as_ref()
@@ -326,7 +375,7 @@ pub fn decode_aggregate(
                     AggregateFunction::UserDefinedAggrFunction(udaf_name) => {
                         let agg_udf = match &agg_node.fun_definition {
                             Some(buf) => codec.try_decode_udaf(udaf_name, buf)?,
-                            None => registry.udaf(udaf_name)?,
+                            None => task_context.udaf(udaf_name)?,
                         };
 
                         AggregateExprBuilder::new(agg_udf, input_phy_expr)

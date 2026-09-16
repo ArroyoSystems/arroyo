@@ -1,3 +1,4 @@
+use super::new_task_context;
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
 use anyhow::{Result, anyhow, bail};
@@ -1040,6 +1041,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let ttl = Duration::from_micros(if config.ttl_micros == 0 {
             warn!("ttl was not set for updating aggregate");
             24 * 60 * 60 * 1000 * 1000
@@ -1054,7 +1056,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
 
         let metadata_expr = parse_physical_expr(
             &PhysicalExprNode::decode(&mut config.metadata_expr.as_slice())?,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;
@@ -1090,7 +1092,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                     &input_schema.schema,
                     name,
                     expr,
-                    registry.as_ref(),
+                    &task_context,
                 )?)
             })
             .map_ok(|agg| {
