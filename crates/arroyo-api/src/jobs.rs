@@ -549,21 +549,32 @@ pub async fn get_job_output(
 
     let pipeline = query_pipeline_by_pub_id(&pipeline_pub_id, &db, &auth_data).await?;
 
-    if !pipeline
+    let preview_operators = pipeline
         .graph
         .nodes
         .iter()
-        .any(|node| node.operator.contains("preview") && node.operator_id == query.operator_id)
-    {
-        return Err(bad_request(format!(
-            "Job does not have preview operator '{}'",
-            query.operator_id
-        )));
+        .filter(|node| node.operator.contains("preview"))
+        .collect::<Vec<_>>();
+
+    if let Some(operator_id) = &query.operator_id {
+        if !preview_operators
+            .iter()
+            .any(|node| node.operator_id == *operator_id)
+        {
+            return Err(bad_request(format!(
+                "Job does not have preview operator '{operator_id}'"
+            )));
+        }
+    } else if preview_operators.is_empty() {
+        return Err(bad_request("Job does not have a preview operator"));
     }
 
-    let output =
-        PreviewOutputReader::new(&config().preview_url, &job_pub_id, Some(&query.operator_id))
-            .await?;
+    let output = PreviewOutputReader::new(
+        &config().preview_url,
+        &job_pub_id,
+        query.operator_id.as_deref(),
+    )
+    .await?;
 
     Ok(Json(output.read(query.offset).await?))
 }

@@ -180,23 +180,6 @@ fn decode_preview_file(bytes: Bytes) -> anyhow::Result<OutputData> {
     })
 }
 
-pub(crate) fn flatten_preview_output(
-    chunks: Vec<OutputData>,
-) -> Result<Vec<serde_json::Value>, ErrorResp> {
-    let mut output = Vec::new();
-    for chunk in chunks {
-        let rows: Vec<serde_json::Value> =
-            serde_json::from_value(chunk.batch).map_err(|error| {
-                log_and_map(anyhow!(
-                    "failed to decode rows in preview output for operator '{}': {error}",
-                    chunk.operator_id
-                ))
-            })?;
-        output.extend(rows);
-    }
-    Ok(output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

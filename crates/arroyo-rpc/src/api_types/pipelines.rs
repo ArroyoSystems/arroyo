@@ -88,8 +88,10 @@ pub struct BatchPreviewPost {
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct BatchPreviewResponse {
-    /// Query results in sink arrival order.
-    pub output: Vec<serde_json::Value>,
+    /// The preview pipeline created for this request.
+    pub pipeline_id: String,
+    /// The job executing the preview pipeline.
+    pub job_id: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -238,6 +240,7 @@ pub struct OutputData {
 #[into_params(parameter_in = Query)]
 #[serde(rename_all = "snake_case")]
 pub struct JobOutputQuery {
-    pub operator_id: String,
+    /// Preview operator to read. Omit to read every preview operator in the job.
+    pub operator_id: Option<String>,
     pub offset: u64,
 }

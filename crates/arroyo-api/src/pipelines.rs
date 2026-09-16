@@ -11,7 +11,7 @@ use petgraph::{Direction, EdgeDirection};
 use std::collections::{HashMap, HashSet};
 use std::num::ParseIntError;
 use std::str::FromStr;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crate::{compiler_service, connection_profiles, jobs, types};
 use arroyo_datastream::{default_sink, preview_sink};
@@ -42,7 +42,6 @@ use tracing::warn;
 
 use crate::AuthData;
 use crate::jobs::get_action;
-use crate::preview_output::{PreviewOutputReader, flatten_preview_output};
 use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
@@ -58,9 +57,6 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
 use petgraph::prelude::EdgeRef;
-
-const BATCH_PREVIEW_TIMEOUT: Duration = Duration::from_secs(3 * 60);
-const BATCH_PREVIEW_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 async fn compile_sql(
     query: String,
@@ -892,69 +888,15 @@ pub async fn create_preview_pipeline(
     Ok(Json(pipeline))
 }
 
-async fn wait_for_batch_preview(
-    pipeline_id: &str,
-    auth_data: &AuthData,
-    database: &DatabaseSource,
-) -> Result<String, ErrorResp> {
-    let started = Instant::now();
-
-    loop {
-        let jobs = api_queries::fetch_get_pipeline_jobs(
-            &database.client().await?,
-            &auth_data.organization_id,
-            &pipeline_id,
-        )
-        .await?;
-
-        if jobs.len() != 1 {
-            return Err(log_and_map(anyhow!(
-                "expected one job for batch preview pipeline '{pipeline_id}', found {}",
-                jobs.len()
-            )));
-        }
-
-        let job = jobs.into_iter().next().unwrap();
-        match job.state.as_deref().unwrap_or("Created") {
-            "Finished" => return Ok(job.id),
-            "Failed" => {
-                return Err(bad_request(format!(
-                    "batch preview failed: {}",
-                    job.failure_message.unwrap_or_else(|| {
-                        "the pipeline failed without an error message".to_string()
-                    })
-                )));
-            }
-            "Stopped" => {
-                return Err(ErrorResp {
-                    status_code: StatusCode::GATEWAY_TIMEOUT,
-                    message: "batch preview exceeded the preview pipeline TTL".to_string(),
-                });
-            }
-            _ if started.elapsed() >= BATCH_PREVIEW_TIMEOUT => {
-                return Err(ErrorResp {
-                    status_code: StatusCode::GATEWAY_TIMEOUT,
-                    message: format!(
-                        "batch preview did not finish within {} seconds",
-                        BATCH_PREVIEW_TIMEOUT.as_secs()
-                    ),
-                });
-            }
-            _ => tokio::time::sleep(BATCH_PREVIEW_POLL_INTERVAL).await,
-        }
-    }
-}
-
-/// Run a query to completion against local input files and return all output rows
+/// Create a bounded preview pipeline against local input files
 #[utoipa::path(
     post,
     path = "/v1/pipelines/batch_preview",
     tag = "pipelines",
     request_body = BatchPreviewPost,
     responses(
-        (status = 200, description = "Batch preview completed", body = BatchPreviewResponse),
+        (status = 200, description = "Batch preview created", body = BatchPreviewResponse),
         (status = 400, description = "Bad request", body = ErrorResp),
-        (status = 504, description = "Batch preview timed out", body = ErrorResp),
     ),
 )]
 pub async fn create_batch_preview(
@@ -998,11 +940,23 @@ pub async fn create_batch_preview(
     )
     .await?;
 
-    let job_id = wait_for_batch_preview(&pipeline_id, &auth_data, &state.database).await?;
-    let output = PreviewOutputReader::new(&config().preview_url, &job_id, None).await?;
+    let jobs = api_queries::fetch_get_pipeline_jobs(
+        &state.database.client().await?,
+        &auth_data.organization_id,
+        &pipeline_id,
+    )
+    .await?;
+    if jobs.len() != 1 {
+        return Err(log_and_map(anyhow!(
+            "expected one job for batch preview pipeline '{pipeline_id}', found {}",
+            jobs.len()
+        )));
+    }
+    let job_id = jobs.into_iter().next().unwrap().id;
 
     Ok(Json(BatchPreviewResponse {
-        output: flatten_preview_output(output.read(0).await?)?,
+        pipeline_id,
+        job_id,
     }))
 }
 
