@@ -95,7 +95,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    input_schema.inner().clone(),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -145,7 +145,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    input_schema.inner().clone(),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -204,10 +204,8 @@ impl AggregateExtension {
             aggregate_plan,
             &ArroyoPhysicalExtensionCodec::default(),
         )?;
-        let input_schema = ArroyoSchema::from_schema_keys(
-            Arc::new(input_schema.as_ref().into()),
-            self.key_fields.clone(),
-        )?;
+        let input_schema =
+            ArroyoSchema::from_schema_keys(input_schema.inner().clone(), self.key_fields.clone())?;
 
         let config = SessionWindowAggregateOperator {
             name: format!("session_window_{index}"),
@@ -267,7 +265,7 @@ impl AggregateExtension {
             binning_function: binning_function_proto.encode_to_vec(),
             input_schema: Some(
                 ArroyoSchema::from_schema_keys(
-                    Arc::new(input_schema.as_ref().into()),
+                    input_schema.inner().clone(),
                     self.key_fields.clone(),
                 )?
                 .into(),
@@ -555,8 +553,7 @@ impl ArroyoExtension for AggregateExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        let output_schema = (*self.schema).clone().into();
-        ArroyoSchema::from_schema_keys(Arc::new(output_schema), vec![]).unwrap()
+        ArroyoSchema::from_schema_keys(self.schema.inner().clone(), vec![]).unwrap()
     }
 }
 
