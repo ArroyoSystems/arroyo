@@ -1,3 +1,4 @@
+use super::accumulator_checkpoint;
 use super::new_task_context;
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
@@ -161,14 +162,22 @@ impl IncrementalState {
                 ..
             } => {
                 let parser = row_converter.parser();
-                let input = row_converter.convert_rows(
-                    data.iter()
-                        .filter(|(_, c)| c.count > 0)
-                        .map(|(v, _)| parser.parse(&v.0)),
-                )?;
                 let mut acc = expr.create_accumulator()?;
-                acc.update_batch(&input)?;
-                acc.evaluate_mut()
+                // Preserve duplicate occurrences, including for non-DISTINCT UDAFs.
+                // Bound the temporary arrays even when a value has a large count.
+                // Stable chunks also keep order-sensitive floating-point/approximate
+                // results reproducible when a checkpoint rebuilds the hash map.
+                let rows = data
+                    .iter()
+                    .sorted_unstable_by(|(a, _), (b, _)| a.0.cmp(&b.0))
+                    .flat_map(|(v, c)| {
+                        let parser = &parser;
+                        (0..c.count).map(move |_| parser.parse(&v.0))
+                    });
+                for chunk in &rows.chunks(1024) {
+                    acc.update_batch(&row_converter.convert_rows(chunk)?)?;
+                }
+                acc.evaluate()
             }
         }
     }
@@ -180,22 +189,13 @@ enum AccumulatorType {
     Batch,
 }
 
-impl AccumulatorType {
-    fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<FieldRef>> {
-        Ok(match self {
-            AccumulatorType::Sliding => agg.sliding_state_fields()?,
-            // state for batch tables is handled separately
-            AccumulatorType::Batch => vec![],
-        })
-    }
-}
-
 #[derive(Debug)]
 struct Aggregator {
     func: Arc<AggregateFunctionExpr>,
     accumulator_type: AccumulatorType,
     row_converter: Arc<RowConverter>,
     state_cols: Vec<usize>,
+    state_fields: Vec<FieldRef>,
 }
 
 pub struct IncrementalAggregatingFunc {
@@ -277,66 +277,48 @@ impl IncrementalAggregatingFunc {
 
         let mut states = vec![vec![]; self.sliding_state_schema.schema.fields.len()];
         let parser = self.key_converter.parser();
-
+        let mut rows = Vec::with_capacity(self.updated_keys.len());
         let mut generation_builder = UInt64Builder::with_capacity(self.updated_keys.len());
 
-        let mut cols = self
-            .key_converter
-            .convert_rows(self.updated_keys.keys().map(|k| {
-                let (accumulators, generation) = self
-                    .accumulators
-                    .get_mut_generation(k.0.as_ref())
-                    .expect("missing accumulator in cache during checkpoint");
-
-                generation_builder.append_value(generation);
-
-                for (state, agg) in accumulators.iter_mut().zip(self.aggregates.iter()) {
-                    let IncrementalState::Sliding { expr, accumulator } = state else {
-                        continue;
-                    };
-
-                    let state = accumulator.state().unwrap_or_else(|_| {
-                        // if it doesn't support immutable state, we'll use the mutable one and
-                        // copy and restore the state -- this should in practice never happen,
-                        // because the accumulators that don't support immutable state also don't
-                        // support retract, but we have this fallback in case someone implements
-                        // a new aggregator that doesn't uphold that relationship
-                        let state = accumulator.state().unwrap();
-                        *accumulator = expr.create_sliding_accumulator().unwrap();
-                        let states: Vec<_> =
-                            state.iter().map(|s| s.to_array()).try_collect().unwrap();
-                        accumulator.merge_batch(&states).unwrap();
-                        state
-                    });
-
-                    assert_eq!(
-                        agg.state_cols.len(),
-                        state.len(),
-                        "wrong state in {}",
-                        agg.func.name()
-                    );
-
-                    for (idx, v) in agg.state_cols.iter().zip(state) {
-                        states[*idx].push(v);
-                    }
+        for key in self.updated_keys.keys() {
+            let (accumulators, generation) = self
+                .accumulators
+                .get_mut_generation(key.0.as_ref())
+                .expect("missing accumulator in cache during checkpoint");
+            generation_builder.append_value(generation);
+            for (state, agg) in accumulators.iter_mut().zip(&self.aggregates) {
+                let IncrementalState::Sliding { expr, accumulator } = state else {
+                    continue;
+                };
+                let state = accumulator_checkpoint::snapshot(expr, &agg.state_fields, accumulator)?;
+                for (idx, value) in agg.state_cols.iter().zip(state) {
+                    states[*idx].push(value);
                 }
-                parser.parse(k.0.as_ref())
-            }))?;
+            }
+            // Also retain a row for groups containing only stored-input aggregates.
+            // A null timestamp is the existing deleted-group marker.
+            states[self.sliding_state_schema.timestamp_index].push(
+                accumulators
+                    .last_mut()
+                    .expect("timestamp aggregate")
+                    .evaluate()?,
+            );
+            rows.push(parser.parse(key.0.as_ref()));
+        }
 
+        let mut cols = self.key_converter.convert_rows(rows)?;
         cols.extend(
             states
                 .into_iter()
                 .skip(cols.len())
-                .map(|c| ScalarValue::iter_to_array(c).unwrap()),
+                .map(ScalarValue::iter_to_array)
+                .collect::<DFResult<Vec<_>>>()?,
         );
-
         let generations = generation_builder.finish();
         self.new_generation = self
             .new_generation
             .max(max_array::<UInt64Type, _>(&generations).unwrap());
-
         cols.push(Arc::new(generations));
-
         Ok(Some(cols))
     }
 
@@ -544,7 +526,9 @@ impl IncrementalAggregatingFunc {
                 let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
 
                 let key_rows = if key_cols.is_empty() {
-                    vec![GLOBAL_KEY]
+                    // Global aggregates still have one row per retained input,
+                    // not one row per group. Restore all of them (including MAX(timestamp)).
+                    vec![GLOBAL_KEY; batch.num_rows()]
                 } else {
                     self.key_converter
                         .convert_columns(&key_cols)?
@@ -1088,29 +1072,13 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             .iter()
             .zip(aggregate_exec.aggr_expr_name.iter())
             .map(|(expr, name)| {
-                Ok(decode_aggregate(
-                    &input_schema.schema,
-                    name,
-                    expr,
-                    &task_context,
-                )?)
-            })
-            .map_ok(|agg| {
-                let retract = match agg.create_sliding_accumulator() {
-                    Ok(s) => s.supports_retract_batch(),
-                    _ => false,
+                let agg = decode_aggregate(&input_schema.schema, name, expr, &task_context)?;
+                let fields = accumulator_checkpoint::state_fields(&agg)?;
+                let t = if fields.is_some() {
+                    AccumulatorType::Sliding
+                } else {
+                    AccumulatorType::Batch
                 };
-
-                (
-                    agg,
-                    if retract {
-                        AccumulatorType::Sliding
-                    } else {
-                        AccumulatorType::Batch
-                    },
-                )
-            })
-            .map_ok(|(agg, t)| {
                 let row_converter = Arc::new(RowConverter::new(
                     agg.expressions()
                         .iter()
@@ -1118,24 +1086,23 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                         .collect::<DFResult<_>>()?,
                 )?);
 
-                let fields = t.state_fields(&agg)?;
-
+                let fields = fields.unwrap_or_default();
                 let field_names = fields.iter().map(|f| f.name().to_string()).collect_vec();
-                sliding_state_fields.extend(fields.into_iter().map(|f| (*f).clone()));
+                sliding_state_fields.extend(fields.iter().map(|f| f.as_ref().clone()));
 
-                Ok::<_, anyhow::Error>((agg, t, row_converter, field_names))
+                Ok::<_, anyhow::Error>((agg, t, row_converter, field_names, fields))
             })
-            .flatten_ok()
             .collect::<Result<_>>()?;
 
         let state_schema = Schema::new(sliding_state_fields);
 
         let aggregates = aggregates
             .into_iter()
-            .map(|(agg, t, row_converter, field_names)| Aggregator {
+            .map(|(agg, t, row_converter, field_names, fields)| Aggregator {
                 func: agg,
                 accumulator_type: t,
                 row_converter,
+                state_fields: fields,
                 state_cols: field_names
                     .iter()
                     .map(|f| state_schema.index_of(f).unwrap())
@@ -1143,12 +1110,14 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             })
             .collect();
 
-        // ensure the last field (timestamp) has the expected name before creating the arroyo schema
+        // The final aggregate computes MAX(_timestamp). It now uses stored inputs,
+        // so keep an explicit timestamp/tombstone column in the sliding-state table.
         let mut state_fields = state_schema.fields().to_vec();
-        let timestamp_field = state_fields.pop().unwrap();
-        state_fields.push(Arc::new(
-            (*timestamp_field).clone().with_name(TIMESTAMP_FIELD),
-        ));
+        state_fields.push(Arc::new(Field::new(
+            TIMESTAMP_FIELD,
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            true,
+        )));
 
         let sliding_state_schema = Arc::new(ArroyoSchema::from_schema_keys(
             Arc::new(Schema::new(state_fields)),
@@ -1193,5 +1162,133 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 new_generation: 0,
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::{Int64Array, StringArray};
+    use datafusion::functions_aggregate::{approx_percentile_cont, count, min_max, sum};
+    use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+    use datafusion::physical_expr::expressions::col;
+
+    #[test]
+    fn stored_input_chunks_are_independent_of_hash_map_insertion_order() -> Result<()> {
+        use arrow_array::Float64Array;
+        use datafusion::physical_expr::expressions::lit;
+
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Float64, true)]));
+        let expr = Arc::new(
+            AggregateExprBuilder::new(
+                approx_percentile_cont::approx_percentile_cont_udaf(),
+                vec![col("v", &schema)?, lit(0.5_f64)],
+            )
+            .schema(schema)
+            .alias("median")
+            .build()?,
+        );
+        let make_state = || IncrementalState::Batch {
+            expr: expr.clone(),
+            data: Default::default(),
+            changed_values: Default::default(),
+            row_converter: Arc::new(
+                RowConverter::new(vec![SortField::new(DataType::Float64); 2]).unwrap(),
+            ),
+        };
+        let mut first = make_state();
+        let mut restored_order = make_state();
+        // More than two recomputation chunks, with duplicate values.
+        let values: Vec<f64> = (0..3000).map(|i| (i % 101) as f64).collect();
+        let percentile: ArrayRef = Arc::new(Float64Array::from(vec![0.5; values.len()]));
+        first.update_batch(
+            0,
+            &[
+                Arc::new(Float64Array::from(values.clone())),
+                percentile.clone(),
+            ],
+        )?;
+        restored_order.update_batch(
+            0,
+            &[
+                Arc::new(Float64Array::from(
+                    values.into_iter().rev().collect::<Vec<_>>(),
+                )),
+                percentile,
+            ],
+        )?;
+        assert_eq!(first.evaluate()?, restored_order.evaluate()?);
+        let retract: Vec<ArrayRef> = vec![
+            Arc::new(Float64Array::from(vec![0.0, 1.0, 2.0])),
+            Arc::new(Float64Array::from(vec![0.5; 3])),
+        ];
+        first.retract_batch(&retract)?;
+        restored_order.retract_batch(&retract)?;
+        assert_eq!(first.evaluate()?, restored_order.evaluate()?);
+        Ok(())
+    }
+
+    #[test]
+    fn stored_inputs_preserve_duplicates_nulls_and_out_of_order_retractions() -> Result<()> {
+        let ints: ArrayRef = Arc::new(Int64Array::from(vec![Some(5), Some(5), Some(10), None]));
+        let strings: ArrayRef = Arc::new(StringArray::from(vec![
+            Some("a"),
+            Some("a"),
+            Some("b"),
+            None,
+        ]));
+        for (udf, input, distinct) in [
+            (min_max::min_udaf(), ints.clone(), false),
+            (min_max::max_udaf(), ints.clone(), false),
+            (sum::sum_udaf(), ints.clone(), true),
+            (count::count_udaf(), ints.clone(), true),
+            (count::count_udaf(), strings, true),
+            // Force a multiplicity-sensitive aggregate down the fallback path.
+            (sum::sum_udaf(), ints.clone(), false),
+        ] {
+            let schema = Arc::new(Schema::new(vec![Field::new(
+                "v",
+                input.data_type().clone(),
+                true,
+            )]));
+            let expr = Arc::new(
+                AggregateExprBuilder::new(udf, vec![col("v", &schema)?])
+                    .schema(schema)
+                    .alias("test")
+                    .with_distinct(distinct)
+                    .build()?,
+            );
+            if distinct || expr.fun().name() != "sum" {
+                assert!(accumulator_checkpoint::state_fields(&expr)?.is_none());
+            }
+            let mut state = IncrementalState::Batch {
+                expr: expr.clone(),
+                data: Default::default(),
+                changed_values: Default::default(),
+                row_converter: Arc::new(RowConverter::new(vec![SortField::new(
+                    input.data_type().clone(),
+                )])?),
+            };
+            state.update_batch(0, std::slice::from_ref(&input))?;
+            let mut remaining = vec![0, 1, 2, 3];
+            for retract in [None, Some(1), Some(0), Some(2), Some(3)] {
+                if let Some(row) = retract {
+                    state.retract_batch(&[input.slice(row, 1)])?;
+                    remaining.retain(|i| *i != row);
+                }
+                let mut expected = expr.create_accumulator()?;
+                for row in &remaining {
+                    expected.update_batch(&[input.slice(*row, 1)])?;
+                }
+                assert_eq!(state.evaluate()?, expected.evaluate()?);
+                // Evaluation must not consume the retained inputs.
+                assert_eq!(state.evaluate()?, expected.evaluate()?);
+            }
+            state.update_batch(1, std::slice::from_ref(&input))?;
+            let mut expected = expr.create_accumulator()?;
+            expected.update_batch(&[input])?;
+            assert_eq!(state.evaluate()?, expected.evaluate()?);
+        }
+        Ok(())
     }
 }
