@@ -1,4 +1,5 @@
 import './index.css';
+import './monacoSetup';
 
 import { extendTheme, ThemeConfig } from '@chakra-ui/react';
 import { theme as proTheme } from '@chakra-ui/pro-theme';
