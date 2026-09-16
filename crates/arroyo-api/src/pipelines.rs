@@ -65,7 +65,7 @@ async fn compile_sql(
     auth_data: &AuthData,
     validate_only: bool,
     db: &DatabaseSource,
-) -> Result<Result<CompiledSql, PlannerError>, ErrorResp> {
+) -> Result<Result<(CompiledSql, HashMap<i64, i32>), PlannerError>, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     let global_udfs = fetch_get_udfs(&db.client().await?, &auth_data.organization_id)
@@ -140,8 +140,15 @@ async fn compile_sql(
         }
     }
 
+    // TODO: Allow pipeline requests to select explicit connection versions. For now,
+    // compile against each connection's current version and persist that resolution.
     let tables =
         connection_tables::get_all_connection_tables(auth_data, &db.client().await?).await?;
+
+    let connection_versions = tables
+        .iter()
+        .map(|table| (table.id, table.version))
+        .collect();
 
     for table in tables {
         let Some(connector) = connector_for_type(&table.connector) else {
@@ -181,7 +188,8 @@ async fn compile_sql(
             default_parallelism: parallelism,
         },
     )
-    .await)
+    .await
+    .map(|compiled| (compiled, connection_versions)))
 }
 
 fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
@@ -301,6 +309,7 @@ pub(crate) async fn create_pipeline_int(
     auth: AuthData,
     db: &DatabaseSource,
     mut compiled: CompiledSql,
+    connection_versions: HashMap<i64, i32>,
     pub_id: Option<String>,
     state_url: Option<String>,
     tags: HashMap<String, String>,
@@ -426,10 +435,16 @@ pub(crate) async fn create_pipeline_int(
 
     if !is_preview {
         for connection in compiled.connection_ids {
+            let connection_version = connection_versions.get(&connection).ok_or_else(|| {
+                log_and_map(anyhow!(
+                    "compiled pipeline references connection {connection} without a resolved version"
+                ))
+            })?;
             api_queries::execute_add_pipeline_connection_table(
                 &db.client().await?,
                 &generate_id(IdTypes::ConnectionTablePipeline),
                 &pipeline_id,
+                connection_version,
                 &connection,
             )
             .await?;
@@ -571,7 +586,7 @@ pub async fn validate_query(
     )
     .await?
     {
-        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+        Ok((CompiledSql { program, .. }, _)) => QueryValidationResult {
             graph: Some(program.try_into().map_err(log_and_map)?),
             errors: vec![],
         },
@@ -656,7 +671,7 @@ async fn create_pipeline_inner(
 
     let udfs = pipeline_post.udfs.unwrap_or_default();
 
-    let compiled = compile_sql(
+    let (compiled, connection_versions) = compile_sql(
         pipeline_post.query.clone(),
         &udfs,
         pipeline_post.parallelism as usize,
@@ -677,6 +692,7 @@ async fn create_pipeline_inner(
         auth_data.clone(),
         &state.database,
         compiled,
+        connection_versions,
         pub_id,
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
@@ -714,7 +730,7 @@ pub async fn create_preview_pipeline(
 
     let udfs = req.udfs.unwrap_or_default();
 
-    let compiled = compile_sql(
+    let (compiled, connection_versions) = compile_sql(
         req.query.clone(),
         &udfs,
         1,
@@ -735,6 +751,7 @@ pub async fn create_preview_pipeline(
         auth_data.clone(),
         &state.database,
         compiled,
+        connection_versions,
         None,
         None,
         HashMap::default(),

@@ -17,8 +17,8 @@ use crate::connection_profiles::{
     get_connection_profiles, test_connection_profile,
 };
 use crate::connection_tables::{
-    create_connection_table, delete_connection_table, get_connection_tables, test_connection_table,
-    test_schema,
+    create_connection_table, delete_connection_table, get_connection_tables,
+    patch_connection_table, test_connection_table, test_schema,
 };
 use crate::connectors::get_connectors;
 use crate::jobs::{
@@ -224,6 +224,7 @@ pub fn create_rest_app(database: DatabaseSource) -> anyhow::Result<Router> {
         .route("/connection_tables/test", post(test_connection_table))
         .route("/connection_tables/schemas/test", post(test_schema))
         .route("/connection_tables/:id", delete(delete_connection_table))
+        .route("/connection_tables/:id", patch(patch_connection_table))
         .route("/udfs", post(create_udf))
         .route("/udfs", get(get_udfs))
         .route("/udfs/validate", post(validate_udf))
