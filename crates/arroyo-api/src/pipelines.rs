@@ -410,7 +410,7 @@ pub(crate) async fn create_pipeline_int(
         &Some(query.clone()),
         &serde_json::to_value(&udfs).unwrap(),
         &program_bytes,
-        &2,
+        &3,
         &state_url,
         &tags_json,
     )
