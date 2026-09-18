@@ -61,10 +61,7 @@ impl ThreadedUdfInterpreter {
             task_tx,
             result_rx: Arc::new(Mutex::new(result_rx)),
             definition: body,
-            signature: Arc::new(Signature {
-                type_signature,
-                volatility: Volatility::Volatile,
-            }),
+            signature: Arc::new(Signature::new(type_signature, Volatility::Volatile)),
             arg_types,
             return_type,
         })
