@@ -163,6 +163,7 @@ def my_add(x: int, y: float) -> float:
                 false,
             )
             .into(),
+            config_options: Arc::default(),
         };
 
         let result = udf.invoke_with_args(args).unwrap();

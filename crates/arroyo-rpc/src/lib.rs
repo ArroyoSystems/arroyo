@@ -34,7 +34,7 @@ use datafusion::common::{
 use datafusion::config::ConfigOptions;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::sqlparser::ast::ValueWithSpan;
-use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
+use datafusion::logical_expr::{AggregateUDF, HigherOrderUDF, ScalarUDF, TableSource, WindowUDF};
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
@@ -461,6 +461,10 @@ impl ContextProvider for EmptyContextProvider {
         None
     }
 
+    fn get_higher_order_meta(&self, _: &str) -> Option<Arc<HigherOrderUDF>> {
+        None
+    }
+
     fn get_variable_type(&self, _: &[String]) -> Option<DataType> {
         None
     }
@@ -478,6 +482,10 @@ impl ContextProvider for EmptyContextProvider {
     }
 
     fn udwf_names(&self) -> Vec<String> {
+        vec![]
+    }
+
+    fn higher_order_function_names(&self) -> Vec<String> {
         vec![]
     }
 }
