@@ -129,9 +129,9 @@ impl ArroyoExtension for KeyCalculationExtension {
 
                 // ensure that the exprs generate the output schema
                 for (expr, expected) in exprs.iter().zip(output_schema.schema.fields()) {
-                    let (data_type, nullable) = expr.data_type_and_nullable(&input_df_schema)?;
-                    assert_eq!(data_type, *expected.data_type());
-                    assert_eq!(nullable, expected.is_nullable());
+                    let (_, field) = expr.to_field(&input_df_schema)?;
+                    assert_eq!(field.data_type(), expected.data_type());
+                    assert_eq!(field.is_nullable(), expected.is_nullable());
                 }
 
                 let mut physical_exprs = vec![];
@@ -178,14 +178,21 @@ impl ArroyoExtension for KeyCalculationExtension {
 
         match &self.keys {
             KeysOrExprs::Keys(keys) => {
-                ArroyoSchema::from_schema_keys(Arc::new(arrow_schema.into()), keys.clone()).unwrap()
+                ArroyoSchema::from_schema_keys(arrow_schema.inner().clone(), keys.clone()).unwrap()
             }
             KeysOrExprs::Exprs(exprs) => {
                 let mut fields = vec![];
 
                 for (i, e) in exprs.iter().enumerate() {
-                    let (dt, nullable) = e.data_type_and_nullable(arrow_schema).unwrap();
-                    fields.push(Field::new(format!("__key_{i}"), dt, nullable).into());
+                    let (_, field) = e.to_field(arrow_schema).unwrap();
+                    fields.push(
+                        Field::new(
+                            format!("__key_{i}"),
+                            field.data_type().clone(),
+                            field.is_nullable(),
+                        )
+                        .into(),
+                    );
                 }
 
                 for f in arrow_schema.fields().iter() {

@@ -12,7 +12,6 @@ use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use prost::Message;
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 pub(crate) const WATERMARK_NODE_NAME: &str = "WatermarkNode";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -135,6 +134,6 @@ impl WatermarkNode {
         })
     }
     pub(crate) fn arroyo_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::new_unkeyed(Arc::new(self.schema.as_ref().into()), self.timestamp_index)
+        ArroyoSchema::new_unkeyed(self.schema.inner().clone(), self.timestamp_index)
     }
 }

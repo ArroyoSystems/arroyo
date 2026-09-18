@@ -96,7 +96,7 @@ fn convert_simple_data_type(
             make_decimal_type(precision, scale)
         }
         SQLDataType::Bytea => Ok(DataType::Binary),
-        SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
+        SQLDataType::Interval { .. } => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
         SQLDataType::Struct(fields, _) => {
             let fields: Vec<_> = fields
                 .iter()
@@ -130,22 +130,29 @@ fn convert_simple_data_type(
 
 /// Returns a validated `DataType` for the specified precision and
 /// scale
-pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> Result<DataType> {
+pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<i64>) -> Result<DataType> {
     // postgres like behavior
     let (precision, scale) = match (precision, scale) {
-        (Some(p), Some(s)) => (p as u8, s as i8),
-        (Some(p), None) => (p as u8, 0),
+        (Some(p), Some(s)) => (p, s),
+        (Some(p), None) => (p, 0),
         (None, Some(_)) => return plan_err!("Cannot specify only scale for decimal data type"),
-        (None, None) => (DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE),
+        (None, None) => (
+            u64::from(DECIMAL128_MAX_PRECISION),
+            i64::from(DECIMAL_DEFAULT_SCALE),
+        ),
     };
 
     // Arrow decimal is i128 meaning 38 maximum decimal digits
-    if precision == 0 || precision > DECIMAL128_MAX_PRECISION || scale.unsigned_abs() > precision {
+    if precision == 0
+        || precision > u64::from(DECIMAL128_MAX_PRECISION)
+        || scale < 0
+        || scale as u64 > precision
+    {
         plan_err!(
-            "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `scale <= precision`."
+            "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `0 <= scale <= precision`."
         )
     } else {
-        Ok(DataType::Decimal128(precision, scale))
+        Ok(DataType::Decimal128(precision as u8, scale as i8))
     }
 }
 
