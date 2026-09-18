@@ -36,6 +36,7 @@ pub fn impulse_schema() -> ConnectionSchema {
 
 pub struct ImpulseConnector {}
 
+#[async_trait::async_trait]
 impl Connector for ImpulseConnector {
     type ProfileT = EmptyConfig;
     type TableT = ImpulseTable;
@@ -168,7 +169,7 @@ impl Connector for ImpulseConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

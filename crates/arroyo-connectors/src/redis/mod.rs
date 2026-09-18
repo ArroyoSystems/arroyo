@@ -150,6 +150,7 @@ async fn test_inner(
     Ok("Received PING response successfully".to_string())
 }
 
+#[async_trait::async_trait]
 impl Connector for RedisConnector {
     type ProfileT = RedisConfig;
     type TableT = RedisTable;
@@ -433,7 +434,7 @@ impl Connector for RedisConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,

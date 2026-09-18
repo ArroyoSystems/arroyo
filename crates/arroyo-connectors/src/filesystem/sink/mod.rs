@@ -181,7 +181,7 @@ fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
             connector_err!(User, NoRetry, "{}", obj_err)
         }
         // External errors: permanent issues that won't be fixed by retrying
-        Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
+        Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented { .. } => {
             connector_err!(External, NoRetry, "{}", obj_err)
         }
         // External errors: transient issues worth retrying

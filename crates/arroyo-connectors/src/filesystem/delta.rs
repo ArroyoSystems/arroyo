@@ -19,6 +19,7 @@ use arroyo_operator::operator::ConstructedOperator;
 
 pub struct DeltaLakeConnector {}
 
+#[async_trait::async_trait]
 impl Connector for DeltaLakeConnector {
     type ProfileT = EmptyConfig;
 
@@ -139,7 +140,7 @@ impl Connector for DeltaLakeConnector {
         self.from_config(None, name, EmptyConfig {}, options.pull_struct()?, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

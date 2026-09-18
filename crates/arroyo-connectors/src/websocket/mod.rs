@@ -33,6 +33,7 @@ const ICON: &str = include_str!("./websocket.svg");
 
 pub struct WebsocketConnector {}
 
+#[async_trait::async_trait]
 impl Connector for WebsocketConnector {
     type ProfileT = EmptyConfig;
 
@@ -307,7 +308,7 @@ impl Connector for WebsocketConnector {
         )
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

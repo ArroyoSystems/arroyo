@@ -94,6 +94,7 @@ pub fn nexmark_schema() -> ConnectionSchema {
 
 pub struct NexmarkConnector {}
 
+#[async_trait::async_trait]
 impl Connector for NexmarkConnector {
     type ProfileT = EmptyConfig;
     type TableT = NexmarkTable;
@@ -219,7 +220,7 @@ impl Connector for NexmarkConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

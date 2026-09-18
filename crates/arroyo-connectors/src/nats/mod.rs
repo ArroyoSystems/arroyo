@@ -142,6 +142,7 @@ impl NatsConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for NatsConnector {
     type ProfileT = NatsConfig;
     type TableT = NatsTable;
@@ -303,7 +304,7 @@ impl Connector for NatsConnector {
         Self::from_config(self, None, name, connection, table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,

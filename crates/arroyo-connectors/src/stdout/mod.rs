@@ -22,6 +22,7 @@ pub struct StdoutConnector {}
 
 const ICON: &str = include_str!("./stdout.svg");
 
+#[async_trait::async_trait]
 impl Connector for StdoutConnector {
     type ProfileT = EmptyConfig;
     type TableT = EmptyConfig;
@@ -119,7 +120,7 @@ impl Connector for StdoutConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         _: Self::TableT,

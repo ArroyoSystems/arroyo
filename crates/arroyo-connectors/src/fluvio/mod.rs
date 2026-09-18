@@ -22,6 +22,7 @@ const ICON: &str = include_str!("./fluvio.svg");
 
 import_types!(schema = "src/fluvio/table.json");
 
+#[async_trait::async_trait]
 impl Connector for FluvioConnector {
     type ProfileT = EmptyConfig;
     type TableT = FluvioTable;
@@ -167,7 +168,7 @@ impl Connector for FluvioConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

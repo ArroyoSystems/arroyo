@@ -89,6 +89,7 @@ impl PollingHTTPConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for PollingHTTPConnector {
     type ProfileT = EmptyConfig;
 
@@ -235,7 +236,7 @@ impl Connector for PollingHTTPConnector {
         ))
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         _: Self::ProfileT,
         table: Self::TableT,

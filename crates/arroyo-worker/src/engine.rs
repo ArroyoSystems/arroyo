@@ -819,7 +819,7 @@ pub async fn construct_node(
     if chain.is_source() {
         let (head, _) = chain.iter().next().unwrap();
         let ConstructedOperator::Source(operator) =
-            construct_operator(head.operator_name, &head.operator_config, registry)
+            construct_operator(head.operator_name, &head.operator_config, registry).await
         else {
             unreachable!();
         };
@@ -855,6 +855,7 @@ pub async fn construct_node(
         for (node, edge) in chain.iter() {
             let ConstructedOperator::Operator(op) =
                 construct_operator(node.operator_name, &node.operator_config, registry.clone())
+                    .await
             else {
                 unreachable!("sources must be the first node in a chain");
             };
@@ -897,7 +898,7 @@ pub async fn construct_node(
     }
 }
 
-pub fn construct_operator(
+pub async fn construct_operator(
     operator: OperatorName,
     config: &[u8],
     registry: Arc<Registry>,
@@ -925,6 +926,7 @@ pub fn construct_operator(
                     serde_json::from_str(&op.config)
                         .unwrap_or_else(|e| panic!("invalid operator config: {op:?}, {e:?}")),
                 )
+                .await
                 .unwrap_or_else(|e| {
                     panic!("Failed to construct connector {}: {:?}", op.connector, e)
                 });

@@ -120,7 +120,7 @@ impl IcebergConnector {
         // try to connect to the catalog
 
         let IcebergTable::Sink(sink) = table;
-        let table = sink::iceberg::IcebergTable::new(&profile.catalog, sink)?;
+        let table = sink::iceberg::IcebergTable::new(&profile.catalog, sink).await?;
 
         table
             .catalog
@@ -131,6 +131,7 @@ impl IcebergConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for IcebergConnector {
     type ProfileT = IcebergProfile;
 
@@ -284,7 +285,7 @@ impl Connector for IcebergConnector {
         Ok(transforms::register_all(registry)?)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,
@@ -292,7 +293,7 @@ impl Connector for IcebergConnector {
     ) -> anyhow::Result<ConstructedOperator> {
         match table {
             IcebergTable::Sink(sink) => {
-                let tf = sink::iceberg::IcebergTable::new(&profile.catalog, &sink)?;
+                let tf = sink::iceberg::IcebergTable::new(&profile.catalog, &sink).await?;
                 make_sink(
                     FileSystemSink {
                         // in iceberg, the path and storage options come from the catalog

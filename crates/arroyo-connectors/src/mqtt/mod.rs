@@ -124,6 +124,7 @@ impl MqttConnector {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for MqttConnector {
     type ProfileT = MqttConfig;
     type TableT = MqttTable;
@@ -268,7 +269,7 @@ impl Connector for MqttConnector {
         Self::from_config(self, None, name, connection, table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,

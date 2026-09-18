@@ -90,6 +90,7 @@ impl From<ConfluentProfile> for KafkaConfig {
     }
 }
 
+#[async_trait::async_trait]
 impl Connector for ConfluentConnector {
     type ProfileT = ConfluentProfile;
     type TableT = KafkaTable;
@@ -195,12 +196,14 @@ impl Connector for ConfluentConnector {
         KafkaConnector {}.from_config(id, name, config.into(), table, schema)
     }
 
-    fn make_operator(
+    async fn make_operator(
         &self,
         profile: Self::ProfileT,
         table: Self::TableT,
         config: OperatorConfig,
     ) -> anyhow::Result<ConstructedOperator> {
-        KafkaConnector {}.make_operator(profile.into(), table, config)
+        KafkaConnector {}
+            .make_operator(profile.into(), table, config)
+            .await
     }
 }
