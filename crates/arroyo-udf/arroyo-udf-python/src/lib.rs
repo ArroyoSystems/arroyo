@@ -13,8 +13,8 @@ use arroyo_udf_common::parse::NullableType;
 use datafusion::common::Result as DFResult;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
-use std::any::Any;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
@@ -36,11 +36,22 @@ pub struct PythonUDF {
     pub return_type: Arc<NullableType>,
 }
 
-impl ScalarUDFImpl for PythonUDF {
-    fn as_any(&self) -> &dyn Any {
-        self
+impl PartialEq for PythonUDF {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.signature == other.signature
     }
+}
 
+impl Eq for PythonUDF {}
+
+impl Hash for PythonUDF {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+    }
+}
+
+impl ScalarUDFImpl for PythonUDF {
     fn name(&self) -> &str {
         &self.name
     }
