@@ -13,6 +13,7 @@ arrow-array = { workspace = true }
 arrow-ord = { workspace = true }
 arrow-schema = {workspace = true, features = ["serde"]}
 tonic = { workspace = true, features = ["tls-native-roots", "tls-webpki-roots"] }
+tonic-prost = { workspace = true }
 prost = {workspace = true}
 tokio = { workspace = true }
 futures = { workspace = true }
