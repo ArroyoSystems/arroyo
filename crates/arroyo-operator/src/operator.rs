@@ -29,7 +29,8 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
-    AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF, create_udaf,
+    AggregateUDF, HigherOrderUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
+    create_udaf,
 };
 use datafusion::physical_plan::{ExecutionPlan, displayable};
 use dlopen2::wrapper::Container;
@@ -1459,6 +1460,24 @@ impl Registry {
 impl FunctionRegistry for Registry {
     fn udfs(&self) -> HashSet<String> {
         self.udfs.keys().cloned().collect()
+    }
+
+    fn udafs(&self) -> HashSet<String> {
+        self.udafs.keys().cloned().collect()
+    }
+
+    fn udwfs(&self) -> HashSet<String> {
+        self.udwfs.keys().cloned().collect()
+    }
+
+    fn higher_order_function_names(&self) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn higher_order_function(&self, name: &str) -> DFResult<Arc<HigherOrderUDF>> {
+        Err(DataFusionError::Execution(format!(
+            "Higher order function {name} not found"
+        )))
     }
 
     fn udf(&self, name: &str) -> DFResult<Arc<ScalarUDF>> {

@@ -6,7 +6,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_storage::StorageProviderRef;
 use arroyo_types::{CheckpointFilePathLayout, Data, TaskInfo};
-use parquet::format::KeyValue;
+use parquet::file::metadata::KeyValue;
 use prost::Message;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -114,7 +114,7 @@ pub(crate) trait Table: Send + Sync + 'static + Clone {
     type ConfigMessage: prost::Message + Default;
     // A protobuf holding all necessary data for restoring from a specific epoch.
     // Will be produced by the controller checkpointing logic and read by subtasks when restoring from checkpoint.
-    type TableCheckpointMessage: prost::Message + Default;
+    type TableCheckpointMessage: prost::Message + Default + std::fmt::Debug;
 
     type TableSubtaskCheckpointMetadata: prost::Message + Default;
 
