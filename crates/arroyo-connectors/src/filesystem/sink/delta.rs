@@ -1,5 +1,5 @@
 use super::FinishedFile;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use arrow::datatypes::Schema;
 use arroyo_storage::{BackendConfig, R2Config, S3Config, StorageProvider};
 use arroyo_types::to_millis;
@@ -11,7 +11,6 @@ use deltalake::{
     kernel::{Action, Add},
     operations::create::CreateBuilder,
     protocol::SaveMode,
-    table::PeekCommit,
 };
 
 use deltalake::kernel::transaction::CommitBuilder;
@@ -84,11 +83,15 @@ pub(crate) async fn load_or_create_table(
                 storage_provider.qualify_path(empty_path)
             ),
         ),
-        BackendConfig::Local(_) => (storage_provider.get_backing_store(), "/".to_string()),
+        BackendConfig::Local(_) => (
+            Arc::new(object_store::local::LocalFileSystem::new()),
+            storage_provider.canonical_url().to_string(),
+        ),
     };
 
-    let mut delta = DeltaTableBuilder::from_uri(&url)
-        .with_storage_backend(backing_store, Url::parse(storage_provider.canonical_url())?)
+    let url = Url::parse(&url)?;
+    let mut delta = DeltaTableBuilder::from_url(url.clone())?
+        .with_storage_backend(backing_store, url)
         .build()?;
 
     if delta.verify_deltatable_existence().await? {
@@ -126,7 +129,7 @@ async fn check_existing_files(
     last_version: i64,
     finished_files: &[FinishedFile],
 ) -> Result<Option<i64>> {
-    if last_version >= table.version().unwrap_or_default() {
+    if last_version >= i64::try_from(table.version().unwrap_or_default())? {
         return Ok(None);
     }
 
@@ -135,19 +138,18 @@ async fn check_existing_files(
         .map(|file| file.filename.to_string())
         .collect();
 
-    let mut version_to_check = last_version;
-
-    while let PeekCommit::New(version, actions) =
-        table.log_store().peek_next_commit(version_to_check).await?
-    {
+    let mut version = u64::try_from(last_version + 1)?;
+    while let Some(bytes) = table.log_store().read_commit_entry(version).await? {
+        let actions = deltalake::logstore::get_actions(version, &bytes)
+            .with_context(|| format!("decoding Delta commit {version}"))?;
         for action in actions {
             if let Action::Add(add) = action
                 && files.contains(&add.path)
             {
-                return Ok(Some(version));
+                return Ok(Some(i64::try_from(version)?));
             }
         }
-        version_to_check = version;
+        version += 1;
     }
     Ok(None)
 }
@@ -165,5 +167,6 @@ async fn commit_to_delta(table: &mut DeltaTable, add_actions: Vec<Action>) -> Re
             },
         )
         .await?
-        .version)
+        .version
+        .try_into()?)
 }

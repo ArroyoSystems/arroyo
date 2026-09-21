@@ -18,7 +18,7 @@ use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, Watermark,
 };
 use async_trait::async_trait;
-use datafusion::common::hash_utils;
+use datafusion::common::hash_utils::create_hashes_with_hasher;
 use rand::Rng;
 use std::collections::HashMap;
 use std::mem::size_of_val;
@@ -513,7 +513,7 @@ fn repartition<'a>(
     if let Some(keys) = keys {
         let keys: Vec<_> = keys.iter().map(|i| record.column(*i).clone()).collect();
 
-        hash_utils::create_hashes(&keys[..], &get_hasher(), &mut buf).unwrap();
+        create_hashes_with_hasher(&keys, &get_hasher(), &mut buf).unwrap();
         let buf_array = PrimitiveArray::from(buf);
 
         let servers = server_for_hash_array(&buf_array, qs).unwrap();

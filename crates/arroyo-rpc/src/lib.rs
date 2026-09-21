@@ -1278,9 +1278,58 @@ pub struct StateContext {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DataSizeUnit, SerializableBytes, parse_expr};
+    use crate::{DataSizeUnit, SerializableBytes, get_hasher, parse_expr};
+    use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray, StringViewArray};
     use bincode::{Decode, Encode, config};
     use bytes::Bytes;
+    use datafusion::common::hash_utils::create_hashes_with_hasher;
+    use std::sync::Arc;
+
+    #[test]
+    fn hashes_are_state_compatible() {
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(Int64Array::from(vec![Some(1), Some(-2), None])),
+            Arc::new(StringArray::from(vec![Some("one"), None, Some("three")])),
+        ];
+        let mut hashes = vec![0; 3];
+
+        create_hashes_with_hasher(&arrays, &get_hasher(), &mut hashes).unwrap();
+
+        assert_eq!(
+            hashes,
+            [
+                13107581764018389965,
+                18413917921427367296,
+                1776838008901755331,
+            ]
+        );
+
+        let mut float_hashes = vec![0; 2];
+        create_hashes_with_hasher(
+            [Arc::new(Float64Array::from(vec![0.0, -0.0])) as ArrayRef],
+            &get_hasher(),
+            &mut float_hashes,
+        )
+        .unwrap();
+        assert_ne!(float_hashes[0], float_hashes[1]);
+
+        let values = vec![Some("short"), None, Some("longer than twelve bytes")];
+        let mut string_hashes = vec![0; values.len()];
+        create_hashes_with_hasher(
+            [Arc::new(StringArray::from(values.clone())) as ArrayRef],
+            &get_hasher(),
+            &mut string_hashes,
+        )
+        .unwrap();
+        let mut view_hashes = vec![0; values.len()];
+        create_hashes_with_hasher(
+            [Arc::new(StringViewArray::from(values)) as ArrayRef],
+            &get_hasher(),
+            &mut view_hashes,
+        )
+        .unwrap();
+        assert_eq!(string_hashes, view_hashes);
+    }
 
     #[test]
     fn test_parse_expr() {
