@@ -479,6 +479,8 @@ impl State for Scheduling {
             .map(|(id, status)| (*id, status.rpc_address.clone()))
             .unwrap();
 
+        let checkpoint_interval_micros =
+            pipeline_config.worker.checkpoint.interval.as_micros() as u64;
         let pipeline_worker_config_json = serde_json::to_string(&pipeline_config.worker)
             .map_err(|e| fatal("failed to serialize pipeline worker config", e.into()))?;
 
@@ -515,6 +517,7 @@ impl State for Scheduling {
                             job_controller_addr: leader_addr,
                             is_leader: leader_id == id,
                             wait_for_leader: true,
+                            checkpoint_interval_micros,
                             checkpoint_manifest_ref: checkpoint_manifest_ref.clone(),
                             pipeline_worker_config_json,
                         }))
