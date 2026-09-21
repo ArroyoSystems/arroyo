@@ -9,7 +9,7 @@ use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::{Error, ObjectMeta};
+use object_store::{Error, ObjectMeta, ObjectStoreExt};
 use object_store::{
     MultipartId, ObjectStore, PutMode, PutOptions, PutPayload, RetryConfig, aws::AmazonS3Builder,
     local::LocalFileSystem,
