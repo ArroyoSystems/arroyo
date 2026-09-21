@@ -492,6 +492,7 @@ message StartExecutionReq {
   // Always send true so older workers wait for job_controller_init before running.
   // New workers always wait for the leader and ignore this field.
   bool wait_for_leader = 8;
+  // Keep populated for older workers, which do not read pipeline_worker_config_json.
   uint64 checkpoint_interval_micros = 9;
   // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;
@@ -499,6 +500,8 @@ message StartExecutionReq {
   // Older controllers omit this field and send v2 programs. Older workers ignore
   // it, so deployments must still ensure their runtime supports the programs sent.
   optional uint32 program_version = 11;
+  // JSON-encoded config.PipelineWorkerConfigs
+  string pipeline_worker_config_json = 12;
 }
 
 message StartExecutionResp {

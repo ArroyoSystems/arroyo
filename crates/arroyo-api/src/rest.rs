@@ -5,6 +5,7 @@ use axum::{
 };
 
 use anyhow::{Context, bail};
+use axum::extract::State;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri, header};
 use rust_embed::RustEmbed;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, Any, CorsLayer};
@@ -12,6 +13,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::ApiDoc;
+use crate::cloud::BearerAuth;
 use crate::connection_profiles::{
     create_connection_profile, delete_connection_profile, get_connection_profile_autocomplete,
     get_connection_profiles, test_connection_profile,
@@ -29,7 +31,7 @@ use crate::pipelines::{
     create_pipeline, create_preview_pipeline, delete_pipeline, get_pipeline, get_pipeline_jobs,
     get_pipelines, patch_pipeline, put_pipeline, restart_pipeline, validate_query,
 };
-use crate::rest_utils::not_found;
+use crate::rest_utils::{ErrorResp, authenticate, not_found};
 use crate::udfs::{create_udf, delete_udf, get_udfs, validate_udf};
 use arroyo_rpc::config::{CorsConfig, CorsOriginPolicy, config};
 use cornucopia_async::DatabaseSource;
@@ -56,6 +58,27 @@ pub struct AppState {
 )]
 pub async fn ping() -> impl IntoResponse {
     Json("Pong")
+}
+
+/// Controller configuration endpoint
+#[utoipa::path(
+    get,
+    path = "/v1/configs",
+    tag = "configs",
+    responses(
+        (status = 200, description = "Controller configuration", body = Object),
+    ),
+)]
+pub async fn get_configs(
+    State(state): State<AppState>,
+    bearer_auth: BearerAuth,
+) -> Result<impl IntoResponse, ErrorResp> {
+    let _ = authenticate(&state.database, bearer_auth).await?;
+
+    Ok(Json(
+        serde_json::to_value(config().as_ref())
+            .expect("controller configuration is always serializable"),
+    ))
 }
 
 pub async fn api_fallback() -> impl IntoResponse {
@@ -207,6 +230,7 @@ pub fn create_rest_app(database: DatabaseSource) -> anyhow::Result<Router> {
 
     let api_routes = Router::new()
         .route("/ping", get(ping))
+        .route("/configs", get(get_configs))
         .route("/connectors", get(get_connectors))
         .route("/connection_profiles/test", post(test_connection_profile))
         .route("/connection_profiles", post(create_connection_profile))

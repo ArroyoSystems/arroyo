@@ -1270,9 +1270,35 @@ pub struct StateContext {
 
 #[cfg(test)]
 mod tests {
+    use crate::grpc::rpc::StartExecutionReq;
     use crate::{DataSizeUnit, SerializableBytes, parse_expr};
     use bincode::{Decode, Encode, config};
     use bytes::Bytes;
+    use prost::Message;
+
+    #[test]
+    fn test_start_execution_legacy_checkpoint_interval() {
+        // The fields an older worker reads, without the new JSON config field.
+        #[derive(Clone, PartialEq, Message)]
+        struct LegacyStartExecutionReq {
+            #[prost(bool, tag = "8")]
+            wait_for_leader: bool,
+            #[prost(uint64, tag = "9")]
+            checkpoint_interval_micros: u64,
+        }
+
+        let request = StartExecutionReq {
+            wait_for_leader: true,
+            checkpoint_interval_micros: 7_123_456,
+            pipeline_worker_config_json: r#"{"checkpoint":{"interval":"7123456micros"}}"#
+                .to_string(),
+            ..Default::default()
+        };
+
+        let legacy = LegacyStartExecutionReq::decode(request.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(legacy.checkpoint_interval_micros, 7_123_456);
+        assert!(legacy.wait_for_leader);
+    }
 
     #[test]
     fn test_parse_expr() {
