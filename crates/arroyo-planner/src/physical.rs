@@ -5,9 +5,7 @@ use arrow::{
 };
 use arrow_array::{Array, PrimitiveArray, RecordBatch, StringArray, StructArray, array};
 use arrow_schema::{DataType, Schema, SchemaRef, TimeUnit};
-use datafusion::common::{
-    DataFusionError, Result, ScalarValue, Statistics, UnnestOptions, not_impl_err, plan_err,
-};
+use datafusion::common::{DataFusionError, Result, ScalarValue, UnnestOptions, plan_err};
 use datafusion::execution::{RecordBatchStream, SendableRecordBatchStream};
 use datafusion::{
     execution::TaskContext,
@@ -18,7 +16,6 @@ use datafusion::{
 };
 use std::collections::HashMap;
 use std::{
-    any::Any,
     mem,
     pin::Pin,
     sync::{Arc, RwLock},
@@ -58,7 +55,7 @@ use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct WindowFunctionUdf {
     signature: Signature,
 }
@@ -78,10 +75,6 @@ impl Default for WindowFunctionUdf {
 }
 
 impl ScalarUDFImpl for WindowFunctionUdf {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         "window"
     }
@@ -197,15 +190,15 @@ pub fn new_registry() -> Registry {
     registry
 }
 
-fn make_properties(schema: SchemaRef) -> PlanProperties {
-    PlanProperties::new(
+fn make_properties(schema: SchemaRef) -> Arc<PlanProperties> {
+    Arc::new(PlanProperties::new(
         EquivalenceProperties::new(schema),
         Partitioning::UnknownPartitioning(1),
         EmissionType::Incremental,
         Boundedness::Unbounded {
             requires_infinite_memory: false,
         },
-    )
+    ))
 }
 
 impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
@@ -213,7 +206,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
         &self,
         buf: &[u8],
         inputs: &[Arc<dyn datafusion::physical_plan::ExecutionPlan>],
-        _registry: &dyn datafusion::execution::FunctionRegistry,
+        _ctx: &TaskContext,
     ) -> datafusion::common::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
         let exec: ArroyoExecNode = Message::decode(buf)
             .map_err(|err| DataFusionError::Internal(format!("couldn't deserialize: {err}")))?;
@@ -301,7 +294,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                     vec![],
                     Arc::new(schema),
                     UnnestOptions::default(),
-                )))
+                )?))
             }
             Node::DebeziumDecode(debezium) => {
                 let schema = Arc::new(serde_json::from_str::<Schema>(&debezium.schema).map_err(
@@ -348,7 +341,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
     ) -> datafusion::common::Result<()> {
         let mut proto = None;
 
-        let mem_table: Option<&ArroyoMemExec> = node.as_any().downcast_ref();
+        let mem_table: Option<&ArroyoMemExec> = node.downcast_ref();
         if let Some(table) = mem_table {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::MemExec(MemExecNode {
@@ -358,7 +351,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             });
         }
 
-        let unnest: Option<&UnnestExec> = node.as_any().downcast_ref();
+        let unnest: Option<&UnnestExec> = node.downcast_ref();
         if let Some(unnest) = unnest {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::UnnestExec(UnnestExecNode {
@@ -366,7 +359,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
                 })),
             });
         }
-        let debezium_decode: Option<&DebeziumUnrollingExec> = node.as_any().downcast_ref();
+        let debezium_decode: Option<&DebeziumUnrollingExec> = node.downcast_ref();
         if let Some(decode) = debezium_decode {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::DebeziumDecode(DebeziumDecodeNode {
@@ -376,7 +369,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
             });
         }
 
-        let debezium_encode: Option<&ToDebeziumExec> = node.as_any().downcast_ref();
+        let debezium_encode: Option<&ToDebeziumExec> = node.downcast_ref();
         if let Some(encode) = debezium_encode {
             proto = Some(ArroyoExecNode {
                 node: Some(arroyo_exec_node::Node::DebeziumEncode(DebeziumEncodeNode {
@@ -402,7 +395,7 @@ impl PhysicalExtensionCodec for ArroyoPhysicalExtensionCodec {
 struct RwLockRecordBatchReader {
     schema: SchemaRef,
     locked_batch: Arc<RwLock<Option<RecordBatch>>>,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl RwLockRecordBatchReader {
@@ -426,10 +419,6 @@ impl DisplayAs for RwLockRecordBatchReader {
 }
 
 impl ExecutionPlan for RwLockRecordBatchReader {
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
@@ -440,9 +429,13 @@ impl ExecutionPlan for RwLockRecordBatchReader {
 
     fn with_new_children(
         self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("not supported".into()))
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if !children.is_empty() {
+            return plan_err!("batch reader cannot have children");
+        }
+        // The input buffer is supplied by Arroyo before each execution, not cached plan state.
+        Ok(self)
     }
 
     fn execute(
@@ -463,15 +456,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
         )?))
     }
 
-    fn statistics(&self) -> Result<datafusion::common::Statistics> {
-        Ok(Statistics::new_unknown(&self.schema))
-    }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
-
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -484,7 +469,7 @@ impl ExecutionPlan for RwLockRecordBatchReader {
 struct UnboundedRecordBatchReader {
     schema: SchemaRef,
     receiver: Arc<RwLock<Option<UnboundedReceiver<RecordBatch>>>>,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl UnboundedRecordBatchReader {
@@ -515,15 +500,11 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
         "unbounded_reader"
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -533,9 +514,13 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
 
     fn with_new_children(
         self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("not supported".into()))
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if !children.is_empty() {
+            return plan_err!("batch reader cannot have children");
+        }
+        // The input buffer is supplied by Arroyo before each execution, not cached plan state.
+        Ok(self)
     }
 
     fn execute(
@@ -555,21 +540,13 @@ impl ExecutionPlan for UnboundedRecordBatchReader {
             .map(Ok),
         )))
     }
-
-    fn statistics(&self) -> Result<datafusion::common::Statistics> {
-        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
-    }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 struct RecordBatchVecReader {
     schema: SchemaRef,
     receiver: Arc<RwLock<Vec<RecordBatch>>>,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl RecordBatchVecReader {
@@ -597,15 +574,11 @@ impl ExecutionPlan for RecordBatchVecReader {
         "vec_reader"
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -615,9 +588,13 @@ impl ExecutionPlan for RecordBatchVecReader {
 
     fn with_new_children(
         self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
-    ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-        Err(DataFusionError::Internal("not supported".into()))
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        if !children.is_empty() {
+            return plan_err!("batch reader cannot have children");
+        }
+        // The input buffer is supplied by Arroyo before each execution, not cached plan state.
+        Ok(self)
     }
 
     fn execute(
@@ -633,21 +610,13 @@ impl ExecutionPlan for RecordBatchVecReader {
 
         DataSourceExec::new(Arc::new(memory)).execute(partition, context)
     }
-
-    fn statistics(&self) -> datafusion::common::Result<datafusion::common::Statistics> {
-        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
-    }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ArroyoMemExec {
     pub table_name: String,
     pub schema: SchemaRef,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl DisplayAs for ArroyoMemExec {
@@ -675,15 +644,11 @@ impl ExecutionPlan for ArroyoMemExec {
         "mem_exec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -693,9 +658,12 @@ impl ExecutionPlan for ArroyoMemExec {
 
     fn with_new_children(
         self: Arc<Self>,
-        _children: Vec<Arc<dyn ExecutionPlan>>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        not_impl_err!("with_new_children is not implemented for mem_exec; should not be called")
+        if !children.is_empty() {
+            return plan_err!("mem_exec cannot have children");
+        }
+        Ok(self)
     }
 
     fn execute(
@@ -707,21 +675,13 @@ impl ExecutionPlan for ArroyoMemExec {
             "EmptyPartitionStream cannot be executed, this is only used for physical planning before serialization"
         )
     }
-
-    fn statistics(&self) -> Result<datafusion::common::Statistics> {
-        Ok(datafusion::common::Statistics::new_unknown(&self.schema))
-    }
-
-    fn reset(&self) -> Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
 pub struct DebeziumUnrollingExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
     primary_keys: Vec<usize>,
 }
 
@@ -786,15 +746,11 @@ impl ExecutionPlan for DebeziumUnrollingExec {
         "debezium_unrolling_exec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -829,10 +785,6 @@ impl ExecutionPlan for DebeziumUnrollingExec {
             self.schema.clone(),
             self.primary_keys.clone(),
         )?))
-    }
-
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
     }
 }
 
@@ -968,7 +920,7 @@ impl RecordBatchStream for DebeziumUnrollingStream {
 pub struct ToDebeziumExec {
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
-    properties: PlanProperties,
+    properties: Arc<PlanProperties>,
 }
 
 impl ToDebeziumExec {
@@ -1031,15 +983,11 @@ impl ExecutionPlan for ToDebeziumExec {
         "to_debezium_exec"
     }
 
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.properties
     }
 
@@ -1082,10 +1030,6 @@ impl ExecutionPlan for ToDebeziumExec {
             timestamp_index,
             struct_projection,
         }))
-    }
-
-    fn reset(&self) -> Result<()> {
-        self.input.reset()
     }
 }
 

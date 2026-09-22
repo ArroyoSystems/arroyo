@@ -1,4 +1,4 @@
-use std::{fmt::Formatter, sync::Arc};
+use std::fmt::Formatter;
 
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::{
@@ -90,7 +90,7 @@ impl ArroyoExtension for RemoteTableExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_keys(Arc::new(self.schema.as_ref().into()), vec![]).unwrap()
+        ArroyoSchema::from_schema_keys(self.schema.inner().clone(), vec![]).unwrap()
     }
 }
 
