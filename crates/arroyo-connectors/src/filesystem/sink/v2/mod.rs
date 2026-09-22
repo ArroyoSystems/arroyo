@@ -10,7 +10,7 @@ use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
 use super::v2::uploads::{FsResponse, UploadFuture};
 use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
-    add_suffix_prefix, map_storage_error,
+    add_suffix_prefix, classify_storage_error, map_storage_error,
 };
 use crate::filesystem::TableFormat;
 use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
