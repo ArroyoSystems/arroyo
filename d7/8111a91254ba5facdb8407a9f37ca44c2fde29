@@ -1,0 +1,21 @@
+crates/arroyo-api/src/cf_endpoints.rs
+  s_28384b94424529::t_5b382c37ca00dc 925,943,961-966,968,1011,1020
+crates/arroyo-api/queries/api_queries.sql
+  s_28384b94424529::t_5b382c37ca00dc 321,338-346
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d78111a91254ba5facdb8407a9f37ca44c2fde29",
+  "prompts": {},
+  "sessions": {
+    "s_28384b94424529": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f36b4c119fferDFWsnVHm5k7K2",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
