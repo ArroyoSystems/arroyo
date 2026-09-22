@@ -1,3 +1,5 @@
+use super::new_task_context;
+use super::reset_execution_plan;
 use super::sync::streams::KeyedCloneableStreamFuture;
 use anyhow::Result;
 use arrow::compute::{max, min, partition, sort_to_indices, take};
@@ -15,8 +17,7 @@ use arroyo_rpc::{
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time};
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::execution::TaskContext;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use futures::StreamExt;
@@ -36,6 +37,7 @@ use tracing::debug;
 type NextBatchFuture<K> = KeyedCloneableStreamFuture<K, SendableRecordBatchStream>;
 
 pub struct InstantJoin {
+    task_context: Arc<TaskContext>,
     left_input_schema: ArroyoSchemaRef,
     right_input_schema: ArroyoSchemaRef,
     execs: BTreeMap<SystemTime, InstantComputeHolder>,
@@ -89,11 +91,9 @@ impl InstantJoin {
             let (right_sender, right_receiver) = unbounded_channel();
             self.left_receiver.write().unwrap().replace(left_receiver);
             self.right_receiver.write().unwrap().replace(right_receiver);
-            self.join_exec.reset()?;
+            reset_execution_plan(&mut self.join_exec)?;
 
-            let new_exec = self
-                .join_exec
-                .execute(0, SessionContext::new().task_ctx())?;
+            let new_exec = self.join_exec.execute(0, self.task_context.clone())?;
             let next_batch_future = NextBatchFuture::new(time, new_exec);
             self.futures.lock().await.push(next_batch_future.clone());
             let exec = InstantComputeHolder {
@@ -377,6 +377,7 @@ impl OperatorConstructor for InstantJoinConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let join_physical_plan_node = PhysicalPlanNode::decode(&mut config.join_plan.as_slice())?;
 
         let left_input_schema: Arc<ArroyoSchema> =
@@ -393,11 +394,7 @@ impl OperatorConstructor for InstantJoinConstructor {
                 right: right_receiver.clone(),
             },
         };
-        let join_exec = join_physical_plan_node.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
-            &codec,
-        )?;
+        let join_exec = join_physical_plan_node.try_into_physical_plan(&task_context, &codec)?;
 
         Ok(ConstructedOperator::from_operator(Box::new(InstantJoin {
             left_input_schema,
@@ -407,6 +404,7 @@ impl OperatorConstructor for InstantJoinConstructor {
             left_receiver,
             right_receiver,
             join_exec,
+            task_context,
         })))
     }
 }

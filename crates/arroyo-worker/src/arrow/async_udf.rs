@@ -1,3 +1,4 @@
+use super::new_task_context;
 use anyhow::anyhow;
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{Array, RecordBatch, UInt64Array, make_array};
@@ -192,6 +193,7 @@ impl ArrowOperator for AsyncUdfOperator {
         let input_schema = Arc::new(Schema::new(input_fields));
         let post_udf_schema = Arc::new(Schema::new(post_udf_fields));
 
+        let task_context = new_task_context(self.registry.as_ref())?;
         self.input_exprs = self
             .config
             .arg_exprs
@@ -199,7 +201,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &task_context,
                     &input_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )
@@ -214,7 +216,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &task_context,
                     &post_udf_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )

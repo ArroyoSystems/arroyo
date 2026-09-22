@@ -1,3 +1,6 @@
+use super::new_task_context;
+use super::reset_execution_plan;
+use datafusion::execution::TaskContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,8 +21,6 @@ use arroyo_rpc::{df::ArroyoSchemaRef, grpc::api};
 use arroyo_state::timestamp_table_config;
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos};
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::context::SessionContext;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
@@ -33,6 +34,7 @@ use super::sync::streams::KeyedCloneableStreamFuture;
 type NextBatchFuture = KeyedCloneableStreamFuture<SystemTime, SendableRecordBatchStream>;
 
 pub struct WindowFunctionOperator {
+    task_context: Arc<TaskContext>,
     input_schema: ArroyoSchemaRef,
     // this is for time bucketing
     input_schema_unkeyed: ArroyoSchemaRef,
@@ -96,9 +98,10 @@ impl WindowFunctionOperator {
             let mut internal_receiver = self.receiver.write().unwrap();
             *internal_receiver = Some(receiver);
         }
+        reset_execution_plan(&mut self.window_exec).expect("reset window execution plan");
         let new_exec = self
             .window_exec
-            .execute(0, SessionContext::new().task_ctx())
+            .execute(0, self.task_context.clone())
             .unwrap();
         let next_batch_future = NextBatchFuture::new(timestamp, new_exec);
         self.futures.lock().await.push(next_batch_future.clone());
@@ -241,6 +244,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let window_exec = PhysicalPlanNode::decode(&mut config.window_function_plan.as_slice())?;
         let input_schema = Arc::new(ArroyoSchema::try_from(
             config
@@ -251,11 +255,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
         let codec = ArroyoPhysicalExtensionCodec {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
-        let window_exec = window_exec.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
-            &codec,
-        )?;
+        let window_exec = window_exec.try_into_physical_plan(&task_context, &codec)?;
         let input_schema_unkeyed = Arc::new(ArroyoSchema::from_schema_unkeyed(
             input_schema.schema.clone(),
         )?);
@@ -267,6 +267,7 @@ impl OperatorConstructor for WindowFunctionConstructor {
                 futures: Arc::new(Mutex::new(FuturesUnordered::new())),
                 receiver,
                 window_exec,
+                task_context,
             },
         )))
     }

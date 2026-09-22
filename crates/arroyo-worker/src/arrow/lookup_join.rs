@@ -1,3 +1,4 @@
+use super::new_task_context;
 use arrow::compute::filter_record_batch;
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::cast::AsArray;
@@ -195,6 +196,7 @@ impl OperatorConstructor for LookupJoinConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let join_type = config.join_type();
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let lookup_schema: ArroyoSchema = config.lookup_schema.unwrap().try_into()?;
@@ -206,7 +208,7 @@ impl OperatorConstructor for LookupJoinConstructor {
                 let expr = PhysicalExprNode::decode(&mut e.left_expr.as_slice())?;
                 Ok(parse_physical_expr(
                     &expr,
-                    registry.as_ref(),
+                    &task_context,
                     &input_schema.schema,
                     &DefaultPhysicalExtensionCodec {},
                 )?)
