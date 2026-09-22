@@ -1,4 +1,4 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
 use datafusion::catalog::Session;
@@ -18,10 +18,6 @@ pub struct LogicalBatchInput {
 #[async_trait::async_trait]
 
 impl TableProvider for LogicalBatchInput {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
     }

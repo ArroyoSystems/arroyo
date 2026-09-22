@@ -332,7 +332,8 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             join_type,
             join_constraint: JoinConstraint::On,
             schema: _,
-            null_equals_null: false,
+            null_equality: datafusion::common::NullEquality::NullEqualsNothing,
+            null_aware: false,
         } = join
         else {
             return not_impl_err!("can't handle join constraint other than ON");
@@ -359,7 +360,8 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             on,
             join_type,
             join_constraint: JoinConstraint::On,
-            null_equals_null: false,
+            null_equality: datafusion::common::NullEquality::NullEqualsNothing,
+            null_aware: false,
             filter,
         });
 

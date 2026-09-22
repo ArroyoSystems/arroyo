@@ -6,14 +6,13 @@ use crate::tables::ConnectorTable;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::{ConnectorOp, LookupJoinCondition, LookupJoinOperator};
+use datafusion::common::TableReference;
 use datafusion::common::{Column, DFSchemaRef, JoinType, internal_err, plan_err};
 use datafusion::logical_expr::{Expr, LogicalPlan, UserDefinedLogicalNodeCore};
-use datafusion::sql::TableReference;
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use prost::Message;
 use std::fmt::Formatter;
-use std::sync::Arc;
 
 pub const SOURCE_EXTENSION_NAME: &str = "LookupSource";
 pub const JOIN_EXTENSION_NAME: &str = "LookupJoin";
@@ -87,7 +86,7 @@ impl ArroyoExtension for LookupJoin {
         index: usize,
         input_schemas: Vec<ArroyoSchemaRef>,
     ) -> datafusion::common::Result<NodeWithIncomingEdges> {
-        let schema = ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into()))?;
+        let schema = ArroyoSchema::from_schema_unkeyed(self.schema.inner().clone())?;
         let lookup_schema = ArroyoSchema::from_schema_unkeyed(add_timestamp_field_arrow(
             self.connector.physical_schema(),
         ))?;

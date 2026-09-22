@@ -15,7 +15,6 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::{Expr, col};
 use serde_json_path::JsonPath;
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
@@ -117,7 +116,7 @@ fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
 
 // Hash function that can take any number of arguments and produces a fast (non-cryptographic)
 // 128-bit hash from their string representations
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct MultiHashFunction {
     signature: Signature,
 }
@@ -183,10 +182,6 @@ impl Default for MultiHashFunction {
 }
 
 impl ScalarUDFImpl for MultiHashFunction {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         "multi_hash"
     }

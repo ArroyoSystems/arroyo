@@ -109,9 +109,10 @@ impl TreeNodeVisitor<'_> for WindowDetectingVisitor {
                                     return Some(Err(err));
                                 }
                             };
-                            if self.fields.contains(
-                                &(column.relation.clone(), Arc::new(input_field.clone())).into(),
-                            ) {
+                            if self
+                                .fields
+                                .contains(&(column.relation.clone(), input_field.clone()).into())
+                            {
                                 return self.window.clone().map(|window| Ok((index, window)));
                             }
                         }

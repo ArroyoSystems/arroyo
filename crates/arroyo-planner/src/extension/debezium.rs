@@ -71,7 +71,7 @@ impl DebeziumUnrollingExtension {
         let mut fields = vec![before, after, op];
 
         if let Some(timestamp_field) = timestamp_field {
-            fields.push(Arc::new(timestamp_field));
+            fields.push(timestamp_field);
         }
 
         let schema = match qualifier {
@@ -154,7 +154,7 @@ impl DebeziumUnrollingExtension {
             return plan_err!("DebeziumUnrollingExtension requires a timestamp field");
         };
 
-        fields.push(Arc::new(input_schema.field(input_timestamp_field).clone()));
+        fields.push(input_schema.field(input_timestamp_field).clone());
         let arrow_schema = Schema::new(fields);
 
         let schema = match qualifier {
@@ -212,7 +212,7 @@ impl ArroyoExtension for DebeziumUnrollingExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(self.schema.inner().clone()).unwrap()
     }
 
     fn transparent(&self) -> bool {
@@ -295,7 +295,7 @@ impl ArroyoExtension for ToDebeziumExtension {
     }
 
     fn output_schema(&self) -> ArroyoSchema {
-        ArroyoSchema::from_schema_unkeyed(Arc::new(self.schema.as_ref().into())).unwrap()
+        ArroyoSchema::from_schema_unkeyed(self.schema.inner().clone()).unwrap()
     }
 
     fn transparent(&self) -> bool {
