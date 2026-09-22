@@ -1,3 +1,4 @@
+use super::new_task_context;
 use arrow::compute::kernels;
 use arrow_array::RecordBatch;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -69,11 +70,12 @@ impl OperatorConstructor for WatermarkGeneratorConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let input_schema: ArroyoSchema = config.input_schema.unwrap().try_into()?;
         let expression = PhysicalExprNode::decode(&mut config.expression.as_slice())?;
         let expression = parse_physical_expr(
             &expression,
-            registry.as_ref(),
+            &task_context,
             &input_schema.schema,
             &DefaultPhysicalExtensionCodec {},
         )?;

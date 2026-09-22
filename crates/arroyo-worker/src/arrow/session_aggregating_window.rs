@@ -1,3 +1,5 @@
+use super::new_task_context;
+use super::reset_execution_plan;
 use anyhow::{Context, Result, anyhow, bail};
 use arrow::{
     compute::{
@@ -25,7 +27,8 @@ use arroyo_state::{
     global_table_config, tables::global_keyed_map::GlobalKeyedView, timestamp_table_config,
 };
 use arroyo_types::{CheckpointBarrier, Watermark, from_nanos, print_time, to_nanos};
-use datafusion::{execution::context::SessionContext, physical_plan::ExecutionPlan};
+use datafusion::execution::TaskContext;
+use datafusion::physical_plan::ExecutionPlan;
 use std::borrow::Cow;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -38,7 +41,6 @@ use arroyo_operator::operator::{AsDisplayable, DisplayableOperator, Registry};
 use arroyo_planner::physical::{ArroyoPhysicalExtensionCodec, DecodingContext};
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use datafusion::execution::SendableRecordBatchStream;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion_proto::{physical_plan::AsExecutionPlan, protobuf::PhysicalPlanNode};
 use prost::Message;
 use std::time::Duration;
@@ -383,6 +385,7 @@ impl SessionAggregatingWindowFunc {
 }
 
 struct SessionWindowConfig {
+    task_context: Arc<TaskContext>,
     gap: Duration,
     input_schema_ref: ArroyoSchemaRef,
     window_field: FieldRef,
@@ -405,12 +408,13 @@ struct ActiveSession {
 
 impl ActiveSession {
     async fn new(
-        aggregation_plan: Arc<dyn ExecutionPlan>,
+        mut aggregation_plan: Arc<dyn ExecutionPlan>,
+        task_context: Arc<TaskContext>,
         initial_timestamp: SystemTime,
         sender: UnboundedSender<RecordBatch>,
     ) -> Result<Self> {
-        aggregation_plan.reset()?;
-        let result_exec = aggregation_plan.execute(0, SessionContext::new().task_ctx())?;
+        reset_execution_plan(&mut aggregation_plan)?;
+        let result_exec = aggregation_plan.execute(0, task_context)?;
         Ok(Self {
             data_start: initial_timestamp,
             data_end: initial_timestamp,
@@ -596,6 +600,7 @@ impl KeyComputingHolder {
                 self.active_session = Some(
                     ActiveSession::new(
                         self.session_window_config.final_physical_exec.clone(),
+                        self.session_window_config.task_context.clone(),
                         *initial_timestamp,
                         sender,
                     )
@@ -709,6 +714,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        let task_context = new_task_context(registry.as_ref())?;
         let window_field = Arc::new(Field::new(
             config.window_field_name,
             window_arrow_struct(),
@@ -721,11 +727,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             context: DecodingContext::UnboundedBatchStream(receiver.clone()),
         };
         let final_plan = PhysicalPlanNode::decode(&mut config.final_aggregation_plan.as_slice())?;
-        let final_execution_plan = final_plan.try_into_physical_plan(
-            registry.as_ref(),
-            &RuntimeEnvBuilder::new().build()?,
-            &codec,
-        )?;
+        let final_execution_plan = final_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let input_schema: ArroyoSchema = config
             .input_schema
@@ -756,6 +758,7 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
             window_index: config.window_index as usize,
             input_schema_ref: Arc::new(input_schema),
             final_physical_exec: final_execution_plan,
+            task_context,
             receiver,
         };
 
