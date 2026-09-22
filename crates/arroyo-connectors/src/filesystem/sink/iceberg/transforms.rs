@@ -18,7 +18,6 @@ use datafusion::functions::{export_functions, make_udf_function};
 use datafusion::logical_expr::{
     ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, TypeSignature, Volatility,
 };
-use std::any::Any;
 use std::sync::Arc;
 
 static YEARS_BEFORE_UNIX_EPOCH: i32 = 1970;
@@ -230,14 +229,10 @@ macro_rules! make_transform_udf {
         $signature:expr,
         $mk_transform:expr,
     ) => {
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq, Eq, Hash)]
         struct $type_name(Signature);
 
         impl ScalarUDFImpl for $type_name {
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-
             fn name(&self) -> &str {
                 stringify!($udf_name)
             }

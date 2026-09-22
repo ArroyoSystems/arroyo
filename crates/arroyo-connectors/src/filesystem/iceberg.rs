@@ -120,10 +120,11 @@ impl IcebergConnector {
         // try to connect to the catalog
 
         let IcebergTable::Sink(sink) = table;
-        let table = sink::iceberg::IcebergTable::new(&profile.catalog, sink)?;
+        let mut table = sink::iceberg::IcebergTable::new(&profile.catalog, sink)?;
+        table.initialize_catalog().await?;
 
         table
-            .catalog
+            .catalog()
             .namespace_exists(table.table_ident.namespace())
             .await?;
 
