@@ -2,7 +2,9 @@ use ::arrow::record_batch::RecordBatch;
 use ::arrow::row::OwnedRow;
 use arroyo_operator::context::OperatorContext;
 use arroyo_rpc::connector_err;
-use arroyo_rpc::errors::{DataflowError, DataflowResult as Result, DataflowResult, StorageError};
+use arroyo_rpc::errors::{
+    DataflowError, DataflowResult, DataflowResult as Result, ErrorDomain, RetryHint, StorageError,
+};
 use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_storage::StorageProvider;
 use arroyo_types::*;
@@ -151,43 +153,56 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
 }
 
 fn map_storage_error(storage_error: StorageError) -> DataflowError {
+    let (domain, retry) = classify_storage_error(&storage_error);
+
+    match storage_error {
+        StorageError::ObjectStore(obj_err) => DataflowError::ConnectorError {
+            domain,
+            retry,
+            error: obj_err.to_string(),
+            source: None,
+        },
+        storage_error => DataflowError::ConnectorError {
+            domain,
+            retry,
+            error: storage_error.to_string(),
+            source: None,
+        },
+    }
+}
+
+fn classify_storage_error(storage_error: &StorageError) -> (ErrorDomain, RetryHint) {
     match storage_error {
         // User errors: configuration/input mistakes by the user
         StorageError::InvalidUrl
         | StorageError::PathError(_)
         | StorageError::NoKeyInUrl
         | StorageError::AlreadyExists { .. }
-        | StorageError::CredentialsError(_) => {
-            connector_err!(User, NoRetry, "{}", storage_error)
-        }
+        | StorageError::CredentialsError(_) => (ErrorDomain::User, RetryHint::NoRetry),
         // Object store errors need to be inspected to determine the domain
-        StorageError::ObjectStore(ref obj_err) => map_object_store_error(obj_err),
+        StorageError::ObjectStore(obj_err) => classify_object_store_error(obj_err),
     }
 }
 
-fn map_object_store_error(obj_err: &object_store::Error) -> DataflowError {
+fn classify_object_store_error(obj_err: &object_store::Error) -> (ErrorDomain, RetryHint) {
     use object_store::Error;
     match obj_err {
         // 409s with "error code: 1018" are spurious upstream errors; let the task recover.
         Error::AlreadyExists { source, .. } if source.to_string().contains("error code: 1018") => {
-            connector_err!(External, WithBackoff, "{}", obj_err)
+            (ErrorDomain::External, RetryHint::WithBackoff)
         }
         // User errors: authentication, authorization, bad paths, misconfiguration
         Error::NotFound { .. }
         | Error::InvalidPath { .. }
         | Error::Unauthenticated { .. }
         | Error::PermissionDenied { .. }
-        | Error::AlreadyExists { .. } => {
-            connector_err!(User, NoRetry, "{}", obj_err)
-        }
+        | Error::AlreadyExists { .. } => (ErrorDomain::User, RetryHint::NoRetry),
         // External errors: permanent issues that won't be fixed by retrying
         Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
-            connector_err!(External, NoRetry, "{}", obj_err)
+            (ErrorDomain::External, RetryHint::NoRetry)
         }
         // External errors: transient issues worth retrying
-        _ => {
-            connector_err!(External, WithBackoff, "{}", obj_err)
-        }
+        _ => (ErrorDomain::External, RetryHint::WithBackoff),
     }
 }
 
