@@ -199,7 +199,7 @@ fn classify_object_store_error(obj_err: &object_store::Error) -> (ErrorDomain, R
         | Error::Unauthenticated { .. }
         | Error::PermissionDenied { .. } => (ErrorDomain::User, RetryHint::NoRetry),
         // External errors: permanent issues that won't be fixed by retrying
-        Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
+        Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented { .. } => {
             (ErrorDomain::External, RetryHint::NoRetry)
         }
         // External errors: transient issues worth retrying
