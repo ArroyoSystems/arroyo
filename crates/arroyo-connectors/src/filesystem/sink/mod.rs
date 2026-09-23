@@ -447,7 +447,8 @@ pub enum CommitState {
         last_version: i64,
         table: Box<DeltaTable>,
     },
-    Iceberg(Box<IcebergTable>),
+    // None while the v2 sink is committing in the background
+    Iceberg(Option<Box<IcebergTable>>),
     VanillaParquet,
 }
 
@@ -773,7 +774,7 @@ where
             TableFormat::Iceberg(mut table) => {
                 let t = table.load_or_create(task_info, &schema.schema).await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
-                CommitState::Iceberg(table)
+                CommitState::Iceberg(Some(table))
             }
         };
         let mut file_naming = sink_config.file_naming.clone();
@@ -1030,7 +1031,11 @@ where
                 }
             }
             CommitState::Iceberg(table) => {
-                table.commit(epoch, &finished_files).await?;
+                table
+                    .as_mut()
+                    .unwrap()
+                    .commit(epoch, &finished_files)
+                    .await?;
             }
             CommitState::VanillaParquet => {
                 // nothing to do
