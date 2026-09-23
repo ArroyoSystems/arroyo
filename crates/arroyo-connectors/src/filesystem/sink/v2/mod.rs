@@ -4,6 +4,7 @@ mod open_file;
 mod uploads;
 
 use super::delta::{commit_files_to_delta, load_or_create_table};
+use super::iceberg::IcebergTable;
 use super::parquet::representitive_timestamp;
 use super::partitioning::{Partitioner, PartitionerMode};
 use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
@@ -25,7 +26,7 @@ use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, connector_err, df::ArroyoSchemaRef, formats::Format};
 use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_storage::StorageProvider;
-use arroyo_types::{CheckpointBarrier, TaskInfo, Watermark};
+use arroyo_types::{CheckpointBarrier, SignalMessage, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config as bincode_config;
 use futures::StreamExt;
@@ -40,6 +41,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use std::{env, fs, mem};
 use tokio::sync::Mutex;
+use tokio::task::{JoinError, JoinHandle};
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 use uuid::Uuid;
@@ -149,7 +151,7 @@ impl SinkContext {
                     .load_or_create(task_info.clone(), &schema.schema)
                     .await?;
                 iceberg_schema = Some(t.metadata().current_schema().clone());
-                CommitState::Iceberg(table)
+                CommitState::Iceberg(Some(table))
             }
             TableFormat::None => CommitState::VanillaParquet,
         };
@@ -262,6 +264,33 @@ pub struct FileSystemSinkV2<BBW: BatchBufferingWriter + 'static> {
 
     event_logger: FsEventLogger,
     watermark: Option<SystemTime>,
+
+    iceberg_commit: Arc<Mutex<Option<IcebergCommit>>>,
+    // the final checkpoint's epoch, whose commit must finish before the operator exits
+    stopping_epoch: Option<u32>,
+}
+
+struct IcebergCommit {
+    epoch: u32,
+    handle: JoinHandle<DataflowResult<Box<IcebergTable>>>,
+}
+
+impl Drop for IcebergCommit {
+    fn drop(&mut self) {
+        // don't leave the commit running if the operator is torn down
+        self.handle.abort();
+    }
+}
+
+type IcebergCommitResult = (u32, Result<DataflowResult<Box<IcebergTable>>, JoinError>);
+
+async fn wait_for_commit(commit: Arc<Mutex<Option<IcebergCommit>>>) -> IcebergCommitResult {
+    let mut guard = commit.lock().await;
+    let Some(c) = guard.as_mut() else {
+        return futures::future::pending().await;
+    };
+    let result = (&mut c.handle).await;
+    (guard.take().unwrap().epoch, result)
 }
 
 struct UploadState {
@@ -338,6 +367,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
                 table_format: table_format_name,
             },
             watermark: None,
+            iceberg_commit: Arc::new(Mutex::new(None)),
+            stopping_epoch: None,
         }
     }
 
@@ -384,6 +415,32 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
             }
         }
         Ok(())
+    }
+
+    async fn finish_iceberg_commit(
+        &mut self,
+        (epoch, result): IcebergCommitResult,
+        ctx: &mut OperatorContext,
+    ) -> DataflowResult<()> {
+        let table = result.map_err(|e| {
+            connector_err!(Internal, WithBackoff, "iceberg commit task failed: {e}")
+        })??;
+
+        if let CommitState::Iceberg(t) = &mut self.context.as_mut().unwrap().commit_state {
+            *t = Some(table);
+        }
+
+        send_commit_ack(ctx, epoch).await;
+        Ok(())
+    }
+
+    async fn wait_for_iceberg_commit(&mut self, ctx: &mut OperatorContext) -> DataflowResult<()> {
+        if self.iceberg_commit.lock().await.is_none() {
+            return Ok(());
+        }
+
+        let result = wait_for_commit(self.iceberg_commit.clone()).await;
+        self.finish_iceberg_commit(result, ctx).await
     }
 
     /// Get the delta version if using Delta Lake.
@@ -550,8 +607,9 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         &mut self,
     ) -> Option<Pin<Box<dyn Future<Output = Box<dyn Any + Send>> + Send>>> {
         let futures = self.upload.pending_uploads.clone();
+        let commit = self.iceberg_commit.clone();
 
-        Some(Box::pin(async move {
+        let uploads = async move {
             let mut guard = futures.lock().await;
 
             if guard.is_empty() {
@@ -564,16 +622,28 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
             // Poll the next upload to completion
             let result: Option<DataflowResult<FsResponse>> = guard.next().await;
-            Box::new(result) as Box<dyn Any + Send>
+            result
+        };
+
+        Some(Box::pin(async move {
+            tokio::select! {
+                result = uploads => Box::new(result) as Box<dyn Any + Send>,
+                result = wait_for_commit(commit) => Box::new(result),
+            }
         }))
     }
 
     async fn handle_future_result(
         &mut self,
         result: Box<dyn Any + Send>,
-        _ctx: &mut OperatorContext,
+        ctx: &mut OperatorContext,
         _collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
+        let result = match result.downcast::<IcebergCommitResult>() {
+            Ok(commit) => return self.finish_iceberg_commit(*commit, ctx).await,
+            Err(result) => result,
+        };
+
         let result: Option<DataflowResult<FsResponse>> = *result
             .downcast()
             .map_err(|_| connector_err!(Internal, NoRetry, "failed to downcast future result"))?;
@@ -606,6 +676,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
     ) -> DataflowResult<()> {
         // if stopping, close all open files
         if barrier.then_stop {
+            self.stopping_epoch = Some(barrier.epoch);
             let pending = self.upload.pending_uploads.lock().await;
             for f in self.active.open_files.values_mut() {
                 for fut in f.close()? {
@@ -822,7 +893,18 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
                     }
                 }
                 CommitState::Iceberg(table) => {
-                    table.commit(epoch, &finished_files).await?;
+                    let mut table = table.take().expect("iceberg commit already in progress");
+                    let handle = tokio::spawn(async move {
+                        table.commit(epoch, &finished_files).await?;
+                        Ok(table)
+                    });
+                    *self.iceberg_commit.lock().await = Some(IcebergCommit { epoch, handle });
+
+                    // otherwise, we'll ack in handle_future_result once the commit finishes
+                    if self.stopping_epoch == Some(epoch) {
+                        self.wait_for_iceberg_commit(ctx).await?;
+                    }
+                    return Ok(());
                 }
                 CommitState::VanillaParquet => {
                     // Nothing to do
@@ -830,24 +912,17 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
             }
         }
 
-        maybe_cause_failure("commit_before_ack");
-
-        // Send completion event
-        ctx.control_tx
-            .send(arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
-                checkpoint_epoch: epoch as u64,
-                operator_idx: ctx.task_info.operator_idx,
-                operator_id: ctx.task_info.operator_id.clone(),
-                subtask_idx: ctx.task_info.task_index,
-                time: SystemTime::now(),
-                event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
-            }))
-            .await
-            .expect("sent commit event");
-
-        maybe_cause_failure("commit_after_ack");
-
+        send_commit_ack(ctx, epoch).await;
         Ok(())
+    }
+
+    async fn on_close(
+        &mut self,
+        _final_message: &Option<SignalMessage>,
+        ctx: &mut OperatorContext,
+        _collector: &mut dyn Collector,
+    ) -> DataflowResult<()> {
+        self.wait_for_iceberg_commit(ctx).await
     }
 
     async fn handle_tick(
@@ -879,4 +954,22 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
         Ok(())
     }
+}
+
+async fn send_commit_ack(ctx: &mut OperatorContext, epoch: u32) {
+    maybe_cause_failure("commit_before_ack");
+
+    ctx.control_tx
+        .send(arroyo_rpc::ControlResp::CheckpointEvent(CheckpointEvent {
+            checkpoint_epoch: epoch as u64,
+            operator_idx: ctx.task_info.operator_idx,
+            operator_id: ctx.task_info.operator_id.clone(),
+            subtask_idx: ctx.task_info.task_index,
+            time: SystemTime::now(),
+            event_type: arroyo_rpc::grpc::rpc::TaskCheckpointEventType::FinishedCommit,
+        }))
+        .await
+        .expect("sent commit event");
+
+    maybe_cause_failure("commit_after_ack");
 }
