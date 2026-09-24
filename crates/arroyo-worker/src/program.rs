@@ -1,7 +1,7 @@
 use arroyo_rpc::grpc::rpc::StartExecutionReq;
 use tonic::Status;
 
-const SUPPORTED_PROGRAM_VERSION: u32 = 2;
+const SUPPORTED_PROGRAM_VERSION: u32 = 3;
 
 #[derive(Debug)]
 pub(crate) enum ProgramAdmissionError {
