@@ -187,16 +187,13 @@ fn classify_storage_error(storage_error: &StorageError) -> (ErrorDomain, RetryHi
 fn classify_object_store_error(obj_err: &object_store::Error) -> (ErrorDomain, RetryHint) {
     use object_store::Error;
     match obj_err {
-        // 409s with "error code: 1018" are spurious upstream errors; let the task recover.
-        Error::AlreadyExists { source, .. } if source.to_string().contains("error code: 1018") => {
-            (ErrorDomain::External, RetryHint::WithBackoff)
-        }
+        // We've seen some spurious upstream errors camouflaged as AlreadyExist, retrying out of precaution
+        Error::AlreadyExists { .. } => (ErrorDomain::External, RetryHint::WithBackoff),
         // User errors: authentication, authorization, bad paths, misconfiguration
         Error::NotFound { .. }
         | Error::InvalidPath { .. }
         | Error::Unauthenticated { .. }
-        | Error::PermissionDenied { .. }
-        | Error::AlreadyExists { .. } => (ErrorDomain::User, RetryHint::NoRetry),
+        | Error::PermissionDenied { .. } => (ErrorDomain::User, RetryHint::NoRetry),
         // External errors: permanent issues that won't be fixed by retrying
         Error::NotSupported { .. } | Error::NotModified { .. } | Error::NotImplemented => {
             (ErrorDomain::External, RetryHint::NoRetry)
