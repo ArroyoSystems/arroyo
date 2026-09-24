@@ -63,6 +63,20 @@ async fn run_smoketest(path: &Path) {
         .next()
         .unwrap();
     let query = read_to_string(path).await.unwrap();
+    let checkpoint_interval = query
+        .lines()
+        .find_map(|line| line.strip_prefix("--checkpoint-interval="))
+        .map(|value| {
+            value
+                .trim()
+                .parse::<i32>()
+                .expect("checkpoint interval must be a positive integer")
+        })
+        .unwrap_or(20);
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
     let fail = query.starts_with("--fail");
     let error_message = query.starts_with("--fail=").then(|| {
         query
@@ -89,7 +103,7 @@ async fn run_smoketest(path: &Path) {
     });
 
     match (
-        correctness_run_codegen(test_name, query.clone(), pk.as_deref(), 20).await,
+        correctness_run_codegen(test_name, query.clone(), pk.as_deref(), checkpoint_interval).await,
         fail,
     ) {
         (Ok(_), false) => {
