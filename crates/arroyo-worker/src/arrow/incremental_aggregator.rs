@@ -162,14 +162,18 @@ impl IncrementalState {
                 ..
             } => {
                 let parser = row_converter.parser();
-                let input = row_converter.convert_rows(
-                    data.iter()
-                        .filter(|(_, c)| c.count > 0)
-                        .sorted_unstable_by(|(a, _), (b, _)| a.0.cmp(&b.0))
-                        .map(|(v, _)| parser.parse(&v.0)),
-                )?;
                 let mut acc = expr.create_accumulator()?;
-                acc.update_batch(&input)?;
+                // Replay each retained occurrence without allocating a batch for the full count.
+                let rows = data
+                    .iter()
+                    .sorted_unstable_by(|(a, _), (b, _)| a.0.cmp(&b.0))
+                    .flat_map(|(v, c)| {
+                        let parser = &parser;
+                        (0..c.count).map(move |_| parser.parse(&v.0))
+                    });
+                for chunk in &rows.chunks(1024) {
+                    acc.update_batch(&row_converter.convert_rows(chunk)?)?;
+                }
                 acc.evaluate()
             }
         }
@@ -1115,7 +1119,7 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             })
             .collect();
 
-        // The last aggregate is MAX(_timestamp); its state is the table's timestamp.
+        // ensure the last field (timestamp) has the expected name before creating the arroyo schema
         let mut state_fields = state_schema.fields().to_vec();
         let timestamp_field = state_fields.pop().unwrap();
         state_fields.push(Arc::new(
@@ -1165,5 +1169,38 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 new_generation: 0,
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::Int64Array;
+    use datafusion::functions_aggregate::sum;
+    use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+    use datafusion::physical_expr::expressions::col;
+
+    #[test]
+    fn stored_input_evaluation_replays_duplicate_counts() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let expr = Arc::new(
+            AggregateExprBuilder::new(sum::sum_udaf(), vec![col("v", &schema)?])
+                .schema(schema)
+                .alias("sum")
+                .build()?,
+        );
+        let mut state = IncrementalState::Batch {
+            expr,
+            data: HashMap::new(),
+            row_converter: Arc::new(RowConverter::new(vec![SortField::new(DataType::Int64)])?),
+            changed_values: HashSet::new(),
+        };
+        let values: ArrayRef = Arc::new(Int64Array::from(vec![5; 1025]));
+        state.update_batch(0, std::slice::from_ref(&values))?;
+        assert_eq!(state.evaluate()?, ScalarValue::Int64(Some(5125)));
+
+        state.retract_batch(&[Arc::new(Int64Array::from(vec![5]))])?;
+        assert_eq!(state.evaluate()?, ScalarValue::Int64(Some(5120)));
+        Ok(())
     }
 }
