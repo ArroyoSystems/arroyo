@@ -1,14 +1,14 @@
 use arrow_array::cast::AsArray;
 use arrow_array::{
-    Array, ArrayAccessor, Date32Array, Date64Array, Decimal128Array, GenericStringArray,
-    OffsetSizeTrait, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, TimestampSecondArray,
+    Array, ArrayAccessor, Date32Array, Date64Array, Decimal128Array, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray,
 };
 use arrow_json::writer::NullableEncoder;
 use arrow_json::{Encoder, EncoderFactory, EncoderOptions};
 use arrow_schema::{ArrowError, DataType, FieldRef, TimeUnit};
 use arroyo_rpc::formats::{DecimalEncoding, TimestampFormat};
 use arroyo_types::ArroyoExtensionType;
+use arroyo_types::strings::StringArrayRef;
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use base64::write::EncoderWriter;
@@ -90,12 +90,12 @@ impl EncoderFactory for ArroyoEncoderFactory {
                         .clone(),
                 ))
             }
-            (_, _, DataType::Utf8) => {
+            (_, _, DataType::Utf8 | DataType::Utf8View) => {
                 if matches!(
                     ArroyoExtensionType::from_map(field.metadata()),
                     Some(ArroyoExtensionType::JSON)
                 ) {
-                    Box::new(RawJsonEncoder(array.as_string::<i32>().clone()))
+                    Box::new(RawJsonEncoder(StringArrayRef::new(array)?))
                 } else {
                     return Ok(None);
                 }
@@ -176,9 +176,9 @@ impl Encoder for UnixMillisTimeEncoder {
     }
 }
 
-struct RawJsonEncoder<O: OffsetSizeTrait>(GenericStringArray<O>);
+struct RawJsonEncoder<'a>(StringArrayRef<'a>);
 
-impl<O: OffsetSizeTrait> Encoder for RawJsonEncoder<O> {
+impl Encoder for RawJsonEncoder<'_> {
     fn encode(&mut self, idx: usize, out: &mut Vec<u8>) {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(self.0.value(idx)) {
             serde_json::to_writer(out, &v)

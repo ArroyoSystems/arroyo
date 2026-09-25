@@ -110,6 +110,9 @@ fn serialize_column<T: SerializeTarget>(
             write_arrow_value!(ArrayRef::as_string::<i32>, Value::String, |v: &str| v
                 .into())
         }
+        DataType::Utf8View => {
+            write_arrow_value!(ArrayRef::as_string_view, Value::String, |v: &str| v.into())
+        }
         DataType::Boolean => write_arrow_value!(ArrayRef::as_boolean, Value::Boolean, |v| v),
 
         DataType::Int8 => write_primitive!(Int8Type, i32, Value::Int),

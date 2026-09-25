@@ -12,6 +12,7 @@ use arroyo_rpc::formats::{
     AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
     TimestampFormat,
 };
+use arroyo_types::strings::StringArrayRef;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -185,16 +186,14 @@ impl ArrowSerializer {
             )
         });
 
-        if *batch.schema().field(value_idx).data_type() != DataType::Utf8 {
+        let values = StringArrayRef::new(batch.column(value_idx).as_ref()).unwrap_or_else(|_| {
             panic!(
                 "invalid schema for raw_string serializer: {}; a must have a column VALUE of type TEXT",
                 batch.schema()
             );
-        }
+        });
 
-        let values: Vec<Vec<u8>> = batch
-            .column(value_idx)
-            .as_string::<i32>()
+        let values: Vec<Vec<u8>> = values
             .iter()
             .map(|v| v.map(|v| v.as_bytes().to_vec()).unwrap_or_default())
             .collect();

@@ -87,7 +87,7 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::Duration(_) => todo!("duration is not supported"),
         DataType::Interval(_) => todo!("interval is not supported"),
         DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => "bytes",
-        DataType::Utf8 | DataType::LargeUtf8 => "string",
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => "string",
         DataType::List(t) | DataType::FixedSizeList(t, _) | DataType::LargeList(t) => {
             return json!({
                 "type": "array",
@@ -116,7 +116,6 @@ fn arrow_to_avro(name: &str, dt: &DataType) -> serde_json::value::Value {
         DataType::Map(_, _) => unimplemented!("maps are not supported"),
         DataType::RunEndEncoded(_, _) => unimplemented!("run end encoded is not supported"),
         DataType::BinaryView => unimplemented!("binary view is not supported"),
-        DataType::Utf8View => unimplemented!("utf8 view is not suported"),
         DataType::ListView(_) => unimplemented!("list view is not supported"),
         DataType::LargeListView(_) => unimplemented!("large list view is not suported"),
     };

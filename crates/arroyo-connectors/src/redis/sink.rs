@@ -1,10 +1,11 @@
 use crate::redis::{ListOperation, RedisClient, Target};
-use arrow::array::{AsArray, RecordBatch};
+use arrow::array::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, ErrorReporter, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_types::CheckpointBarrier;
+use arroyo_types::strings::StringArrayRef;
 use async_trait::async_trait;
 use redis::aio::{ConnectionLike, ConnectionManager};
 use redis::cluster_async::ClusterConnection;
@@ -36,7 +37,11 @@ impl RedisSinkFunc {
         let mut key = prefix.to_string();
 
         if let Some(key_index) = self.key_index {
-            key.push_str(batch.column(key_index).as_string::<i32>().value(idx));
+            key.push_str(
+                StringArrayRef::new(batch.column(key_index).as_ref())
+                    .expect("Redis key must be a string")
+                    .value(idx),
+            );
         };
 
         key
@@ -347,11 +352,14 @@ impl ArrowOperator for RedisSinkFunc {
                     hash_key_prefix, ..
                 } => {
                     let key = self.make_key(hash_key_prefix, &batch, i);
-                    let field = batch
-                        .column(self.hash_index.expect("no hash index"))
-                        .as_string::<i32>()
-                        .value(i)
-                        .to_string();
+                    let field = StringArrayRef::new(
+                        batch
+                            .column(self.hash_index.expect("no hash index"))
+                            .as_ref(),
+                    )
+                    .expect("Redis hash field must be a string")
+                    .value(i)
+                    .to_string();
 
                     self.tx
                         .send(RedisCmd::HData { key, field, value })

@@ -76,6 +76,46 @@ fn test_udf() {
     assert_eq!(result.value(2), "20-c-[122]");
 }
 
+#[tokio::test]
+async fn utf8view_arguments_are_coerced_for_rust_udfs() {
+    use arrow::array::{RecordBatch, StringViewArray};
+    use datafusion::logical_expr::ScalarUDF;
+    use datafusion::prelude::SessionContext;
+
+    let udf = test_udf_1::__local().config;
+    let sync_udf: SyncUdfDylib = (&udf).try_into().unwrap();
+    let context = SessionContext::new();
+    context.register_udf(ScalarUDF::new_from_impl(sync_udf));
+    context
+        .register_batch(
+            "input",
+            RecordBatch::try_from_iter([
+                (
+                    "value",
+                    Arc::new(StringViewArray::from(vec!["é水🙂longer than twelve bytes"]))
+                        as ArrayRef,
+                ),
+                (
+                    "bytes",
+                    Arc::new(BinaryArray::from(vec![b"x".as_slice()])) as ArrayRef,
+                ),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+    let batches = context
+        .sql("SELECT my_udf(CAST(10 AS INT), value, bytes) AS result FROM input")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        batches[0].column(0).as_ref(),
+        &StringArray::from(vec!["10-é水🙂longer than twelve bytes-[120]"]),
+    );
+}
+
 #[test]
 fn test_optional_arg() {
     let udf = test_udf_optional_binary_return::__local().config;

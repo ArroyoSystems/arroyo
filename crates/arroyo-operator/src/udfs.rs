@@ -175,6 +175,7 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         DataType::LargeBinary => ScalarValue::LargeBinary(None),
         DataType::Utf8 => ScalarValue::Utf8(None),
         DataType::LargeUtf8 => ScalarValue::LargeUtf8(None),
+        DataType::Utf8View => ScalarValue::Utf8View(None),
         DataType::List(item) => ScalarValue::List(Arc::new(list_from_arr(
             item,
             new_empty_array(item.data_type()),
@@ -203,9 +204,8 @@ fn scalar_none(datatype: &DataType) -> ScalarValue {
         DataType::Time64(TimeUnit::Millisecond) => {
             unimplemented!("cannot represent time64 millis as scalar")
         }
-        DataType::BinaryView
-        | DataType::Utf8View
-        | DataType::ListView(_)
-        | DataType::LargeListView(_) => unimplemented!("views are not supported"),
+        DataType::BinaryView | DataType::ListView(_) | DataType::LargeListView(_) => {
+            unimplemented!("views are not supported")
+        }
     }
 }

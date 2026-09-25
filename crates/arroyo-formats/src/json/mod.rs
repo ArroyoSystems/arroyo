@@ -47,7 +47,7 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         | arrow::datatypes::DataType::LargeBinary => {
             json! {{ "type": "array", "items": { "type": "integer" }}}
         }
-        arrow::datatypes::DataType::Utf8 | arrow::datatypes::DataType::LargeUtf8 => {
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {
             json! {{ "type": "string" }}
         }
         arrow::datatypes::DataType::List(t)
@@ -66,7 +66,6 @@ pub fn field_to_json_schema(field: &Field) -> Value {
         arrow::datatypes::DataType::Map(_, _) => todo!(),
         arrow::datatypes::DataType::RunEndEncoded(_, _) => todo!(),
         DataType::BinaryView => todo!(),
-        DataType::Utf8View => todo!(),
         DataType::ListView(_) => todo!(),
         DataType::LargeListView(_) => todo!(),
     }
@@ -102,7 +101,7 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         Int64 | UInt64 => "int64",
         Float16 | Float32 => "float",
         Float64 => "double",
-        Utf8 | LargeUtf8 => "string",
+        Utf8 | LargeUtf8 | Utf8View => "string",
         Binary | FixedSizeBinary(_) | LargeBinary => "bytes",
         Time32(_) | Time64(_) | Timestamp(_, _) => {
             // as far as I can tell, this is the only way to get timestamps from Arroyo into
@@ -160,7 +159,6 @@ pub fn field_to_kafka_json(field: &Field) -> Value {
         Map(_, _) => todo!(),
         RunEndEncoded(_, _) => todo!(),
         BinaryView => todo!(),
-        Utf8View => todo!(),
         ListView(_) => todo!(),
         LargeListView(_) => todo!(),
     };
