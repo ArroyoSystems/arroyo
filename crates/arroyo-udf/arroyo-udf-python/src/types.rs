@@ -7,12 +7,9 @@ use pyo3::{Bound, PyAny};
 
 pub fn extract_type_info(udf: &Bound<PyAny>) -> anyhow::Result<(Vec<NullableType>, NullableType)> {
     let attr = udf.getattr("__annotations__")?;
-    let annotations: &Bound<PyDict> = attr.downcast().map_err(|e| {
-        anyhow!(
-            "__annotations__ object is not a dictionary: {}",
-            e.to_string()
-        )
-    })?;
+    let annotations: &Bound<PyDict> = attr
+        .downcast()
+        .map_err(|e| anyhow!("__annotations__ object is not a dictionary: {}", e))?;
 
     // Iterate over annotations dictionary
     let (ok, err): (Vec<_>, Vec<_>) = annotations

@@ -8,9 +8,9 @@ pub mod tls;
 use anyhow::anyhow;
 use arroyo_types::TELEMETRY_KEY;
 use axum::Router;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use lazy_static::lazy_static;
@@ -33,7 +33,7 @@ use tower::layer::util::Stack;
 use tower::{Layer, Service};
 use tower_http::classify::{GrpcCode, GrpcErrorsAsFailures, SharedClassifier};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
-use tower_http::validate_request::ValidateRequestHeaderLayer;
+use tower_http::validate_request::{ValidateRequest, ValidateRequestHeaderLayer};
 use tracing::metadata::LevelFilter;
 use tracing::{Level, debug, info, span};
 use tracing_subscriber::EnvFilter;
@@ -344,6 +344,32 @@ fn require_profiling_activated(
     }
 }
 
+#[derive(Clone)]
+pub struct StaticApiKeyValidator {
+    expected: HeaderValue,
+}
+
+impl ValidateRequest<Body> for StaticApiKeyValidator {
+    type ResponseBody = Body;
+
+    fn validate(&mut self, request: &mut http::Request<Body>) -> Result<(), http::Response<Body>> {
+        if request.headers().get(header::AUTHORIZATION) == Some(&self.expected) {
+            Ok(())
+        } else {
+            let mut response = http::Response::new(Body::empty());
+            *response.status_mut() = StatusCode::UNAUTHORIZED;
+            Err(response)
+        }
+    }
+}
+
+pub fn static_api_key_layer(api_key: &str) -> ValidateRequestHeaderLayer<StaticApiKeyValidator> {
+    let expected = format!("Bearer {api_key}")
+        .parse()
+        .expect("token is not a valid header value");
+    ValidateRequestHeaderLayer::custom(StaticApiKeyValidator { expected })
+}
+
 fn admin_router(
     service: &str,
     auth_mode: &ApiAuthMode,
@@ -366,7 +392,7 @@ fn admin_router(
     }
 
     if let ApiAuthMode::StaticApiKey { api_key } = auth_mode {
-        protected = protected.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        protected = protected.layer(static_api_key_layer(api_key));
     };
 
     // /status is always reachable without auth (e.g. for liveness probes).
@@ -595,5 +621,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn static_api_key_auth_preserves_bearer_responses() {
+        let app = admin_router("test", &static_auth(), false);
+
+        for authorization in [None, Some("Bearer wrong"), Some("Basic secret")] {
+            let mut request = Request::get("/details");
+            if let Some(value) = authorization {
+                request = request.header(header::AUTHORIZATION, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+
+        let response = app
+            .oneshot(
+                Request::get("/details")
+                    .header(header::AUTHORIZATION, "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }

@@ -12,7 +12,6 @@ use tokio::net::TcpListener;
 use tonic::transport::Channel;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::{CompressionLayer, DefaultPredicate, Predicate};
-use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{error, info};
 use utoipa::OpenApi;
 
@@ -149,7 +148,7 @@ pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> any
     );
 
     if let ApiAuthMode::StaticApiKey { api_key } = &config.api.auth_mode {
-        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+        app = app.layer(arroyo_server_common::static_api_key_layer(api_key));
     };
 
     let tls_config =

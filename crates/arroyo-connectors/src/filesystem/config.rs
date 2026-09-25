@@ -926,7 +926,7 @@ impl IcebergPartitioning {
         for (expr, field) in exprs.iter().zip(&self.fields) {
             schema.field_with_name(&field.field)?;
 
-            if expr.data_type_and_nullable(&dfschema).is_err() {
+            if expr.to_field(&dfschema).is_err() {
                 return exec_err!("partition transform {} has invalid types", field);
             }
         }

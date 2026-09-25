@@ -1828,7 +1828,7 @@ impl<R: BatchBufferingWriter + Send + 'static> TwoPhaseCommitter for FileSystemS
             // This is because the number of subtasks may have changed.
             // Recovering should be reasonably fast since it is just finishing in-flight uploads.
             if ctx.task_info.task_index == 0 {
-                recovered_files.extend(file_system_data_recovery.active_files.into_iter());
+                recovered_files.extend(file_system_data_recovery.active_files);
             }
         }
         self.sender

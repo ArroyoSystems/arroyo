@@ -22,6 +22,7 @@ use std::{fs::File, io::Write, time::Instant};
 ///
 /// Generic over `W: Write` so it can wrap both in-memory buffers (`Writer<BytesMut>`)
 /// and file handles (`File`).
+#[allow(clippy::large_enum_variant)]
 enum JsonBuffer<W: Write> {
     Uncompressed(W),
     /// The `Gzipped` variant uses an `Option` so that the encoder can be temporarily
