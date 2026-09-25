@@ -36,7 +36,20 @@ pub fn to_arrow(schema: &str) -> anyhow::Result<arrow_schema::Schema> {
 }
 
 fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
-    let next_name = format!("{}_{}", name, &field.name());
+    // the field name becomes part of a nested record's name, which Avro only allows to contain
+    // [A-Za-z0-9_] (plus `.` as a namespace separator)
+    let record_name: String = field
+        .name()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let next_name = format!("{name}_{record_name}");
     let mut schema = arrow_to_avro(&next_name, field.data_type());
 
     if field.is_nullable() {
@@ -175,5 +188,33 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
             (DataType::Struct(fields), false, None)
         }
         _ => (DataType::Utf8, false, Some(ArroyoExtensionType::JSON)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_avro;
+    use arrow_schema::{DataType, Field, Fields};
+
+    #[test]
+    fn test_struct_field_name_that_is_not_a_valid_avro_name() {
+        // a nested struct column's name becomes part of the generated Avro
+        // record name, so characters Avro names cannot contain must be replaced
+        let fields: Fields = vec![Field::new(
+            "user-agent",
+            DataType::Struct(vec![Field::new("browser", DataType::Utf8, false)].into()),
+            false,
+        )]
+        .into();
+
+        let schema = to_avro("ArroyoAvro", &fields);
+        let apache_avro::Schema::Record(record) = schema else {
+            panic!("expected a record schema");
+        };
+        assert_eq!(record.fields[0].name, "user_agent");
+        let apache_avro::Schema::Record(inner) = &record.fields[0].schema else {
+            panic!("expected a nested record schema");
+        };
+        assert_eq!(inner.name.name, "ArroyoAvro_user_agent");
     }
 }
