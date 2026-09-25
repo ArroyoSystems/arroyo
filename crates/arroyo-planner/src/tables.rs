@@ -37,14 +37,19 @@ use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant
 use datafusion::optimizer::eliminate_limit::EliminateLimit;
 use datafusion::optimizer::eliminate_outer_join::EliminateOuterJoin;
 use datafusion::optimizer::extract_equijoin_predicate::ExtractEquijoinPredicate;
+use datafusion::optimizer::extract_leaf_expressions::{
+    ExtractLeafExpressions, PushDownLeafProjections,
+};
 use datafusion::optimizer::filter_null_join_keys::FilterNullJoinKeys;
 use datafusion::optimizer::optimize_unions::OptimizeUnions;
 use datafusion::optimizer::propagate_empty_relation::PropagateEmptyRelation;
 use datafusion::optimizer::push_down_filter::PushDownFilter;
 use datafusion::optimizer::push_down_limit::PushDownLimit;
 use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate;
+use datafusion::optimizer::rewrite_set_comparison::RewriteSetComparison;
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
+use datafusion::optimizer::unions_to_filter::UnionsToFilter;
 use datafusion::sql::sqlparser;
 use datafusion::sql::sqlparser::ast::{CreateTable, CreateTableOptions, Query};
 use datafusion::{
@@ -154,7 +159,9 @@ fn produce_optimized_plan(
     )?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
+        Arc::new(RewriteSetComparison::new()),
         Arc::new(OptimizeUnions::new()),
+        Arc::new(UnionsToFilter::new()),
         Arc::new(SimplifyExpressions::new()),
         Arc::new(ReplaceDistinctWithAggregate::new()),
         // EliminateJoin can turn inner joins into semi joins or remove
@@ -170,8 +177,6 @@ fn produce_optimized_plan(
         Arc::new(EliminateCrossJoin::new()),
         Arc::new(EliminateLimit::new()),
         Arc::new(PropagateEmptyRelation::new()),
-        // Must be after PropagateEmptyRelation
-        Arc::new(OptimizeUnions::new()),
         Arc::new(FilterNullJoinKeys::default()),
         Arc::new(EliminateOuterJoin::new()),
         // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
@@ -184,6 +189,8 @@ fn produce_optimized_plan(
         // that might benefit from the following rules
         Arc::new(EliminateGroupByConstant::new()),
         Arc::new(CommonSubexprEliminate::new()),
+        Arc::new(ExtractLeafExpressions::new()),
+        Arc::new(PushDownLeafProjections::new()),
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];

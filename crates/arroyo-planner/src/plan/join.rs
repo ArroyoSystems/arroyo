@@ -11,15 +11,14 @@ use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue, Spans, TableReference,
-    not_impl_err, plan_err,
+    Column, DataFusionError, JoinConstraint, JoinType, Result, Spans, TableReference, not_impl_err,
+    plan_err,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
 use datafusion::logical_expr::{
     BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection, build_join_schema,
 };
-use datafusion::prelude::coalesce;
 use datafusion::sql::unparser::expr_to_sql;
 use std::sync::Arc;
 
@@ -163,25 +162,26 @@ impl JoinRewriter<'_> {
             spans: Spans::default(),
         });
         let max_timestamp = Expr::Case(Case {
-            expr: Some(Box::new(Expr::BinaryExpr(BinaryExpr {
-                left: Box::new(left_column.clone()),
-                op: logical_expr::Operator::GtEq,
-                right: Box::new(right_column.clone()),
-            }))),
+            expr: None,
             when_then_expr: vec![
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(true)), None)),
+                    Box::new(Expr::IsNull(Box::new(left_column.clone()))),
+                    Box::new(right_column.clone()),
+                ),
+                (
+                    Box::new(Expr::IsNull(Box::new(right_column.clone()))),
                     Box::new(left_column.clone()),
                 ),
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(false)), None)),
-                    Box::new(right_column.clone()),
+                    Box::new(Expr::BinaryExpr(BinaryExpr {
+                        left: Box::new(left_column.clone()),
+                        op: logical_expr::Operator::GtEq,
+                        right: Box::new(right_column.clone()),
+                    })),
+                    Box::new(left_column),
                 ),
             ],
-            else_expr: Some(Box::new(coalesce(vec![
-                left_column.clone(),
-                right_column.clone(),
-            ]))),
+            else_expr: Some(Box::new(right_column)),
         });
 
         projection_expr.push(Expr::Alias(Alias {
