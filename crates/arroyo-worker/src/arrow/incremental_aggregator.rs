@@ -1,3 +1,4 @@
+use super::accumulator_checkpoint;
 use super::new_task_context;
 use crate::arrow::decode_aggregate;
 use crate::arrow::updating_cache::{Key, UpdatingCache};
@@ -161,14 +162,19 @@ impl IncrementalState {
                 ..
             } => {
                 let parser = row_converter.parser();
-                let input = row_converter.convert_rows(
-                    data.iter()
-                        .filter(|(_, c)| c.count > 0)
-                        .map(|(v, _)| parser.parse(&v.0)),
-                )?;
                 let mut acc = expr.create_accumulator()?;
-                acc.update_batch(&input)?;
-                acc.evaluate_mut()
+                // Replay each retained occurrence without allocating a batch for the full count.
+                let rows = data
+                    .iter()
+                    .sorted_unstable_by(|(a, _), (b, _)| a.0.cmp(&b.0))
+                    .flat_map(|(v, c)| {
+                        let parser = &parser;
+                        (0..c.count).map(move |_| parser.parse(&v.0))
+                    });
+                for chunk in &rows.chunks(1024) {
+                    acc.update_batch(&row_converter.convert_rows(chunk)?)?;
+                }
+                acc.evaluate()
             }
         }
     }
@@ -180,22 +186,13 @@ enum AccumulatorType {
     Batch,
 }
 
-impl AccumulatorType {
-    fn state_fields(&self, agg: &AggregateFunctionExpr) -> DFResult<Vec<FieldRef>> {
-        Ok(match self {
-            AccumulatorType::Sliding => agg.sliding_state_fields()?,
-            // state for batch tables is handled separately
-            AccumulatorType::Batch => vec![],
-        })
-    }
-}
-
 #[derive(Debug)]
 struct Aggregator {
     func: Arc<AggregateFunctionExpr>,
     accumulator_type: AccumulatorType,
     row_converter: Arc<RowConverter>,
     state_cols: Vec<usize>,
+    state_fields: Vec<FieldRef>,
 }
 
 pub struct IncrementalAggregatingFunc {
@@ -277,66 +274,52 @@ impl IncrementalAggregatingFunc {
 
         let mut states = vec![vec![]; self.sliding_state_schema.schema.fields.len()];
         let parser = self.key_converter.parser();
-
+        let mut rows = Vec::with_capacity(self.updated_keys.len());
         let mut generation_builder = UInt64Builder::with_capacity(self.updated_keys.len());
 
-        let mut cols = self
-            .key_converter
-            .convert_rows(self.updated_keys.keys().map(|k| {
-                let (accumulators, generation) = self
-                    .accumulators
-                    .get_mut_generation(k.0.as_ref())
-                    .expect("missing accumulator in cache during checkpoint");
-
-                generation_builder.append_value(generation);
-
-                for (state, agg) in accumulators.iter_mut().zip(self.aggregates.iter()) {
-                    let IncrementalState::Sliding { expr, accumulator } = state else {
-                        continue;
-                    };
-
-                    let state = accumulator.state().unwrap_or_else(|_| {
-                        // if it doesn't support immutable state, we'll use the mutable one and
-                        // copy and restore the state -- this should in practice never happen,
-                        // because the accumulators that don't support immutable state also don't
-                        // support retract, but we have this fallback in case someone implements
-                        // a new aggregator that doesn't uphold that relationship
-                        let state = accumulator.state().unwrap();
-                        *accumulator = expr.create_sliding_accumulator().unwrap();
-                        let states: Vec<_> =
-                            state.iter().map(|s| s.to_array()).try_collect().unwrap();
-                        accumulator.merge_batch(&states).unwrap();
-                        state
-                    });
-
-                    assert_eq!(
-                        agg.state_cols.len(),
-                        state.len(),
-                        "wrong state in {}",
-                        agg.func.name()
-                    );
-
-                    for (idx, v) in agg.state_cols.iter().zip(state) {
-                        states[*idx].push(v);
-                    }
+        for key in self.updated_keys.keys() {
+            let (accumulators, generation) = self
+                .accumulators
+                .get_mut_generation(key.0.as_ref())
+                .expect("missing accumulator in cache during checkpoint");
+            generation_builder.append_value(generation);
+            for (state, agg) in accumulators.iter_mut().zip(&self.aggregates) {
+                let IncrementalState::Sliding { expr, accumulator } = state else {
+                    continue;
+                };
+                let state = if accumulator_checkpoint::state_fields(expr)?.is_some() {
+                    accumulator_checkpoint::snapshot(expr, &agg.state_fields, accumulator)?
+                } else {
+                    // Preserve the old path for sliding accumulators such as
+                    // MIN/MAX, whose exported state cannot rebuild their queue.
+                    accumulator.state()?
+                };
+                assert_eq!(
+                    agg.state_cols.len(),
+                    state.len(),
+                    "wrong state in {}",
+                    agg.func.name()
+                );
+                for (idx, value) in agg.state_cols.iter().zip(state) {
+                    states[*idx].push(value);
                 }
-                parser.parse(k.0.as_ref())
-            }))?;
+            }
+            rows.push(parser.parse(key.0.as_ref()));
+        }
 
+        let mut cols = self.key_converter.convert_rows(rows)?;
         cols.extend(
             states
                 .into_iter()
                 .skip(cols.len())
-                .map(|c| ScalarValue::iter_to_array(c).unwrap()),
+                .map(ScalarValue::iter_to_array)
+                .collect::<DFResult<Vec<_>>>()?,
         );
-
         let generations = generation_builder.finish();
         self.new_generation = self
             .new_generation
             .max(max_array::<UInt64Type, _>(&generations).unwrap());
-
         cols.push(Arc::new(generations));
-
         Ok(Some(cols))
     }
 
@@ -1088,29 +1071,16 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
             .iter()
             .zip(aggregate_exec.aggr_expr_name.iter())
             .map(|(expr, name)| {
-                Ok(decode_aggregate(
-                    &input_schema.schema,
-                    name,
-                    expr,
-                    &task_context,
-                )?)
-            })
-            .map_ok(|agg| {
-                let retract = match agg.create_sliding_accumulator() {
-                    Ok(s) => s.supports_retract_batch(),
-                    _ => false,
+                let agg = decode_aggregate(&input_schema.schema, name, expr, &task_context)?;
+                let retract = agg
+                    .create_sliding_accumulator()
+                    .map(|s| s.supports_retract_batch())
+                    .unwrap_or(false);
+                let t = if retract {
+                    AccumulatorType::Sliding
+                } else {
+                    AccumulatorType::Batch
                 };
-
-                (
-                    agg,
-                    if retract {
-                        AccumulatorType::Sliding
-                    } else {
-                        AccumulatorType::Batch
-                    },
-                )
-            })
-            .map_ok(|(agg, t)| {
                 let row_converter = Arc::new(RowConverter::new(
                     agg.expressions()
                         .iter()
@@ -1118,24 +1088,30 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                         .collect::<DFResult<_>>()?,
                 )?);
 
-                let fields = t.state_fields(&agg)?;
-
+                let fields = if t == AccumulatorType::Sliding {
+                    match accumulator_checkpoint::state_fields(&agg)? {
+                        Some(fields) => fields,
+                        None => agg.state_fields()?,
+                    }
+                } else {
+                    vec![]
+                };
                 let field_names = fields.iter().map(|f| f.name().to_string()).collect_vec();
-                sliding_state_fields.extend(fields.into_iter().map(|f| (*f).clone()));
+                sliding_state_fields.extend(fields.iter().map(|f| f.as_ref().clone()));
 
-                Ok::<_, anyhow::Error>((agg, t, row_converter, field_names))
+                Ok::<_, anyhow::Error>((agg, t, row_converter, field_names, fields))
             })
-            .flatten_ok()
             .collect::<Result<_>>()?;
 
         let state_schema = Schema::new(sliding_state_fields);
 
         let aggregates = aggregates
             .into_iter()
-            .map(|(agg, t, row_converter, field_names)| Aggregator {
+            .map(|(agg, t, row_converter, field_names, fields)| Aggregator {
                 func: agg,
                 accumulator_type: t,
                 row_converter,
+                state_fields: fields,
                 state_cols: field_names
                     .iter()
                     .map(|f| state_schema.index_of(f).unwrap())
@@ -1193,5 +1169,38 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
                 new_generation: 0,
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_array::Int64Array;
+    use datafusion::functions_aggregate::sum;
+    use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+    use datafusion::physical_expr::expressions::col;
+
+    #[test]
+    fn stored_input_evaluation_replays_duplicate_counts() -> Result<()> {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, false)]));
+        let expr = Arc::new(
+            AggregateExprBuilder::new(sum::sum_udaf(), vec![col("v", &schema)?])
+                .schema(schema)
+                .alias("sum")
+                .build()?,
+        );
+        let mut state = IncrementalState::Batch {
+            expr,
+            data: HashMap::new(),
+            row_converter: Arc::new(RowConverter::new(vec![SortField::new(DataType::Int64)])?),
+            changed_values: HashSet::new(),
+        };
+        let values: ArrayRef = Arc::new(Int64Array::from(vec![5; 1025]));
+        state.update_batch(0, std::slice::from_ref(&values))?;
+        assert_eq!(state.evaluate()?, ScalarValue::Int64(Some(5125)));
+
+        state.retract_batch(&[Arc::new(Int64Array::from(vec![5]))])?;
+        assert_eq!(state.evaluate()?, ScalarValue::Int64(Some(5120)));
+        Ok(())
     }
 }
