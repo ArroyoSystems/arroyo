@@ -103,11 +103,15 @@ impl ArrowSerializer {
             self.projection = Self::projection(&batch.schema());
         }
 
-        if self.kafka_schema.is_none() {
+        // only build the schemas the format writes: generating them panics for column types
+        // those schemas can't express (e.g. TIME in Avro), which other formats handle fine
+        if self.kafka_schema.is_none()
+            && matches!(&self.format, Format::Json(json) if json.include_schema)
+        {
             self.kafka_schema = Some(Self::kafka_schema(&batch.schema()));
         }
 
-        if self.avro_schema.is_none() {
+        if self.avro_schema.is_none() && matches!(self.format, Format::Avro(_)) {
             self.avro_schema = Some(Arc::new(Self::avro_schema(&batch.schema())));
         }
 
@@ -621,6 +625,52 @@ mod tests {
         assert_eq!(iter.next().unwrap(), br#"{"value":"aGVsbG8="}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":"MTIzMTIz"}"#);
         assert_eq!(iter.next().unwrap(), br#"{"value":"AAECAwQ="}"#);
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_json_with_type_avro_cannot_represent() {
+        // a JSON sink never needs an Avro schema, so a column type that Avro
+        // can't express (here TIME) must not stop it from writing
+        let mut serializer = ArrowSerializer::new(Format::Json(JsonFormat {
+            confluent_schema_registry: false,
+            schema_id: None,
+            include_schema: false,
+            debezium: false,
+            unstructured: false,
+            timestamp_format: Default::default(),
+            decimal_encoding: Default::default(),
+            compression: Default::default(),
+        }));
+
+        let schema = Arc::new(Schema::new(vec![
+            arrow_schema::Field::new(
+                "opened_at",
+                arrow_schema::DataType::Time64(TimeUnit::Nanosecond),
+                false,
+            ),
+            arrow_schema::Field::new(
+                "_timestamp",
+                arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]));
+
+        let batch = arrow_array::RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(arrow_array::Time64NanosecondArray::from(vec![
+                    9 * 60 * 60 * 1_000_000_000,
+                ])),
+                Arc::new(arrow_array::TimestampNanosecondArray::from(vec![
+                    to_nanos(SystemTime::now()) as i64,
+                ])),
+            ],
+        )
+        .unwrap();
+
+        let mut iter = serializer.serialize(&batch);
+        assert_eq!(iter.next().unwrap(), br#"{"opened_at":"09:00:00"}"#);
         assert_eq!(iter.next(), None);
     }
 }
