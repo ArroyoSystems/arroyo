@@ -35,8 +35,31 @@ pub fn to_arrow(schema: &str) -> anyhow::Result<arrow_schema::Schema> {
     Ok(arrow_schema::Schema::new(fields))
 }
 
+/// Makes a struct field's name safe to append (after `_`) to a valid Avro record name. Avro
+/// names may only contain `[A-Za-z0-9_]`, plus `.` between namespace components, each of which
+/// must be nonempty and start with a letter or `_`. A `.` is kept only where it separates two
+/// such components, so names that were already valid keep the same record name.
+fn avro_record_name_suffix(field_name: &str) -> String {
+    let chars: Vec<char> = field_name.chars().collect();
+    let mut out = String::with_capacity(field_name.len());
+    for (i, &c) in chars.iter().enumerate() {
+        let keep = match c {
+            '.' => {
+                // the `_` joining this suffix to the parent name ends a nonempty component
+                !out.ends_with('.')
+                    && chars
+                        .get(i + 1)
+                        .is_some_and(|n| n.is_ascii_alphabetic() || *n == '_')
+            }
+            c => c.is_ascii_alphanumeric() || c == '_',
+        };
+        out.push(if keep { c } else { '_' });
+    }
+    out
+}
+
 fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
-    let next_name = format!("{}_{}", name, &field.name());
+    let next_name = format!("{name}_{}", avro_record_name_suffix(field.name()));
     let mut schema = arrow_to_avro(&next_name, field.data_type());
 
     if field.is_nullable() {
@@ -175,5 +198,62 @@ fn to_arrow_datatype(schema: &Schema) -> (DataType, bool, Option<ArroyoExtension
             (DataType::Struct(fields), false, None)
         }
         _ => (DataType::Utf8, false, Some(ArroyoExtensionType::JSON)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::to_avro;
+    use arrow_schema::{DataType, Field, Fields};
+
+    #[test]
+    fn test_struct_field_name_that_is_not_a_valid_avro_name() {
+        // a nested struct column's name becomes part of the generated Avro
+        // record name, so characters Avro names cannot contain must be replaced
+        let fields: Fields = vec![Field::new(
+            "user-agent",
+            DataType::Struct(vec![Field::new("browser", DataType::Utf8, false)].into()),
+            false,
+        )]
+        .into();
+
+        let schema = to_avro("ArroyoAvro", &fields);
+        let apache_avro::Schema::Record(record) = schema else {
+            panic!("expected a record schema");
+        };
+        assert_eq!(record.fields[0].name, "user_agent");
+        let apache_avro::Schema::Record(inner) = &record.fields[0].schema else {
+            panic!("expected a nested record schema");
+        };
+        assert_eq!(inner.name.name, "ArroyoAvro_user_agent");
+    }
+
+    fn nested_record_name(field_name: &str) -> String {
+        let fields: Fields = vec![Field::new(
+            field_name,
+            DataType::Struct(vec![Field::new("browser", DataType::Utf8, false)].into()),
+            false,
+        )]
+        .into();
+
+        let apache_avro::Schema::Record(record) = to_avro("ArroyoAvro", &fields) else {
+            panic!("expected a record schema");
+        };
+        let apache_avro::Schema::Record(inner) = &record.fields[0].schema else {
+            panic!("expected a nested record schema");
+        };
+        inner.name.fullname(None)
+    }
+
+    #[test]
+    fn test_struct_field_name_with_dots_that_are_not_valid_avro_separators() {
+        // a component after a `.` must be nonempty and start with a letter or `_`
+        assert_eq!(nested_record_name("user.2agent"), "ArroyoAvro_user_2agent");
+        assert_eq!(nested_record_name("user..agent"), "ArroyoAvro_user_.agent");
+        assert_eq!(nested_record_name("user."), "ArroyoAvro_user_");
+        assert_eq!(nested_record_name("user.-agent"), "ArroyoAvro_user__agent");
+        // dots that already separate valid components keep the previous record name
+        assert_eq!(nested_record_name("user.agent"), "ArroyoAvro_user.agent");
+        assert_eq!(nested_record_name(".agent"), "ArroyoAvro_.agent");
     }
 }
