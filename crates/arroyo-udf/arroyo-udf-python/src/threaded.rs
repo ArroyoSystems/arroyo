@@ -29,7 +29,7 @@ impl ThreadedUdfInterpreter {
                 let (name, arg_types, ret) = match Self::parse(&interpreter, &body) {
                     Ok(p) => p,
                     Err(e) => {
-                        parse_tx.send(Err(anyhow!("{}", e.to_string()))).unwrap();
+                        parse_tx.send(Err(anyhow!("{e}"))).unwrap();
                         return;
                     }
                 };
