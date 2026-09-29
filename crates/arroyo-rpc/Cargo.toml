@@ -30,6 +30,7 @@ apache-avro = {workspace =  true}
 regex = { workspace = true }
 base64 = { workspace = true }
 ahash = { workspace = true }
+xxhash-rust = { version = "=0.8.17", features = ["xxh3", "std"] }
 strum_macros = { workspace = true }
 strum = { workspace = true }
 figment = { version = "0.10", features = ["toml", "env", "yaml", "json"] }
