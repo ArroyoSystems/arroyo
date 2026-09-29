@@ -22,7 +22,7 @@ use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
 use arrow_schema::{ArrowError, DataType, Field, Fields};
-use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
+use arroyo_types::{CheckpointBarrier, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
@@ -436,8 +436,10 @@ impl Converter {
     }
 }
 
-pub fn get_hasher() -> ahash::RandomState {
-    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
+pub fn get_hasher() -> xxhash_rust::xxh3::Xxh3Builder {
+    // Changing this seed breaks existing checkpoint state.
+    const HASH_SEED: u64 = 5093852630788334730;
+    xxhash_rust::xxh3::Xxh3Builder::new().with_seed(HASH_SEED)
 }
 
 #[derive(Default)]
@@ -1286,7 +1288,7 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn hashes_are_state_compatible() {
+    fn state_hashes_are_stable() {
         let arrays: Vec<ArrayRef> = vec![
             Arc::new(Int64Array::from(vec![Some(1), Some(-2), None])),
             Arc::new(StringArray::from(vec![Some("one"), None, Some("three")])),
@@ -1298,9 +1300,9 @@ mod tests {
         assert_eq!(
             hashes,
             [
-                13107581764018389965,
-                18413917921427367296,
-                1776838008901755331,
+                5092311861472499808,
+                7071289902786260134,
+                3655623068756176794,
             ]
         );
 
@@ -1311,6 +1313,7 @@ mod tests {
             &mut float_hashes,
         )
         .unwrap();
+        assert_eq!(float_hashes, [10047217818046557741, 17817844013210015546]);
         assert_ne!(float_hashes[0], float_hashes[1]);
 
         let values = vec![Some("short"), None, Some("longer than twelve bytes")];
@@ -1321,6 +1324,7 @@ mod tests {
             &mut string_hashes,
         )
         .unwrap();
+        assert_eq!(string_hashes, [9392568220474000271, 0, 9560082321094713409]);
         let mut view_hashes = vec![0; values.len()];
         create_hashes_with_hasher(
             [Arc::new(StringViewArray::from(values)) as ArrayRef],
@@ -1329,6 +1333,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(string_hashes, view_hashes);
+
+        // Long inputs use XXH3's seeded secret, a different path from short keys.
+        let long_value = "a".repeat(256);
+        let mut long_hashes = vec![0];
+        create_hashes_with_hasher(
+            [Arc::new(StringArray::from(vec![long_value.as_str()])) as ArrayRef],
+            &get_hasher(),
+            &mut long_hashes,
+        )
+        .unwrap();
+        assert_eq!(long_hashes, [13499894044953796130]);
+        let mut long_view_hashes = vec![0];
+        create_hashes_with_hasher(
+            [Arc::new(StringViewArray::from(vec![long_value.as_str()])) as ArrayRef],
+            &get_hasher(),
+            &mut long_view_hashes,
+        )
+        .unwrap();
+        assert_eq!(long_view_hashes, long_hashes);
     }
 
     #[test]
