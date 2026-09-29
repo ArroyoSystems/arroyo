@@ -16,18 +16,20 @@ RUN apt-get update && \
 
 
 # Install node & pnpm
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH="${PNPM_HOME}/bin:${PATH}"
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
     echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" |  \
       sudo tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && apt-get install -y nodejs && \
-    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=10.33.0 SHELL=$(which bash) bash -
+    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=12.8.1 SHELL=$(which bash) bash -
 
 COPY docker/install_deps.sh /install_deps.sh
 RUN sh /install_deps.sh
 
 COPY webui/pnpm-lock.yaml webui/pnpm-lock.yaml
-RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm fetch"
+RUN pnpm --dir webui fetch
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
@@ -37,7 +39,7 @@ COPY webui webui
 
 # set git hash
 ENV VERGEN_GIT_SHA=$GIT_SHA
-RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
+RUN pnpm --dir webui install && pnpm --dir webui build
 
 COPY docker/refinery.toml refinery.toml
 
