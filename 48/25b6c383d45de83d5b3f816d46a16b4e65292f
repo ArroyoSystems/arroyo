@@ -1,0 +1,23 @@
+crates/arroyo-worker/src/job_controller/controller.rs
+  s_e5d8ce581768a2::t_aabc2ae12e18ba 435
+  s_e5d8ce581768a2::t_bcf5f054a6a5aa 431-434
+  s_e5d8ce581768a2::t_8f207d01ae19eb 429-430
+crates/arroyo-worker/src/job_controller/model.rs
+  s_e5d8ce581768a2::t_bcf5f054a6a5aa 254
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4825b6c383d45de83d5b3f816d46a16b4e65292f",
+  "prompts": {},
+  "sessions": {
+    "s_e5d8ce581768a2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f0daeb420ffeICcLeXTK7tJ69z",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
