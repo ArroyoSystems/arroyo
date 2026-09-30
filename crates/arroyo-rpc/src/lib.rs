@@ -50,6 +50,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
@@ -584,7 +585,12 @@ impl DataSizeUnit {
         let captures = regex
             .captures(s)
             .ok_or_else(|| plan_datafusion_err!("invalid data size {}", s))?;
-        let quantity: u64 = captures.get(1).unwrap().as_str().parse().unwrap();
+        let quantity: u64 = captures
+            .get(1)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| plan_datafusion_err!("data size {} is too large", s))?;
         let unit = captures.get(2).unwrap().as_str();
         Ok((DataSizeUnit::from_str(unit)?, quantity))
     }
@@ -601,8 +607,23 @@ impl DataSizeUnit {
         }
     }
 
-    pub fn as_bytes(&self, value: u64) -> u64 {
-        value * self.multiplier()
+    pub fn as_bytes(&self, value: u64) -> DFResult<u64> {
+        value
+            .checked_mul(self.multiplier())
+            .ok_or_else(|| plan_datafusion_err!("data size {value}{self:?} is too large"))
+    }
+}
+
+/// Checks that a user-provided data size (in bytes) for the option `name` is within `bounds`.
+pub fn check_data_size(name: &str, bytes: u64, bounds: RangeInclusive<u64>) -> DFResult<()> {
+    if bounds.contains(&bytes) {
+        Ok(())
+    } else {
+        plan_err!(
+            "{name} must be between {} and {} bytes, got {bytes}",
+            bounds.start(),
+            bounds.end()
+        )
     }
 }
 
@@ -732,7 +753,7 @@ impl ConnectorOptions {
         self.pull_opt_str(name)?
             .map(|s| {
                 let (unit, q) = DataSizeUnit::parse(&s)?;
-                Ok(unit.as_bytes(q))
+                unit.as_bytes(q)
             })
             .transpose()
     }
@@ -1324,6 +1345,10 @@ mod tests {
 
         assert!(DataSizeUnit::parse("-14G").is_err());
         assert!(DataSizeUnit::parse("G").is_err());
+        assert!(DataSizeUnit::parse("99999999999999999999").is_err());
+
+        assert_eq!(Some(1 << 47), DataSizeUnit::Terabytes.as_bytes(128).ok());
+        assert!(DataSizeUnit::Exabytes.as_bytes(20).is_err());
     }
 
     #[derive(Debug, Eq, PartialEq, Encode, Decode)]
