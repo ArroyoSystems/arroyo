@@ -10,6 +10,8 @@ use std::ops::{Deref, RangeInclusive};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+pub mod strings;
+
 // worker configuration
 pub const CLUSTER_ID_ENV: &str = "CLUSTER_ID";
 pub const JOB_ID_ENV: &str = "JOB_ID";
@@ -526,7 +528,7 @@ impl Display for DisplayAsSql<'_> {
             DataType::Binary | DataType::FixedSizeBinary(_) | DataType::LargeBinary => {
                 write!(f, "BYTEA")
             }
-            DataType::Utf8 | DataType::LargeUtf8 => write!(f, "TEXT"),
+            DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => write!(f, "TEXT"),
             DataType::List(inner) => {
                 write!(f, "{}[]", DisplayAsSql(inner.data_type()))
             }

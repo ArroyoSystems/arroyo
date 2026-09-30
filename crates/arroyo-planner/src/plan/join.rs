@@ -5,6 +5,7 @@ use crate::plan::WindowDetectingVisitor;
 use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::{ArroyoSchemaProvider, fields_with_qualifiers, schema_from_df_fields_with_metadata};
+use arrow::datatypes::DataType;
 use arroyo_datastream::WindowType;
 use arroyo_rpc::UPDATING_META_FIELD;
 use datafusion::common::tree_node::{
@@ -276,17 +277,30 @@ fn maybe_plan_lookup_join(join: &Join) -> Result<Option<LogicalPlan>> {
         .expect("right side of join does not have lookup");
 
     let on = join.on.iter().map(|(l, r)| {
-        match r {
-            Expr::Column(c) => {
+        let column = match r {
+            Expr::Column(c) => Some(c),
+            Expr::Cast(cast) if cast.field.data_type() == &DataType::Utf8View => {
+                if let Expr::Column(c) = cast.expr.as_ref() {
+                    (join.right.schema().qualified_field_from_column(c)?.1.data_type()
+                        == &DataType::Utf8)
+                        .then_some(c)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        match column {
+            Some(c) => {
                 if !connector.primary_keys.contains(&c.name) {
                     plan_err!("the right-side of a look-up join condition must be a PRIMARY KEY column, but '{}' is not", c.name)
                 } else {
                     Ok((l.clone(), c.clone()))
                 }
             },
-            e => {
+            None => {
                 plan_err!("invalid right-side condition for lookup join: `{}`; only column references are supported", 
-                expr_to_sql(e).map(|e| e.to_string()).unwrap_or_else(|_| e.to_string()))
+                expr_to_sql(r).map(|e| e.to_string()).unwrap_or_else(|_| r.to_string()))
             }
         }
     }).collect::<Result<_>>()?;

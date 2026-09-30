@@ -416,6 +416,52 @@ mod test {
     use datafusion::common::ScalarValue;
     use std::sync::Arc;
 
+    #[tokio::test]
+    async fn utf8view_arguments_are_coerced_for_json_udfs() {
+        use arrow_array::{ArrayRef, RecordBatch, StringViewArray};
+        use datafusion::prelude::SessionContext;
+
+        let context = SessionContext::new();
+        let mut state = context.state();
+        super::register_all(&mut state);
+        let context = SessionContext::new_with_state(state);
+        context
+            .register_batch(
+                "input",
+                RecordBatch::try_from_iter([(
+                    "value",
+                    Arc::new(StringViewArray::from(vec![
+                        Some(r#"{"value":"longer than twelve bytes"}"#),
+                        None,
+                        Some("invalid JSON"),
+                    ])) as ArrayRef,
+                )])
+                .unwrap(),
+            )
+            .unwrap();
+
+        for function in [
+            "extract_json_string",
+            "get_first_json_object",
+            "extract_json",
+        ] {
+            let query = format!(
+                "SELECT {function}(value, arrow_cast('$.value', 'Utf8View')) AS result FROM input"
+            );
+            let actual = context.sql(&query).await.unwrap().collect().await.unwrap();
+            let expected = context
+                .sql(&format!(
+                    "SELECT {function}(arrow_cast(value, 'Utf8'), '$.value') AS result FROM input"
+                ))
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+            assert_eq!(actual, expected, "{function}");
+        }
+    }
+
     #[test]
     fn test_extract_json() {
         let input = Arc::new(StringArray::from(vec![

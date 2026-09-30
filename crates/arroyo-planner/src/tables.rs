@@ -144,10 +144,7 @@ fn produce_optimized_plan(
 ) -> Result<LogicalPlan> {
     let sql_to_rel = SqlToRel::new_with_options(
         schema_provider,
-        datafusion::sql::planner::ParserOptions::new()
-            .with_collect_spans(true)
-            // Preserve DF48's Utf8 mapping; Arroyo does not support Utf8View.
-            .with_map_string_types_to_utf8view(false),
+        datafusion::sql::planner::ParserOptions::new().with_collect_spans(true),
     );
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
