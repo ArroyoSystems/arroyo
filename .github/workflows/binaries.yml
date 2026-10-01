@@ -37,11 +37,14 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.7.1
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
@@ -50,7 +53,7 @@ jobs:
         run: |
           rustup update
       - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: ${{ matrix.config.python_arch }}
@@ -59,14 +62,15 @@ jobs:
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
-        run: cd webui && pnpm install && pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Create output directory
         run: mkdir artifacts
       - name: Build Arroyo with Python
         run: PYO3_PYTHON="$pythonLocation/bin/python3" LD_LIBRARY_PATH="$pythonLocation/lib:${LD_LIBRARY_PATH:-}" cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
       - name: Build Arroyo without Python
         run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arroyo-${{ matrix.config.artifact }}
           path: artifacts/*
@@ -85,11 +89,14 @@ jobs:
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.7.1
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install Python 3.12 via homebrew
         run: |
           set -euxo pipefail
@@ -122,14 +129,15 @@ jobs:
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
-        run: cd webui && pnpm install && pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Create output directory
         run: mkdir artifacts
       - name: Build Arroyo with Python
         run: PYO3_PYTHON=$(brew --prefix python@3.12)/Frameworks/Python.framework/Versions/3.12/bin/python3.12 cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
       - name: Build Arroyo without Python
         run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arroyo-${{ matrix.config.artifact }}
           path: artifacts/*
