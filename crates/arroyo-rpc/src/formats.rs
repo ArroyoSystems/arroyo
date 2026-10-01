@@ -1,4 +1,4 @@
-use crate::ConnectorOptions;
+use crate::{ConnectorOptions, check_data_size};
 use datafusion::common::{Result as DFResult, plan_datafusion_err, plan_err};
 use datafusion::error::DataFusionError;
 use regex::Regex;
@@ -344,7 +344,16 @@ pub struct ParquetFormat {
     pub row_group_bytes: Option<u64>,
 }
 
+const MAX_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
+
 impl ParquetFormat {
+    pub fn validate(&self) -> DFResult<()> {
+        if let Some(bytes) = self.row_group_bytes {
+            check_data_size("row_group_size", bytes, 1..=MAX_ROW_GROUP_BYTES)?;
+        }
+        Ok(())
+    }
+
     pub fn from_opts(opts: &mut ConnectorOptions) -> DFResult<Self> {
         let compression = opts
             .pull_opt_str("parquet.compression")?

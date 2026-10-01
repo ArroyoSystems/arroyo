@@ -87,9 +87,15 @@ impl Connector for DeltaLakeConnector {
 
         let (description, connection_type, partition_fields) = match &table.table_type {
             DeltaLakeTableType::Sink(DeltaLakeSink {
-                path, partitioning, ..
+                path,
+                partitioning,
+                rolling_policy,
+                multipart,
+                ..
             }) => {
                 BackendConfig::parse_url(path, true)?;
+                rolling_policy.validate()?;
+                multipart.validate()?;
 
                 let description = format!("DeltaLakeSink<{format}, {path}>");
 

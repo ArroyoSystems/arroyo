@@ -1,7 +1,7 @@
 use crate::filesystem::sink::iceberg::transforms;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
+use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD, check_data_size};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
 use datafusion::common::{
@@ -23,7 +23,9 @@ use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
-const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
+const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024; // 5MB
+const MAXIMUM_PART_SIZE: u64 = 5 * 1024 * 1024 * 1024; // 5GB
+const MAXIMUM_FILE_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024; // 5TB
 
 /// Which version of the FileSystemSink to use
 #[derive(
@@ -76,6 +78,15 @@ pub struct RollingPolicy {
     pub watermark_expiration: bool,
 }
 
+impl RollingPolicy {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(bytes) = self.file_size_bytes {
+            check_data_size("rolling_policy.file_size", bytes, 1..=MAXIMUM_FILE_SIZE)?;
+        }
+        Ok(())
+    }
+}
+
 impl FromOpts for RollingPolicy {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
         Ok(Self {
@@ -119,6 +130,26 @@ pub struct MultipartConfig {
         description = "Files smaller than this will be written as a single put rather than a multipart upload (only available on v2)"
     )]
     pub minimum_multipart_size: Option<u64>,
+}
+
+impl MultipartConfig {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(bytes) = self.target_part_size_bytes {
+            check_data_size(
+                "multipart.target_part_size",
+                bytes,
+                MINIMUM_PART_SIZE..=MAXIMUM_PART_SIZE,
+            )?;
+        }
+        if let Some(bytes) = self.minimum_multipart_size {
+            check_data_size(
+                "multipart.minimum_multipart_size",
+                bytes,
+                0..=MAXIMUM_PART_SIZE,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 impl FromOpts for MultipartConfig {
@@ -1020,5 +1051,31 @@ impl FromOpts for IcebergTable {
                 return plan_err!("type must be 'sink'");
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_sink_sizes() {
+        let rolling = |file_size_bytes| RollingPolicy {
+            file_size_bytes,
+            ..Default::default()
+        };
+        assert!(rolling(None).validate().is_ok());
+        assert!(rolling(Some(MAXIMUM_FILE_SIZE)).validate().is_ok());
+        assert!(rolling(Some(0)).validate().is_err());
+        assert!(rolling(Some(MAXIMUM_FILE_SIZE + 1)).validate().is_err());
+
+        let multipart = |target_part_size_bytes| MultipartConfig {
+            target_part_size_bytes,
+            ..Default::default()
+        };
+        assert!(multipart(None).validate().is_ok());
+        assert!(multipart(Some(MINIMUM_PART_SIZE)).validate().is_ok());
+        assert!(multipart(Some(MINIMUM_PART_SIZE - 1)).validate().is_err());
+        assert!(multipart(Some(u64::MAX)).validate().is_err());
     }
 }

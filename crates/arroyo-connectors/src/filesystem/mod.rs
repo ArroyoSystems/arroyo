@@ -220,9 +220,13 @@ impl Connector for FileSystemConnector {
                 path,
                 partitioning,
                 version,
+                rolling_policy,
+                multipart,
                 ..
             }) => {
                 BackendConfig::parse_url(path, true)?;
+                rolling_policy.validate()?;
+                multipart.validate()?;
 
                 let description = format!("FileSystemSink{:?}<{format}, {path}>", version);
 
