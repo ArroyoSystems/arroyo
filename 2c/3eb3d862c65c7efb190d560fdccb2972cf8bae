@@ -1,0 +1,54 @@
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_c86e3b25d1872a::t_cea4003e08863b 18,29
+crates/arroyo-rpc/src/config_cf.rs
+  s_c86e3b25d1872a::t_0b2db23b7dd95b 184-191,201,203,232
+  s_c86e3b25d1872a::t_6909e4dea328fe 212
+  s_c86e3b25d1872a::t_a1a96ebb7a74af 211,213-214
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_c86e3b25d1872a::t_6909e4dea328fe 80-83
+  s_c86e3b25d1872a::t_b61d1ec43a6909 22,53-55,91,109-111,113-114
+  s_c86e3b25d1872a::t_60e6f8cd0105e8 79,84-87
+  s_c86e3b25d1872a::t_faeba8860094ee 280,337
+  s_c86e3b25d1872a::t_47d2ab38c758fc 46,51-52,56,107-108,112,401,506-508,518-519
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_c86e3b25d1872a::t_b61d1ec43a6909 134-142
+  s_c86e3b25d1872a::t_cea4003e08863b 88,129-133,170
+crates/arroyo-rpc/default.toml
+  s_c86e3b25d1872a::t_0b2db23b7dd95b 137-140
+crates/arroyo-connectors/src/superbuffer/source/progress.rs
+  s_c86e3b25d1872a::t_cea4003e08863b 6,18,158-159,179-180,182,191-194
+  s_c86e3b25d1872a::t_571ae65146bfaa 163,196-199,201
+crates/arroyo-connectors/Cargo.toml
+  s_c86e3b25d1872a::t_3d33b8c3af5881 126,132
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_c86e3b25d1872a::t_c28c0f37fd1eae 12-13,15,23,25,33,38-44,46-51,53,120,143-144,147,165,175-177,224-242,244-269,271-280,290,299,305,329-332,426-429,683
+  s_c86e3b25d1872a::t_b61d1ec43a6909 122-127,168-169,243,349-357
+  s_c86e3b25d1872a::t_3dc868d73bac4a 675-682
+  s_c86e3b25d1872a::t_b4b937018a862a 365
+  s_c86e3b25d1872a::t_571ae65146bfaa 187-191
+  s_c86e3b25d1872a::t_faeba8860094ee 627,655
+  s_c86e3b25d1872a::t_9e3ccd79e3787e 660-674
+  s_c86e3b25d1872a::t_b0e7ec9db1c89a 270
+  s_c86e3b25d1872a::t_47d2ab38c758fc 688-689
+  s_c86e3b25d1872a::t_5714cb4df0ef77 684
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_c86e3b25d1872a::t_0b2db23b7dd95b 6-8,31,47-50,59
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_c86e3b25d1872a::t_cea4003e08863b 114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2c3eb3d862c65c7efb190d560fdccb2972cf8bae",
+  "prompts": {},
+  "sessions": {
+    "s_c86e3b25d1872a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f137e8fbeffe85Bqc9FWCMzU4f",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
