@@ -392,6 +392,7 @@ pub fn controller_job_failure(
         error_domain: error_domain as i32,
         retry_hint: retry_hint as i32,
         details: String::new(),
+        retry_policy: Some(errors::RetryHint::from(retry_hint).into()),
     }
 }
 
@@ -466,7 +467,8 @@ impl JobContext<'_> {
         failure: arroyo_rpc::grpc::rpc::JobFailure,
     ) -> Result<Transition, StateError> {
         let error_domain = errors::ErrorDomain::from(failure.error_domain());
-        let retry_hint = errors::RetryHint::from(failure.retry_hint());
+        let retry_hint =
+            errors::RetryHint::from_rpc(failure.retry_policy.as_ref(), failure.retry_hint());
         let operator_id = failure
             .operator_id
             .clone()
@@ -482,6 +484,8 @@ impl JobContext<'_> {
             operator_id,
             error_domain = error_domain.as_str(),
             retry_hint = retry_hint.as_str(),
+            retry_policy = ?failure.retry_policy,
+            restarts = self.status.restarts,
             message = "job failed",
             reason,
         );
@@ -513,20 +517,21 @@ impl JobContext<'_> {
             }
         }
 
-        match retry_hint {
-            errors::RetryHint::NoRetry => Err(StateError::FatalError {
-                source: anyhow!("job failed: {}", failure.message),
-                message: failure.message,
-                domain: error_domain,
-            }),
-            errors::RetryHint::WithBackoff => Ok(Transition::next(
+        if retry_hint.should_retry(self.status.restarts) {
+            Ok(Transition::next(
                 state,
                 Recovering {
                     source: anyhow!("job failed: {}", failure.message),
                     reason: failure.message,
                     domain: error_domain,
                 },
-            )),
+            ))
+        } else {
+            Err(StateError::FatalError {
+                source: anyhow!("job failed: {}", failure.message),
+                message: failure.message,
+                domain: error_domain,
+            })
         }
     }
 

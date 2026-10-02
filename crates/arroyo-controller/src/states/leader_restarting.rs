@@ -6,7 +6,7 @@ use crate::JobMessage;
 use crate::states::recovering::Recovering;
 use crate::types::public::RestartMode;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStopMode};
+use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
@@ -88,15 +88,11 @@ impl State for LeaderRestarting {
                             };
                         }
                         _ = tokio::time::sleep(timeout) => {
-                            return ctx.handle_job_failure(*self, JobFailure {
-                                operator_id: None,
-                                task_id: None,
-                                subtask_index: None,
-                                message: "timed out while taking final checkpoint".to_string(),
-                                error_domain: rpc::ErrorDomain::Internal as i32,
-                                retry_hint: rpc::RetryHint::WithBackoff as i32,
-                                details: String::new(),
-                            }).await;
+                            return ctx.handle_job_failure(*self, controller_job_failure(
+                                "timed out while taking final checkpoint",
+                                rpc::ErrorDomain::Internal,
+                                rpc::RetryHint::WithBackoff,
+                            )).await;
                         }
                     }
                 }
