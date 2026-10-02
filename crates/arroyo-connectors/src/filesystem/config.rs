@@ -1,7 +1,9 @@
 use crate::filesystem::sink::iceberg::transforms;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD, check_data_size};
+use arroyo_rpc::{
+    ConnectorOptions, FromOpts, TIMESTAMP_FIELD, check_data_size, timestamp_field_index,
+};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
 use datafusion::common::{
@@ -235,7 +237,7 @@ impl PartitioningConfig {
             (Some(pattern), fields) if !fields.is_empty() => Some(
                 Self::partition_string_for_fields_and_time(schema, fields, pattern)?,
             ),
-            (Some(pattern), _) => Some(Self::timestamp_logical_expression(pattern)),
+            (Some(pattern), _) => Some(Self::timestamp_logical_expression(schema, pattern)),
         })
     }
 
@@ -245,7 +247,7 @@ impl PartitioningConfig {
         time_partition_pattern: &str,
     ) -> Result<Expr, DataFusionError> {
         let field_function = Self::field_logical_expression(schema, partition_fields)?;
-        let time_function = Self::timestamp_logical_expression(time_partition_pattern);
+        let time_function = Self::timestamp_logical_expression(schema, time_partition_pattern);
         let function = concat(vec![
             time_function,
             Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
@@ -292,8 +294,12 @@ impl PartitioningConfig {
         Ok(function)
     }
 
-    fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
-        to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
+    fn timestamp_logical_expression(schema: &Schema, time_partition_pattern: &str) -> Expr {
+        // sinks from programs compiled before the rename still use the legacy name
+        let timestamp_field = timestamp_field_index(schema)
+            .map(|i| schema.field(i).name().as_str())
+            .unwrap_or(TIMESTAMP_FIELD);
+        to_char(col(timestamp_field), lit(time_partition_pattern))
     }
 }
 
