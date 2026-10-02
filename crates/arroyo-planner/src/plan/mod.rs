@@ -278,7 +278,7 @@ impl TreeNodeRewriter for ArroyoRewriter<'_> {
                     .expect("in projection");
                     projection.expr.push(Expr::Column(Column {
                         relation: timestamp_field.qualifier().cloned(),
-                        name: "_timestamp".to_string(),
+                        name: TIMESTAMP_FIELD.to_string(),
                         spans: Spans::default(),
                     }));
                 }

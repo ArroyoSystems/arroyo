@@ -21,7 +21,7 @@ use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::{ArrowError, DataType, Field, Fields};
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
@@ -329,7 +329,30 @@ pub fn error_chain(e: anyhow::Error) -> String {
         .join(": ")
 }
 
-pub const TIMESTAMP_FIELD: &str = "_timestamp";
+/// Prefix reserved for columns that Arroyo adds to schemas internally
+pub const INTERNAL_FIELD_PREFIX: &str = "__arroyo";
+
+/// Whether `name` falls in the reserved internal namespace. Case-insensitive, as unquoted
+/// identifiers are lowercased during planning and could otherwise resolve to internal columns.
+pub fn is_internal_field_name(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with(INTERNAL_FIELD_PREFIX)
+}
+
+pub const TIMESTAMP_FIELD: &str = "__arroyo_internal_ts";
+/// Name of the timestamp field before it was renamed to [`TIMESTAMP_FIELD`]
+// TODO: remove LEGACY_TIMESTAMP_FIELD and the fallback in timestamp_field_index once all
+// pipelines compiled before the rename have been recompiled
+pub const LEGACY_TIMESTAMP_FIELD: &str = "_timestamp";
+
+/// Returns the index of the timestamp field, falling back to [`LEGACY_TIMESTAMP_FIELD`] for
+/// programs compiled before the rename
+pub fn timestamp_field_index(schema: &Schema) -> Option<usize> {
+    schema
+        .index_of(TIMESTAMP_FIELD)
+        .or_else(|_| schema.index_of(LEGACY_TIMESTAMP_FIELD))
+        .ok()
+}
+
 pub const UPDATING_META_FIELD: &str = "_updating_meta";
 
 pub fn updating_meta_fields() -> Fields {
@@ -1292,7 +1315,11 @@ pub struct StateContext {
 #[cfg(test)]
 mod tests {
     use crate::grpc::rpc::StartExecutionReq;
-    use crate::{DataSizeUnit, SerializableBytes, parse_expr};
+    use crate::{
+        DataSizeUnit, LEGACY_TIMESTAMP_FIELD, SerializableBytes, TIMESTAMP_FIELD,
+        is_internal_field_name, parse_expr, timestamp_field_index,
+    };
+    use arrow_schema::{DataType, Field, Schema};
     use bincode::{Decode, Encode, config};
     use bytes::Bytes;
     use prost::Message;
@@ -1374,5 +1401,29 @@ mod tests {
             .0;
 
         assert_eq!(s, decoded);
+    }
+
+    #[test]
+    fn test_timestamp_field_index_prefers_current_name() {
+        let field = |name| Field::new(name, DataType::Int64, false);
+
+        let legacy = Schema::new(vec![field("a"), field(LEGACY_TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&legacy), Some(1));
+
+        // a user column named like the legacy field must not shadow the real one
+        let both = Schema::new(vec![field(LEGACY_TIMESTAMP_FIELD), field(TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&both), Some(1));
+
+        assert_eq!(timestamp_field_index(&Schema::new(vec![field("a")])), None);
+    }
+
+    #[test]
+    fn test_is_internal_field_name_ignores_case() {
+        assert!(is_internal_field_name(TIMESTAMP_FIELD));
+        assert!(is_internal_field_name("__ARROYO_INTERNAL_TS"));
+        assert!(is_internal_field_name("__Arroyo_custom"));
+        assert!(!is_internal_field_name("__arroy"));
+        assert!(!is_internal_field_name("_arroyo"));
+        assert!(!is_internal_field_name(LEGACY_TIMESTAMP_FIELD));
     }
 }
