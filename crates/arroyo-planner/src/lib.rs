@@ -10,6 +10,7 @@ mod plan;
 mod rewriters;
 pub mod schemas;
 mod tables;
+mod type_coercion;
 pub mod types;
 pub mod udafs;
 
