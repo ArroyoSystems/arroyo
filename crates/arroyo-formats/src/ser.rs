@@ -7,11 +7,11 @@ use arrow_array::{Array, RecordBatch, StructArray};
 use arrow_json::EncoderOptions;
 use arrow_json::writer::make_encoder;
 use arrow_schema::{ArrowError, DataType, Field};
-use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::formats::{
     AvroFormat, DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat,
     TimestampFormat,
 };
+use arroyo_rpc::timestamp_field_index;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -69,12 +69,9 @@ impl ArrowSerializer {
     }
 
     fn projection(schema: &arrow_schema::Schema) -> Vec<usize> {
-        schema
-            .fields
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.name() != TIMESTAMP_FIELD)
-            .map(|(i, _)| i)
+        let timestamp_index = timestamp_field_index(schema);
+        (0..schema.fields.len())
+            .filter(|i| Some(*i) != timestamp_index)
             .collect()
     }
 
@@ -279,6 +276,7 @@ mod tests {
     use crate::ser::ArrowSerializer;
     use arrow_array::builder::{Decimal128Builder, TimestampNanosecondBuilder};
     use arrow_schema::{Schema, TimeUnit};
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::formats::{
         DecimalEncoding, Format, JsonFormat, RawBytesFormat, RawStringFormat, TimestampFormat,
     };
@@ -303,7 +301,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Utf8, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -340,7 +338,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -394,7 +392,7 @@ mod tests {
             arrow_schema::Field::new("value", arrow_schema::DataType::Utf8, false),
             arrow_schema::Field::new("number", arrow_schema::DataType::Int32, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -450,7 +448,7 @@ mod tests {
                 true,
             ),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -500,7 +498,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Decimal128(5, 3), true),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -602,7 +600,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
