@@ -53,7 +53,6 @@ pub struct PipelinePost {
     pub query: String,
     pub udfs: Option<Vec<Udf>>,
     pub parallelism: u64,
-    pub checkpoint_interval_micros: Option<u64>,
     pub state_url: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     /// Per-job environment variables forwarded to workers.
@@ -65,6 +64,11 @@ pub struct PipelinePost {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay. The shape mirrors the
+    /// controller's global `pipeline` config block and is merged on top
+    /// of it when the job runs. An omitted field, `null`, or an empty
+    /// object all mean "use the global pipeline config unchanged".
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -80,7 +84,6 @@ pub struct PreviewPost {
 #[serde(rename_all = "snake_case")]
 pub struct PipelinePatch {
     pub parallelism: Option<u64>,
-    pub checkpoint_interval_micros: Option<u64>,
     pub stop: Option<StopType>,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: Option<HashMap<String, String>>,
@@ -91,6 +94,9 @@ pub struct PipelinePatch {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// Supplying this field replaces the job's existing overlay.
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -107,7 +113,6 @@ pub struct Pipeline {
     pub name: String,
     pub query: String,
     pub udfs: Vec<Udf>,
-    pub checkpoint_interval_micros: u64,
     pub stop: StopType,
     pub created_at: u64,
     pub action: Option<StopType>,
@@ -182,6 +187,10 @@ pub struct Job {
     /// An empty object means "no overrides, use the controller's
     /// global scheduler config unchanged".
     pub scheduler_config: serde_json::Value,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// An empty object means "no overrides, use the global pipeline
+    /// config unchanged".
+    pub pipeline_config: serde_json::Value,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: serde_json::Value,
 }

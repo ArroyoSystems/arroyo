@@ -31,6 +31,8 @@ use std::{
 };
 
 const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
+// Buffers grow on demand; this caps the up-front allocation from user-configured sizes
+const MAX_INITIAL_BUFFER_BYTES: usize = 1024 * 1024 * 8; // 8MB
 
 fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, usize) {
     let mut parquet_writer_options = WriterProperties::builder();
@@ -64,7 +66,9 @@ pub(crate) struct SharedBuffer {
 impl SharedBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buffer: Arc::new(Mutex::new(BytesMut::with_capacity(capacity).writer())),
+            buffer: Arc::new(Mutex::new(
+                BytesMut::with_capacity(capacity.min(MAX_INITIAL_BUFFER_BYTES)).writer(),
+            )),
         }
     }
 

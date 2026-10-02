@@ -37,10 +37,10 @@ WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 
 ------- connection tables -------------
---! create_connection_table(profile_id?, schema?)
+--! create_connection_table(profile_id?)
 INSERT INTO connection_tables
-(pub_id, organization_id, created_by, name, table_type, connector, connection_id, config, schema)
-VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :profile_id, :config, :schema);
+(pub_id, organization_id, created_by, name, table_type, connector, connection_id)
+VALUES (:pub_id, :organization_id, :created_by, :name, :table_type, :connector, :profile_id);
 
 --: DbConnectionTable (profile_id?, profile_name?, profile_type?, profile_config?, schema?)
 
@@ -51,8 +51,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_table_versions.version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -62,6 +64,14 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND NOT EXISTS (
+        SELECT 1
+        FROM connection_table_versions newer_versions
+        WHERE newer_versions.connection_table_id = connection_tables.id
+          AND newer_versions.version > connection_table_versions.version
+    )
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id
     AND (connection_tables.created_at < (
@@ -78,8 +88,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_table_versions.version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -89,6 +101,14 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND NOT EXISTS (
+        SELECT 1
+        FROM connection_table_versions newer_versions
+        WHERE newer_versions.connection_table_id = connection_tables.id
+          AND newer_versions.version > connection_table_versions.version
+    )
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id
 ORDER BY connection_tables.created_at DESC;
@@ -100,8 +120,10 @@ SELECT connection_tables.id as id,
     connection_tables.created_at as created_at,
     connection_tables.connector as connector,
     connection_tables.table_type as table_type,
-    connection_tables.config as config,
-    connection_tables.schema as schema,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    connection_table_versions.version as latest,
     connection_profiles.pub_id as profile_id,
     connection_profiles.name as profile_name,
     connection_profiles.type as profile_type,
@@ -111,8 +133,54 @@ SELECT connection_tables.id as id,
         WHERE connection_table_pipelines.connection_table_id = connection_tables.id
     ) as consumer_count
 FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND NOT EXISTS (
+        SELECT 1
+        FROM connection_table_versions newer_versions
+        WHERE newer_versions.connection_table_id = connection_tables.id
+          AND newer_versions.version > connection_table_versions.version
+    )
 LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
 WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
+
+--! get_connection_table_version: DbConnectionTable
+SELECT connection_tables.id as id,
+    connection_tables.pub_id as pub_id,
+    connection_tables.name as name,
+    connection_table_versions.created_at as created_at,
+    connection_tables.connector as connector,
+    connection_tables.table_type as table_type,
+    connection_table_versions.config as config,
+    connection_table_versions.schema as schema,
+    connection_table_versions.version as version,
+    COALESCE((
+        SELECT MAX(latest_versions.version)
+        FROM connection_table_versions latest_versions
+        WHERE latest_versions.connection_table_id = connection_tables.id
+    ), connection_table_versions.version) as latest,
+    connection_profiles.pub_id as profile_id,
+    connection_profiles.name as profile_name,
+    connection_profiles.type as profile_type,
+    connection_profiles.config as profile_config,
+    (SELECT count(*) as pipeline_count
+        FROM connection_table_pipelines
+        WHERE connection_table_pipelines.connection_table_id = connection_tables.id
+          AND connection_table_pipelines.connection_version = connection_table_versions.version
+    ) as consumer_count
+FROM connection_tables
+INNER JOIN connection_table_versions
+    ON connection_table_versions.connection_table_id = connection_tables.id
+    AND connection_table_versions.version = :version
+LEFT JOIN connection_profiles ON connection_profiles.id = connection_tables.connection_id
+WHERE connection_tables.organization_id = :organization_id AND connection_tables.pub_id = :pub_id;
+
+--! create_connection_table_version(schema?)
+INSERT INTO connection_table_versions
+    (connection_table_id, version, config, schema, created_by)
+SELECT id, :version, :config, :schema, :created_by
+FROM connection_tables
+WHERE organization_id = :organization_id AND pub_id = :pub_id;
 
 --! delete_connection_table
 DELETE FROM connection_tables
@@ -128,7 +196,7 @@ INSERT INTO pipelines (pub_id, organization_id, created_by, name, type, textual_
 VALUES (:pub_id, :organization_id, :created_by, :name, :type, :textual_repr, :udfs, :program, :proto_version, :state_url, :tags);
 
 --! get_pipelines : DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -143,7 +211,7 @@ ORDER BY pipelines.created_at DESC
 LIMIT cast(:limit as integer);
 
 --! get_pipeline: DbPipeline
-SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, checkpoint_interval_micros, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
+SELECT pipelines.id, pipelines.pub_id, name, type, textual_repr, udfs, program, stop, pipelines.created_at, state, parallelism_overrides, ttl_micros, state_url, tags
 FROM pipelines
     INNER JOIN job_configs on pipelines.id = job_configs.pipeline_id
     INNER JOIN job_statuses ON job_configs.id = job_statuses.id
@@ -155,8 +223,14 @@ FROM pipelines
 WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 --! add_pipeline_connection_table
-INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id)
-VALUES (:pub_id, :pipeline_id, :connection_table_id);
+INSERT INTO connection_table_pipelines(pub_id, pipeline_id, connection_table_id, connection_version)
+SELECT :pub_id, :pipeline_id, id, :connection_version
+FROM connection_tables
+WHERE id = :connection_table_id
+  AND EXISTS (
+      SELECT 1 FROM connection_table_versions
+      WHERE connection_table_id = connection_tables.id AND version = :connection_version
+  );
 
 --! delete_pipeline
 DELETE FROM pipelines
@@ -165,17 +239,17 @@ WHERE pub_id = :pub_id AND organization_id = :organization_id;
 
 ----------- jobs -----------------------
 
---! update_job(checkpoint_interval_micros?, stop?, parallelism_overrides?, env_vars?, scheduler_config?)
+--! update_job(stop?, parallelism_overrides?, env_vars?, scheduler_config?, pipeline_config?)
 UPDATE job_configs
 SET
    updated_at = :updated_at,
    updated_by = :updated_by,
 
    stop = COALESCE(:stop, stop),
-   checkpoint_interval_micros = COALESCE(:checkpoint_interval_micros, checkpoint_interval_micros),
    parallelism_overrides = COALESCE(:parallelism_overrides, parallelism_overrides),
    env_vars = COALESCE(:env_vars, env_vars),
-   scheduler_config = COALESCE(:scheduler_config, scheduler_config)
+   scheduler_config = COALESCE(:scheduler_config, scheduler_config),
+   pipeline_config = COALESCE(:pipeline_config, pipeline_config)
 WHERE id = :job_id AND organization_id = :organization_id;
 
 --! restart_job(mode)
@@ -189,8 +263,8 @@ WHERE id = :job_id AND organization_id = :organization_id;
 
 --! create_job(ttl_micros?)
 INSERT INTO job_configs
-(id, organization_id, pipeline_name, created_by, pipeline_id, checkpoint_interval_micros, ttl_micros, env_vars, scheduler_config)
-VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :checkpoint_interval_micros, :ttl_micros, :env_vars, :scheduler_config);
+(id, organization_id, pipeline_name, created_by, pipeline_id, ttl_micros, env_vars, scheduler_config, pipeline_config)
+VALUES (:id, :organization_id, :pipeline_name, :created_by, :pipeline_id, :ttl_micros, :env_vars, :scheduler_config, :pipeline_config);
 
 --! create_job_status
 INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :organization_id);
@@ -198,11 +272,9 @@ INSERT INTO job_statuses (pub_id, id, organization_id) VALUES (:pub_id, :id, :or
 --! clone_job_without_state
 INSERT INTO job_configs
     (id, organization_id, pipeline_name, created_by, updated_by, updated_at,
-     ttl_micros, stop, pipeline_id, parallelism_overrides,
-     checkpoint_interval_micros, env_vars, scheduler_config)
+     ttl_micros, stop, pipeline_id, parallelism_overrides, env_vars, scheduler_config, pipeline_config)
 SELECT :new_job_id, organization_id, pipeline_name, created_by, :updated_by, CURRENT_TIMESTAMP,
-       ttl_micros, 'none', pipeline_id, parallelism_overrides,
-       checkpoint_interval_micros, env_vars, scheduler_config
+       ttl_micros, 'none', pipeline_id, parallelism_overrides, env_vars, scheduler_config, pipeline_config
 FROM job_configs
 WHERE id = :old_job_id;
 
@@ -221,7 +293,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
 --! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -229,7 +301,7 @@ WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub
 ORDER BY job_configs.created_at DESC;
 
 --! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
@@ -237,7 +309,7 @@ WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY job_configs.created_at DESC;
 
 --! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, checkpoint_interval_micros, job_configs.created_at, state_context, scheduler_config, env_vars
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id

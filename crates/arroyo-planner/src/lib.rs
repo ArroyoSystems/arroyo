@@ -65,6 +65,7 @@ use arroyo_datastream::logical::LogicalProgram;
 use arroyo_datastream::optimizers::ChainingOptimizer;
 use arroyo_operator::connector::Connection;
 use arroyo_rpc::api_types::pipelines::{SqlDiagnostic, SqlLocation, SqlSpan};
+use arroyo_rpc::config::{PipelineCompilerConfigs, config as global_config};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::{TIMESTAMP_FIELD, duration_from_sql};
 use arroyo_udf_host::ParsedUdfFile;
@@ -539,13 +540,21 @@ impl FunctionRegistry for ArroyoSchemaProvider {
 #[derive(Clone, Debug)]
 pub struct SqlConfig {
     pub default_parallelism: usize,
+    pub compiler: PipelineCompilerConfigs,
+}
+
+impl SqlConfig {
+    pub fn new(default_parallelism: usize, compiler: &PipelineCompilerConfigs) -> Self {
+        Self {
+            default_parallelism,
+            compiler: compiler.clone(),
+        }
+    }
 }
 
 impl Default for SqlConfig {
     fn default() -> Self {
-        Self {
-            default_parallelism: 4,
-        }
+        Self::new(4, &global_config().pipeline.compiler)
     }
 }
 
@@ -825,22 +834,24 @@ pub(crate) fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
 pub async fn parse_and_get_arrow_program(
     query: String,
     mut schema_provider: ArroyoSchemaProvider,
-    // TODO: use config
-    _config: SqlConfig,
+    config: SqlConfig,
 ) -> Result<CompiledSql> {
-    let mut config = SessionConfig::new();
-    config
+    let mut session_config = SessionConfig::new();
+    session_config
         .options_mut()
         .optimizer
         .enable_round_robin_repartition = false;
-    config.options_mut().optimizer.repartition_aggregations = false;
-    config.options_mut().optimizer.repartition_windows = false;
-    config.options_mut().optimizer.repartition_sorts = false;
-    config.options_mut().optimizer.repartition_joins = false;
-    config.options_mut().execution.target_partitions = 1;
+    session_config
+        .options_mut()
+        .optimizer
+        .repartition_aggregations = false;
+    session_config.options_mut().optimizer.repartition_windows = false;
+    session_config.options_mut().optimizer.repartition_sorts = false;
+    session_config.options_mut().optimizer.repartition_joins = false;
+    session_config.options_mut().execution.target_partitions = 1;
 
     let session_state = SessionStateBuilder::new()
-        .with_config(config)
+        .with_config(session_config)
         .with_default_features()
         .with_physical_optimizer_rules(vec![])
         .build();
@@ -953,7 +964,8 @@ pub async fn parse_and_get_arrow_program(
     // rewrite sink's inputs, and remove duplicated sink
     let extensions = rewrite_sinks(extensions)?;
 
-    let mut plan_to_graph_visitor = PlanToGraphVisitor::new(&schema_provider, &session_state);
+    let mut plan_to_graph_visitor =
+        PlanToGraphVisitor::new(&schema_provider, &session_state, &config);
     for extension in extensions {
         plan_to_graph_visitor.add_plan(extension)?;
     }
@@ -967,7 +979,7 @@ pub async fn parse_and_get_arrow_program(
         },
     );
 
-    if arroyo_rpc::config::config().pipeline.chaining.enabled {
+    if config.compiler.chaining.enabled {
         program.optimize(&ChainingOptimizer {});
     }
 

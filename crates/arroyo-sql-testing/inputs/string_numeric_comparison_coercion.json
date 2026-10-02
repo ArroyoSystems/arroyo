@@ -1,0 +1,10 @@
+{"user_id":"","event_name":"empty"}
+{"user_id":"alpha","event_name":"text"}
+{"user_id":"123","event_name":"matching"}
+{"user_id":"124","event_name":"other-number"}
+{"user_id":"hello, world","event_name":"punctuation"}
+{"user_id":"東京-🦀","event_name":"unicode"}
+{"user_id":"0","event_name":"zero"}
+{"user_id":"-1","event_name":"negative"}
+{"user_id":"00123","event_name":"leading-zero"}
+{"user_id":"value-9","event_name":"generated"}

@@ -1,7 +1,7 @@
-use super::map_storage_error;
+use super::{classify_storage_error, map_storage_error};
 use crate::filesystem::sink::FsEventLogger;
 use arroyo_rpc::connector_err;
-use arroyo_rpc::errors::{DataflowError, DataflowResult, StorageError};
+use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, RetryHint, StorageError};
 use arroyo_storage::StorageProvider;
 use bytes::Bytes;
 use futures::future::try_join_all;
@@ -198,22 +198,34 @@ async fn validate_already_there(
             }
         }
         Err(head_error) => {
-            if matches!(
-                head_error,
-                StorageError::ObjectStore(object_store::Error::NotFound { .. })
-            ) {
-                // we failed to write the file; return the original write error
-                Err(handle_error(started, logger, e))
-            } else {
-                // we failed to determine the state of the file because head also failed
-                Err(connector_err!(
-                    External,
-                    WithBackoff,
-                    source: head_error.into(),
-                    "failed to validate whether failed multipart write successfully completed",
-                ))
+            match classify_recovery_head_error(&head_error) {
+                None => {
+                    // we failed to write the file; return the original write error
+                    Err(handle_error(started, logger, e))
+                }
+                Some((domain, retry)) => {
+                    // we failed to determine the state of the file because head also failed
+                    Err(DataflowError::ConnectorError {
+                        domain,
+                        retry,
+                        error: "failed to validate whether failed multipart write successfully completed"
+                            .to_string(),
+                        source: Some(head_error.into()),
+                    })
+                }
             }
         }
+    }
+}
+
+fn classify_recovery_head_error(head_error: &StorageError) -> Option<(ErrorDomain, RetryHint)> {
+    if matches!(
+        head_error,
+        StorageError::ObjectStore(object_store::Error::NotFound { .. })
+    ) {
+        None
+    } else {
+        Some(classify_storage_error(head_error))
     }
 }
 
@@ -248,4 +260,58 @@ pub fn create_multipart_finalize_future(
             data: FsResponseData::MultipartFinalized,
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_recovery_head_error;
+    use arroyo_rpc::errors::{ErrorDomain, RetryHint, StorageError};
+    use object_store::Error;
+    use std::io;
+
+    fn source() -> Box<dyn std::error::Error + Send + Sync> {
+        Box::new(io::Error::other("test error"))
+    }
+
+    #[test]
+    fn recovery_head_auth_errors_are_user_errors() {
+        for error in [
+            Error::PermissionDenied {
+                path: "test.parquet".to_string(),
+                source: source(),
+            },
+            Error::Unauthenticated {
+                path: "test.parquet".to_string(),
+                source: source(),
+            },
+        ] {
+            assert_eq!(
+                classify_recovery_head_error(&StorageError::ObjectStore(error)),
+                Some((ErrorDomain::User, RetryHint::NoRetry))
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_head_transient_errors_remain_retryable() {
+        let error = StorageError::ObjectStore(Error::Generic {
+            store: "test",
+            source: source(),
+        });
+
+        assert_eq!(
+            classify_recovery_head_error(&error),
+            Some((ErrorDomain::External, RetryHint::WithBackoff))
+        );
+    }
+
+    #[test]
+    fn recovery_head_not_found_uses_original_write_error() {
+        let error = StorageError::ObjectStore(Error::NotFound {
+            path: "test.parquet".to_string(),
+            source: source(),
+        });
+
+        assert_eq!(classify_recovery_head_error(&error), None);
+    }
 }

@@ -24,7 +24,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
 use tokio::sync::oneshot;
 
-use crate::ArroyoSchemaProvider;
 use crate::extension::debezium::{
     DEBEZIUM_UNROLLING_EXTENSION_NAME, DebeziumUnrollingExtension, TO_DEBEZIUM_EXTENSION_NAME,
 };
@@ -35,6 +34,7 @@ use crate::physical::{
     ToDebeziumExec,
 };
 use crate::schemas::add_timestamp_field_arrow;
+use crate::{ArroyoSchemaProvider, SqlConfig};
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{
@@ -54,13 +54,17 @@ pub(crate) struct PlanToGraphVisitor<'a> {
 }
 
 impl<'a> PlanToGraphVisitor<'a> {
-    pub fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
+    pub fn new(
+        schema_provider: &'a ArroyoSchemaProvider,
+        session_state: &'a SessionState,
+        sql_config: &'a SqlConfig,
+    ) -> Self {
         Self {
             graph: Default::default(),
             output_schemas: Default::default(),
             named_nodes: Default::default(),
             traversal: vec![],
-            planner: Planner::new(schema_provider, session_state),
+            planner: Planner::new(schema_provider, session_state, sql_config),
         }
     }
 }
@@ -69,12 +73,14 @@ pub(crate) struct Planner<'a> {
     schema_provider: &'a ArroyoSchemaProvider,
     planner: DefaultPhysicalPlanner,
     session_state: &'a SessionState,
+    pub(crate) sql_config: &'a SqlConfig,
 }
 
 impl<'a> Planner<'a> {
     pub(crate) fn new(
         schema_provider: &'a ArroyoSchemaProvider,
         session_state: &'a SessionState,
+        sql_config: &'a SqlConfig,
     ) -> Self {
         let planner = DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
             ArroyoExtensionPlanner {},
@@ -83,6 +89,7 @@ impl<'a> Planner<'a> {
             schema_provider,
             planner,
             session_state,
+            sql_config,
         }
     }
 

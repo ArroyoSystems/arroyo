@@ -13,7 +13,7 @@ pub fn should_flush(buffered_count: usize, buffered_bytes: usize, time: Instant)
     if buffered_count == 0 {
         return false;
     }
-    let cfg = &config().pipeline;
+    let cfg = &config().pipeline.worker;
     buffered_count >= cfg.source_batch_size
         || time.elapsed() >= *cfg.source_batch_linger
         || cfg
@@ -49,9 +49,9 @@ mod tests {
         // config() auto-initialises from defaults; update() panics without it
         let _ = config();
         update(|c| {
-            c.pipeline.source_batch_size = batch_size;
-            c.pipeline.source_batch_linger = Duration::from_millis(linger_ms).into();
-            c.pipeline.source_batch_max_bytes = max_bytes;
+            c.pipeline.worker.source_batch_size = batch_size;
+            c.pipeline.worker.source_batch_linger = Duration::from_millis(linger_ms).into();
+            c.pipeline.worker.source_batch_max_bytes = max_bytes;
         });
     }
 

@@ -1,5 +1,4 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
-default-checkpoint-interval = "10s"
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"
@@ -13,12 +12,15 @@ state-initial-backoff = "500ms"
 state-max-backoff = "1m"
 chaining.enabled = true
 store-deserialization-errors = true
+queue-size = 8192
+checkpoint-details-to-keep = 10
 
 [pipeline.compaction]
 enabled = false
 checkpoints-to-compact = 4
 
 [pipeline.checkpoint]
+interval = "10s"
 
 # Services
 
@@ -53,8 +55,6 @@ bind-address = "0.0.0.0"
 rpc-port = 0
 data-port = 0
 task-slots = 16
-queue-size = 8192
-checkpoint-details-to-keep = 10
 
 [node]
 bind-address = "0.0.0.0"

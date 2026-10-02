@@ -86,7 +86,9 @@ async fn start_pipeline(test_id: u32, query: &str, udfs: &[&str]) -> anyhow::Res
             PipelinePost::builder()
                 .name(pipeline_name)
                 .parallelism(1)
-                .checkpoint_interval_micros(1_000_000)
+                .pipeline_config(Some(serde_json::json!({
+                    "checkpoint": { "interval": "1s" }
+                })))
                 .query(query)
                 .udfs(Some(
                     udfs.iter()
