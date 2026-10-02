@@ -9,6 +9,7 @@ use crate::job_controller::{
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
@@ -498,6 +499,7 @@ impl WorkerJobController {
                                 error_domain: rpc::ErrorDomain::Internal.into(),
                                 retry_hint: rpc::RetryHint::WithBackoff.into(),
                                 details: String::new(),
+                                retry_policy: Some(RetryHint::WithBackoff.into()),
                             })
                             .await?;
                             return Ok(());
