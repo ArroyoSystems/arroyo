@@ -45,8 +45,9 @@ impl From<TaskFailedEvent> for rpc::JobFailure {
             subtask_index: Some(value.subtask_idx),
             message: value.reason,
             error_domain: rpc::ErrorDomain::from(value.error_domain).into(),
-            retry_hint: rpc::RetryHint::from(value.retry_hint).into(),
+            retry_hint: value.retry_hint.legacy_hint().into(),
             details: value.details,
+            retry_policy: Some(value.retry_hint.into()),
         }
     }
 }

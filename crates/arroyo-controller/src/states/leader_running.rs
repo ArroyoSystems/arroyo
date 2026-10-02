@@ -9,7 +9,7 @@ use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::{ErrorDomain, JobFailure, RetryHint};
+use arroyo_rpc::grpc::rpc::{ErrorDomain, RetryHint};
 use arroyo_rpc::log_event;
 use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
@@ -178,15 +178,11 @@ impl State for LeaderRunning {
                             };
                             match state {
                                 rpc::JobState::JobInitializing => {
-                                    return ctx.handle_job_failure(*self, JobFailure {
-                                        operator_id: None,
-                                        task_id: None,
-                                        subtask_index: None,
-                                        message: "job unexpectedly in Initializing state, should be running".to_string(),
-                                        error_domain: ErrorDomain::Internal as i32,
-                                        retry_hint: RetryHint::WithBackoff as i32,
-                                        details: String::new(),
-                                    }).await;
+                                    return ctx.handle_job_failure(*self, controller_job_failure(
+                                        "job unexpectedly in Initializing state, should be running",
+                                        ErrorDomain::Internal,
+                                        RetryHint::WithBackoff,
+                                    )).await;
                                 }
                                 rpc::JobState::JobRunning => {
                                     // in progress
