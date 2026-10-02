@@ -1,4 +1,5 @@
 use crate::extension::remote_table::RemoteTableExtension;
+use crate::type_coercion::analyze_plan;
 use crate::types::convert_data_type;
 use crate::{
     ArroyoSchemaProvider, DFField,
@@ -19,9 +20,7 @@ use arroyo_rpc::grpc::api::ConnectorOp;
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{Column, DataFusionError, plan_err};
-use datafusion::common::{
-    DFSchema, Result, ScalarValue, config::ConfigOptions, plan_datafusion_err,
-};
+use datafusion::common::{DFSchema, Result, ScalarValue, plan_datafusion_err};
 use datafusion::logical_expr::{
     CreateMemoryTable, CreateView, DdlStatement, DmlStatement, Expr, ExprSchemable, Extension,
     LogicalPlan, WriteOp,
@@ -152,11 +151,7 @@ fn produce_optimized_plan(
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
 
-    let analyzed_plan = schema_provider.analyzer.execute_and_check(
-        plan,
-        &ConfigOptions::default(),
-        |_plan, _rule| {},
-    )?;
+    let analyzed_plan = analyze_plan(plan, &schema_provider.analyzer)?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
         Arc::new(RewriteSetComparison::new()),
