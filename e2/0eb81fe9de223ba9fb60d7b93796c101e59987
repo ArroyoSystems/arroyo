@@ -1,0 +1,55 @@
+crates/arroyo-connectors/src/superbuffer/source/partition_reading.rs
+  s_48a530949c6043::t_a23c9e5374a572 1,10-11,20,28,41,46,54,57,63,142-143
+  s_48a530949c6043::t_47cf83add8a641 70-78,86
+  s_48a530949c6043::t_a5c6712f9afebf 170
+  s_48a530949c6043::t_19c45a7ebbdd2f 207,215,224,233,242,253-254,256-257,266,314-315,318,338,341,344-345
+  s_48a530949c6043::t_9bd71210c25a16 342-343
+  s_48a530949c6043::t_96f6ce7581065f 317,324-328
+  s_48a530949c6043::t_c6a96940e657e0 3,15
+crates/arroyo-connectors/src/superbuffer/source/config.rs
+  s_48a530949c6043::t_c6a96940e657e0 6-8,49-55
+  s_48a530949c6043::t_e46d93b03dc808 56-58
+crates/arroyo-connectors/src/superbuffer/source/mod.rs
+  s_48a530949c6043::t_cec565f8551e87 3-5
+  s_48a530949c6043::t_6085b309e06e7f 35,114-115,121
+  s_48a530949c6043::t_4c602e243e59b6 166,172-174
+  s_48a530949c6043::t_0eae7879b5db8f 26,30,116,164-165,280
+crates/arroyo-connectors/src/superbuffer/source/metrics.rs
+  s_48a530949c6043::t_6085b309e06e7f 121-128
+  s_48a530949c6043::t_76181541bb641d 14,59-61,70,73,84,86-87,106-107,112,115-120,140,147,149-150,156-157,168-173,176
+crates/arroyo-connectors/src/superbuffer/source/state.rs
+  s_48a530949c6043::t_6085b309e06e7f 115
+  s_48a530949c6043::t_0eae7879b5db8f 5-6,11,17-18,28-29,33-34,84-102,113-114,117-125
+crates/arroyo-connectors/src/superbuffer/source/progress.rs
+  s_48a530949c6043::t_bbee4a5dbbd53f 15,18,151,157,160,166,170-179,187,203-209,211,235-236,242-247,250
+  s_48a530949c6043::t_4c602e243e59b6 155,162-164,168
+  s_48a530949c6043::t_cec565f8551e87 199,270
+crates/arroyo-connectors/Cargo.toml
+  s_48a530949c6043::t_a23c9e5374a572 126,132
+crates/arroyo-connectors/src/superbuffer/source/test.rs
+  s_48a530949c6043::t_39a3bd740f783d 4-5,9-10,22-23
+  s_48a530949c6043::t_ac8309593b5f01 378-379,397,405,423,428,453,456-459,461,464,467,471
+  s_48a530949c6043::t_92b4a9b6f67169 220-222,227,230-231,233,258,261,284-285,287,296,299-300,310,314-315,320,338-340,344-349,351-352
+  s_48a530949c6043::t_9bd71210c25a16 253,468-470,472
+crates/arroyo-rpc/src/config_cf.rs
+  s_48a530949c6043::t_cec565f8551e87 187,189,191
+  s_48a530949c6043::t_c6a96940e657e0 182-186
+crates/arroyo-rpc/default.toml
+  s_48a530949c6043::t_c6a96940e657e0 136-137,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e20eb81fe9de223ba9fb60d7b93796c101e59987",
+  "prompts": {},
+  "sessions": {
+    "s_48a530949c6043": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f0b2d1fd7ffe6dOKNV9qSWqfuE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
