@@ -1,0 +1,22 @@
+crates/arroyo-storage/src/lib.rs
+  s_84dc9ecec35a07::t_dae20245e8eab7 487-496,598-607,675-684,716-725
+  s_84dc9ecec35a07::t_97ee37a14b4a6e 16,836
+  s_84dc9ecec35a07::t_3c17ff97100ca2 7,9,13-14,31-33,804,806,814-815,827,829-830,834-835,911
+  s_84dc9ecec35a07::t_decd4eacb9f84b 837-838
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1e709d966ba3441b4a9d32fedd807cb7a6bde075",
+  "prompts": {},
+  "sessions": {
+    "s_84dc9ecec35a07": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_eef62c07bffeMeAttgrPuB1QA3",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
