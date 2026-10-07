@@ -410,6 +410,7 @@ mod tests {
     use super::*;
     use arrow::array::{RecordBatch, StringArray, TimestampNanosecondArray};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::formats::JsonFormat;
     use arroyo_types::{CheckpointFilePathLayout, TaskInfo};
     use flate2::read::MultiGzDecoder;
@@ -598,7 +599,7 @@ mod tests {
     fn local_writer_schema() -> (Arc<Schema>, ArroyoSchemaRef) {
         let schema = Arc::new(Schema::new(vec![
             Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),

@@ -135,6 +135,7 @@ mod tests {
 
     use crate::ser::record_batch_to_vec;
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::formats::{AvroFormat, BadData, DecimalEncoding, Format, TimestampFormat};
     use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
@@ -231,7 +232,7 @@ mod tests {
         let arroyo_schema = {
             let mut fields = arrow_schema.fields.to_vec();
             fields.push(Arc::new(Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             )));
@@ -291,7 +292,7 @@ mod tests {
                 .unwrap()
         })
         .map(|mut f| {
-            f.remove("_timestamp");
+            f.remove(TIMESTAMP_FIELD);
             f
         })
         .collect()

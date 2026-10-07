@@ -18,6 +18,7 @@ use arroyo_rpc::formats::{Format, RawStringFormat};
 use arroyo_rpc::grpc::rpc::{CheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata};
 use arroyo_rpc::{
     CheckpointCompleted, ControlMessage, ControlResp, MetadataField, MetadataOrManifest,
+    TIMESTAMP_FIELD,
 };
 use arroyo_types::{
     ArrowMessage, ChainInfo, CheckpointBarrier, SignalMessage, TaskInfo, single_item_hash_map,
@@ -116,7 +117,7 @@ impl KafkaTopicTester {
         let out_schema = Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
-                    "_timestamp",
+                    TIMESTAMP_FIELD,
                     DataType::Timestamp(TimeUnit::Nanosecond, None),
                     false,
                 ),
@@ -434,7 +435,7 @@ async fn test_kafka_with_metadata_fields() {
         Some(Arc::new(ArroyoSchema::new_unkeyed(
             Arc::new(Schema::new(vec![
                 Field::new(
-                    "_timestamp",
+                    TIMESTAMP_FIELD,
                     DataType::Timestamp(TimeUnit::Nanosecond, None),
                     false,
                 ),

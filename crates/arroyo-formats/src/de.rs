@@ -11,12 +11,12 @@ use arrow_array::builder::{
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
+use arroyo_rpc::MetadataField;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{LOOKUP_KEY_INDEX_FIELD, to_nanos};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
@@ -445,7 +445,9 @@ impl ArrowDeserializer {
             let fields = schema
                 .fields()
                 .iter()
-                .filter(|f| !metadata_names.contains(f.name()) && f.name() != TIMESTAMP_FIELD)
+                .enumerate()
+                .filter(|(i, f)| !metadata_names.contains(f.name()) && Some(*i) != timestamp_idx)
+                .map(|(_, f)| f)
                 .cloned()
                 .collect::<Vec<_>>();
             Arc::new(Schema::new_with_metadata(fields, schema.metadata.clone()))
@@ -628,7 +630,7 @@ impl ArrowDeserializer {
 
         let mut source_errors = vec![];
 
-        if let Some((_, timestamp)) = &mut self.timestamp_builder {
+        if let Some((timestamp_index, timestamp)) = &mut self.timestamp_builder {
             let array = if let Some(error_mask) = &error_mask {
                 let errors = error_mask.false_count();
                 if errors > 0 {
@@ -643,7 +645,11 @@ impl ArrowDeserializer {
                 Arc::new(timestamp.finish())
             };
 
-            arrays.insert(TIMESTAMP_FIELD, array);
+            // use the schema's name, which may be the legacy one for older programs
+            arrays.insert(
+                self.final_schema.field(*timestamp_index).name().as_str(),
+                array,
+            );
         }
 
         let arrays = self
@@ -849,6 +855,7 @@ mod tests {
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
     use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::MetadataField;
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::errors::DataflowError;
     use arroyo_rpc::formats::{
@@ -970,7 +977,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -1092,7 +1099,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -1138,7 +1145,7 @@ mod tests {
             arrow_schema::Field::new("y", arrow_schema::DataType::Int32, true),
             arrow_schema::Field::new("z", arrow_schema::DataType::Utf8, true),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),

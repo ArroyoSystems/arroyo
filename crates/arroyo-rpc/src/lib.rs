@@ -21,7 +21,7 @@ use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::{ArrowError, DataType, Field, Fields};
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
 use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
@@ -50,6 +50,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
@@ -328,7 +329,30 @@ pub fn error_chain(e: anyhow::Error) -> String {
         .join(": ")
 }
 
-pub const TIMESTAMP_FIELD: &str = "_timestamp";
+/// Prefix reserved for columns that Arroyo adds to schemas internally
+pub const INTERNAL_FIELD_PREFIX: &str = "__arroyo";
+
+/// Whether `name` falls in the reserved internal namespace. Case-insensitive, as unquoted
+/// identifiers are lowercased during planning and could otherwise resolve to internal columns.
+pub fn is_internal_field_name(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with(INTERNAL_FIELD_PREFIX)
+}
+
+pub const TIMESTAMP_FIELD: &str = "__arroyo_internal_ts";
+/// Name of the timestamp field before it was renamed to [`TIMESTAMP_FIELD`]
+// TODO: remove LEGACY_TIMESTAMP_FIELD and the fallback in timestamp_field_index once all
+// pipelines compiled before the rename have been recompiled
+pub const LEGACY_TIMESTAMP_FIELD: &str = "_timestamp";
+
+/// Returns the index of the timestamp field, falling back to [`LEGACY_TIMESTAMP_FIELD`] for
+/// programs compiled before the rename
+pub fn timestamp_field_index(schema: &Schema) -> Option<usize> {
+    schema
+        .index_of(TIMESTAMP_FIELD)
+        .or_else(|_| schema.index_of(LEGACY_TIMESTAMP_FIELD))
+        .ok()
+}
+
 pub const UPDATING_META_FIELD: &str = "_updating_meta";
 
 pub fn updating_meta_fields() -> Fields {
@@ -584,7 +608,12 @@ impl DataSizeUnit {
         let captures = regex
             .captures(s)
             .ok_or_else(|| plan_datafusion_err!("invalid data size {}", s))?;
-        let quantity: u64 = captures.get(1).unwrap().as_str().parse().unwrap();
+        let quantity: u64 = captures
+            .get(1)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| plan_datafusion_err!("data size {} is too large", s))?;
         let unit = captures.get(2).unwrap().as_str();
         Ok((DataSizeUnit::from_str(unit)?, quantity))
     }
@@ -601,8 +630,23 @@ impl DataSizeUnit {
         }
     }
 
-    pub fn as_bytes(&self, value: u64) -> u64 {
-        value * self.multiplier()
+    pub fn as_bytes(&self, value: u64) -> DFResult<u64> {
+        value
+            .checked_mul(self.multiplier())
+            .ok_or_else(|| plan_datafusion_err!("data size {value}{self:?} is too large"))
+    }
+}
+
+/// Checks that a user-provided data size (in bytes) for the option `name` is within `bounds`.
+pub fn check_data_size(name: &str, bytes: u64, bounds: RangeInclusive<u64>) -> DFResult<()> {
+    if bounds.contains(&bytes) {
+        Ok(())
+    } else {
+        plan_err!(
+            "{name} must be between {} and {} bytes, got {bytes}",
+            bounds.start(),
+            bounds.end()
+        )
     }
 }
 
@@ -732,7 +776,7 @@ impl ConnectorOptions {
         self.pull_opt_str(name)?
             .map(|s| {
                 let (unit, q) = DataSizeUnit::parse(&s)?;
-                Ok(unit.as_bytes(q))
+                unit.as_bytes(q)
             })
             .transpose()
     }
@@ -1271,7 +1315,11 @@ pub struct StateContext {
 #[cfg(test)]
 mod tests {
     use crate::grpc::rpc::StartExecutionReq;
-    use crate::{DataSizeUnit, SerializableBytes, parse_expr};
+    use crate::{
+        DataSizeUnit, LEGACY_TIMESTAMP_FIELD, SerializableBytes, TIMESTAMP_FIELD,
+        is_internal_field_name, parse_expr, timestamp_field_index,
+    };
+    use arrow_schema::{DataType, Field, Schema};
     use bincode::{Decode, Encode, config};
     use bytes::Bytes;
     use prost::Message;
@@ -1324,6 +1372,10 @@ mod tests {
 
         assert!(DataSizeUnit::parse("-14G").is_err());
         assert!(DataSizeUnit::parse("G").is_err());
+        assert!(DataSizeUnit::parse("99999999999999999999").is_err());
+
+        assert_eq!(Some(1 << 47), DataSizeUnit::Terabytes.as_bytes(128).ok());
+        assert!(DataSizeUnit::Exabytes.as_bytes(20).is_err());
     }
 
     #[derive(Debug, Eq, PartialEq, Encode, Decode)]
@@ -1349,5 +1401,29 @@ mod tests {
             .0;
 
         assert_eq!(s, decoded);
+    }
+
+    #[test]
+    fn test_timestamp_field_index_prefers_current_name() {
+        let field = |name| Field::new(name, DataType::Int64, false);
+
+        let legacy = Schema::new(vec![field("a"), field(LEGACY_TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&legacy), Some(1));
+
+        // a user column named like the legacy field must not shadow the real one
+        let both = Schema::new(vec![field(LEGACY_TIMESTAMP_FIELD), field(TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&both), Some(1));
+
+        assert_eq!(timestamp_field_index(&Schema::new(vec![field("a")])), None);
+    }
+
+    #[test]
+    fn test_is_internal_field_name_ignores_case() {
+        assert!(is_internal_field_name(TIMESTAMP_FIELD));
+        assert!(is_internal_field_name("__ARROYO_INTERNAL_TS"));
+        assert!(is_internal_field_name("__Arroyo_custom"));
+        assert!(!is_internal_field_name("__arroy"));
+        assert!(!is_internal_field_name("_arroyo"));
+        assert!(!is_internal_field_name(LEGACY_TIMESTAMP_FIELD));
     }
 }
