@@ -1,0 +1,19 @@
+crates/arroyo-planner/src/lib_cf.rs
+  s_7ca0c63b3ae0e3::t_e3c5404fa9da91 134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a880fda33d4531aa5b381a9458a8737bc57db367",
+  "prompts": {},
+  "sessions": {
+    "s_7ca0c63b3ae0e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_eee682b32ffeyCUcApzerZBTAa",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Miki Mokrysz <miki@cloudflare.com>"
+    }
+  }
+}
