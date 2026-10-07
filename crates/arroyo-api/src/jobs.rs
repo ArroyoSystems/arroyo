@@ -239,7 +239,14 @@ pub(crate) async fn replace_job_without_state(
     // Deleting job_configs cascades to statuses and log messages on both backends, and to
     // checkpoints on PostgreSQL. SQLite checkpoints do not have the corresponding foreign key.
     api_queries::execute_delete_job_checkpoints(&tx, &old_job_id).await?;
-    api_queries::execute_delete_job_config(&tx, &old_job_id).await?;
+
+    // On PostgreSQL, concurrent replacements can both read and clone the old job; whichever
+    // deletes it second finds nothing left and must roll back, or the pipeline ends up with two jobs
+    if api_queries::execute_delete_job_config(&tx, &old_job_id).await? != 1 {
+        return Err(conflict(format!(
+            "job {old_job_id} was replaced concurrently; reload the pipeline and retry"
+        )));
+    }
 
     tx.commit().await?;
 
@@ -730,6 +737,23 @@ mod tests {
         )
     }
 
+    fn assert_only_old_job(connection: &rusqlite::Connection) {
+        for (table, column) in [
+            ("job_configs", "id"),
+            ("job_statuses", "id"),
+            ("checkpoints", "job_id"),
+        ] {
+            let ids: Vec<String> = connection
+                .prepare(&format!("SELECT {column} FROM {table}"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(ids, vec!["job_old"], "{table} should be unchanged");
+        }
+    }
+
     #[tokio::test]
     async fn replace_job_without_state_replaces_terminal_job_and_deletes_history() {
         let (database, connection) = sqlite_job("Stopped");
@@ -822,20 +846,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        for (table, column) in [
-            ("job_configs", "id"),
-            ("job_statuses", "id"),
-            ("checkpoints", "job_id"),
-        ] {
-            let ids: Vec<String> = connection
-                .prepare(&format!("SELECT {column} FROM {table}"))
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            assert_eq!(ids, vec!["job_old"], "{table} should be unchanged");
-        }
+        assert_only_old_job(&connection);
 
         // the database remains usable after the rollback
         connection
@@ -844,5 +855,26 @@ mod tests {
         replace_job_without_state(&database, "pl_1", &auth())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_conflicts_when_old_job_already_replaced() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        // simulate a concurrent replacement having already deleted the old job, which on
+        // PostgreSQL leaves this transaction's delete matching no rows
+        connection
+            .execute_batch(
+                "CREATE TRIGGER skip_job_delete BEFORE DELETE ON job_configs
+                 BEGIN SELECT RAISE(IGNORE); END;",
+            )
+            .unwrap();
+
+        let error = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::CONFLICT);
+        assert_only_old_job(&connection);
     }
 }
