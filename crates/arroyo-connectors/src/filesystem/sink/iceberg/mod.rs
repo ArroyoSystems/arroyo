@@ -96,46 +96,39 @@ fn extract_catalog_message(display: &str) -> Option<String> {
 fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
     debug!(error = ?error, "iceberg catalog error");
 
-    let (domain, msg) = match error.kind() {
-        ErrorKind::PreconditionFailed => (ErrorDomain::Internal, error.to_string()),
+    let (domain, retry, msg) = match error.kind() {
+        ErrorKind::PreconditionFailed => (
+            ErrorDomain::Internal,
+            RetryHint::WithBackoff,
+            error.to_string(),
+        ),
         ErrorKind::DataInvalid | ErrorKind::NamespaceNotFound | ErrorKind::TableNotFound => {
-            (ErrorDomain::User, error.to_string())
+            (ErrorDomain::User, RetryHint::NoRetry, error.to_string())
         }
         ErrorKind::Unexpected => {
             // For Unexpected errors from iceberg-catalog-rest, the HTTP status and response
             // body are embedded in the error's Display output as context fields. Extract the
             // status to determine the domain, and try to pull out a clean error message.
             let display = error.to_string();
-            let status = extract_catalog_status(&display);
+            let status = extract_catalog_status(&display).or_else(|| {
+                error
+                    .source()
+                    .and_then(|source| source.downcast_ref::<reqwest::Error>())
+                    .and_then(|source| source.status())
+                    .map(|status| status.as_u16())
+            });
 
-            let domain = match status {
+            let (domain, retry) = match status {
+                // We have seen spurious 409s from upstream intermediaries, so allow a few
+                // retries before failing with a user error.
+                Some(409) => (
+                    ErrorDomain::User,
+                    RetryHint::WithBackoffLimited(super::MAX_CONFLICT_RETRIES),
+                ),
                 // Rate limiting is a transient failure in the external service, not a user error.
-                Some(429) => ErrorDomain::External,
-                Some(400..=499) => ErrorDomain::User,
-                Some(_) => ErrorDomain::External,
-                // No status found — could be a transport error or something else
-                None => {
-                    if let Some(source) = error.source() {
-                        if let Some(err) = source.downcast_ref::<reqwest::Error>() {
-                            if err
-                                .status()
-                                .map(|c| {
-                                    c.is_client_error()
-                                        && c != reqwest::StatusCode::TOO_MANY_REQUESTS
-                                })
-                                .unwrap_or(false)
-                            {
-                                ErrorDomain::User
-                            } else {
-                                ErrorDomain::External
-                            }
-                        } else {
-                            ErrorDomain::External
-                        }
-                    } else {
-                        ErrorDomain::External
-                    }
-                }
+                Some(429) => (ErrorDomain::External, RetryHint::WithBackoff),
+                Some(400..=499) => (ErrorDomain::User, RetryHint::NoRetry),
+                _ => (ErrorDomain::External, RetryHint::WithBackoff),
             };
 
             let msg = if let Some(catalog_msg) = extract_catalog_message(&display) {
@@ -144,18 +137,18 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
                 format!("Iceberg catalog error: {error}")
             };
 
-            (domain, msg)
+            (domain, retry, msg)
         }
-        _ => (ErrorDomain::External, error.to_string()),
+        _ => (
+            ErrorDomain::External,
+            RetryHint::WithBackoff,
+            error.to_string(),
+        ),
     };
 
     DataflowError::ConnectorError {
         domain,
-        retry: if matches!(domain, ErrorDomain::User) {
-            RetryHint::NoRetry
-        } else {
-            RetryHint::WithBackoff
-        },
+        retry,
         error: msg,
         source: error.source().map(|e| anyhow!("{}", e)),
     }
