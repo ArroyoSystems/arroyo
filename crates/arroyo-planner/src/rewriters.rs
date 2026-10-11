@@ -15,7 +15,10 @@ use crate::{
 };
 
 use arrow_schema::DataType;
-use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD, api_types::connections::ConnectionType};
+use arroyo_rpc::{
+    INTERNAL_FIELD_PREFIX, TIMESTAMP_FIELD, UPDATING_META_FIELD,
+    api_types::connections::ConnectionType, is_internal_field_name,
+};
 use datafusion::logical_expr::UserDefinedLogicalNode;
 
 use crate::extension::AsyncUDFExtension;
@@ -71,7 +74,7 @@ impl SourceRewriter<'_> {
             None => Expr::BinaryExpr(BinaryExpr {
                 left: Box::new(Expr::Column(Column {
                     relation: None,
-                    name: "_timestamp".to_string(),
+                    name: TIMESTAMP_FIELD.to_string(),
                     spans: Default::default(),
                 })),
                 op: logical_expr::Operator::Minus,
@@ -134,8 +137,8 @@ impl SourceRewriter<'_> {
                     DataFusionError::Plan(format!("Event time field {event_time_field} not found"))
                 })?;
 
-            let event_time_field =
-                event_time_field.alias_qualified(Some(qualifier.clone()), "_timestamp".to_string());
+            let event_time_field = event_time_field
+                .alias_qualified(Some(qualifier.clone()), TIMESTAMP_FIELD.to_string());
             expressions.push(event_time_field);
         } else {
             expressions.push(Expr::Column(Column::new(
@@ -692,6 +695,31 @@ impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
     }
 }
 
+/// Rejects user-written aliases that collide with Arroyo's internal columns. Must run before
+/// the plan is rewritten, as the rewriters add aliases using those names.
+pub struct ReservedFieldNameChecker {}
+
+impl TreeNodeVisitor<'_> for ReservedFieldNameChecker {
+    type Node = LogicalPlan;
+
+    fn f_down(&mut self, node: &Self::Node) -> DFResult<TreeNodeRecursion> {
+        for expr in node.expressions() {
+            expr.apply(|e| {
+                if let Expr::Alias(alias) = e
+                    && is_internal_field_name(&alias.name)
+                {
+                    return plan_err!(
+                        "column name '{}' is invalid; names starting with '{INTERNAL_FIELD_PREFIX}' are reserved",
+                        alias.name
+                    );
+                }
+                Ok(TreeNodeRecursion::Continue)
+            })?;
+        }
+        Ok(TreeNodeRecursion::Continue)
+    }
+}
+
 pub struct TimeWindowNullCheckRemover {}
 
 impl TreeNodeRewriter for TimeWindowNullCheckRemover {
@@ -721,7 +749,7 @@ impl TreeNodeRewriter for RowTimeRewriter {
         {
             let transformed = Expr::Column(Column {
                 relation: None,
-                name: "_timestamp".to_string(),
+                name: TIMESTAMP_FIELD.to_string(),
                 spans: Default::default(),
             })
             .alias("row_time()");

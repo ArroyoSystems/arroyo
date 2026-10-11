@@ -267,12 +267,6 @@ pub async fn create_connection_table(
 ) -> Result<Json<ConnectionTable>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    // let transaction = client.transaction().await.map_err(log_and_map)?;
-    // transaction
-    //     .execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", &[])
-    //     .await
-    //     .map_err(log_and_map)?;
-
     let (connector, connection_id, profile, schema) =
         get_and_validate_connector(&req, &auth_data, &state.database).await?;
 
@@ -282,10 +276,11 @@ pub async fn create_connection_table(
 
     let pub_id = generate_id(IdTypes::ConnectionTable);
 
-    let client = state.database.client().await?;
+    let mut client = state.database.client().await?;
+    let tx = client.transaction().await?;
 
     api_queries::execute_create_connection_table(
-        &client,
+        &tx,
         &pub_id,
         &auth_data.organization_id,
         &auth_data.user_id,
@@ -298,7 +293,7 @@ pub async fn create_connection_table(
     .map_err(|err| map_insert_err("connection_table", err))?;
 
     let created = api_queries::execute_create_connection_table_version(
-        &client,
+        &tx,
         &1,
         &req.config,
         &schema,
@@ -314,7 +309,7 @@ pub async fn create_connection_table(
         ));
     }
 
-    // transaction.commit().await.map_err(log_and_map)?;
+    tx.commit().await?;
 
     let table =
         api_queries::fetch_get_connection_table(&client, &auth_data.organization_id, &pub_id)

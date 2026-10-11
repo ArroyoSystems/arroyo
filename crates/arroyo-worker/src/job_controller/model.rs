@@ -251,7 +251,7 @@ impl RunningJobModel {
             }
             RunningMessage::WorkerHeartbeat { worker_id, time } => {
                 if let Some(worker) = self.workers.get_mut(&worker_id) {
-                    worker.last_heartbeat = time;
+                    worker.last_heartbeat = worker.last_heartbeat.max(time);
                 } else {
                     warn!(
                         message = "Received heartbeat for unknown worker",

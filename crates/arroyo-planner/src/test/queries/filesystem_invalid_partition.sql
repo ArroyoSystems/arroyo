@@ -1,4 +1,4 @@
---fail=Failed to create table events_sink caused by Error during planning: Arrow error: Schema error: Unable to get field named "not_a_real_field". Valid fields: ["id", "timestamp", "ip", "user_id", "platform", "app_version", "type", "properties", "_timestamp"]
+--fail=Failed to create table events_sink caused by Error during planning: Arrow error: Schema error: Unable to get field named "not_a_real_field". Valid fields: ["id", "timestamp", "ip", "user_id", "platform", "app_version", "type", "properties", "__arroyo_internal_ts"]
 create table events (
     id TEXT PRIMARY KEY,
     timestamp TIMESTAMP NOT NULL,

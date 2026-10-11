@@ -55,7 +55,9 @@ use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 
 use crate::functions::{is_json_union, serialize_outgoing_json};
-use crate::rewriters::{SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter};
+use crate::rewriters::{
+    ReservedFieldNameChecker, SourceMetadataVisitor, TimeWindowUdfChecker, UnnestRewriter,
+};
 
 use crate::extension::key_calculation::{KeyCalculationExtension, KeysOrExprs};
 use crate::extension::projection::ProjectionExtension;
@@ -693,6 +695,8 @@ pub fn rewrite_plan(
     plan: LogicalPlan,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
+    plan.visit_with_subqueries(&mut ReservedFieldNameChecker {})?;
+
     let rewritten_plan = plan
         .rewrite_with_subqueries(&mut ArroyoRewriter { schema_provider })?
         .data

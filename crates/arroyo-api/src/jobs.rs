@@ -40,7 +40,7 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{GetCheckpointDetailsReq, GetJobCheckpointsReq};
 use arroyo_rpc::identity::InjectWorkerId;
-use cornucopia_async::DatabaseSource;
+use cornucopia_async::{Database, DatabaseSource};
 use http::StatusCode;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
@@ -115,18 +115,21 @@ fn operator_checkpoint_groups(
     operators
 }
 
+/// Creates a job and its status for a pipeline
+///
+/// This should be called within the same transaction that created the pipeline.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_job(
     pipeline_name: &str,
     pipeline_id: i64,
     preview: bool,
     auth: &AuthData,
-    db: &DatabaseSource,
+    db: &Database<'_>,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
     pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
-    let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
+    let running_jobs = api_queries::fetch_get_jobs(db, &auth.organization_id)
         .await?
         .iter()
         .filter(|j| {
@@ -154,7 +157,7 @@ pub(crate) async fn create_job(
 
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
-        &db.client().await?,
+        db,
         &job_id,
         &auth.organization_id,
         &pipeline_name,
@@ -172,7 +175,7 @@ pub(crate) async fn create_job(
     .await?;
 
     api_queries::execute_create_job_status(
-        &db.client().await?,
+        db,
         &generate_id(IdTypes::JobStatus),
         &job_id,
         &auth.organization_id,
@@ -213,33 +216,39 @@ pub(crate) async fn replace_job_without_state(
 ) -> Result<String, ErrorResp> {
     let new_job_id = generate_id(IdTypes::JobConfig);
     let new_status_id = generate_id(IdTypes::JobStatus);
-    let db = db.client().await?;
+    let mut client = db.client().await?;
+    let tx = client.transaction().await?;
 
-    let jobs = api_queries::fetch_get_pipeline_jobs(&db, &auth.organization_id, &pipeline_pub_id)
+    let jobs = api_queries::fetch_get_pipeline_jobs(&tx, &auth.organization_id, &pipeline_pub_id)
         .await?
         .into_iter()
         .map(|job| (job.id, job.state.unwrap_or_else(|| "Created".to_string())))
         .collect();
     let old_job_id = replaceable_job(jobs)?;
 
-    // TODO: Note that this is not transactional, as we don't have the ability to do transactions in
-    //   a database-agnostic way across postgres and sqlite. This is not ideal, but the risk is pretty
-    //   small. If it fails midway, the user can retry the operation.
-
     let inserted =
-        api_queries::execute_clone_job_without_state(&db, &new_job_id, &auth.user_id, &old_job_id)
+        api_queries::execute_clone_job_without_state(&tx, &new_job_id, &auth.user_id, &old_job_id)
             .await?;
     if inserted != 1 {
         return Err(internal_server_error("failed to clone job configuration"));
     }
 
-    api_queries::execute_create_job_status(&db, &new_status_id, &new_job_id, &auth.organization_id)
+    api_queries::execute_create_job_status(&tx, &new_status_id, &new_job_id, &auth.organization_id)
         .await?;
 
     // Deleting job_configs cascades to statuses and log messages on both backends, and to
     // checkpoints on PostgreSQL. SQLite checkpoints do not have the corresponding foreign key.
-    api_queries::execute_delete_job_checkpoints(&db, &old_job_id).await?;
-    api_queries::execute_delete_job_config(&db, &old_job_id).await?;
+    api_queries::execute_delete_job_checkpoints(&tx, &old_job_id).await?;
+
+    // On PostgreSQL, concurrent replacements can both read and clone the old job; whichever
+    // deletes it second finds nothing left and must roll back, or the pipeline ends up with two jobs
+    if api_queries::execute_delete_job_config(&tx, &old_job_id).await? != 1 {
+        return Err(conflict(format!(
+            "job {old_job_id} was replaced concurrently; reload the pipeline and retry"
+        )));
+    }
+
+    tx.commit().await?;
 
     Ok(new_job_id)
 }
@@ -628,7 +637,10 @@ pub async fn get_jobs(
 mod tests {
     use super::*;
     use crate::OrgMetadata;
-    use std::sync::{Arc, Mutex};
+    use cornucopia_async::SqliteSource;
+    use rusqlite::OpenFlags;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn auth() -> AuthData {
         AuthData {
@@ -639,8 +651,17 @@ mod tests {
         }
     }
 
-    fn sqlite_job(state: &str) -> DatabaseSource {
-        let connection = rusqlite::Connection::open_in_memory().unwrap();
+    /// Returns the database along with a second connection to it for inspecting committed state
+    fn sqlite_job(state: &str) -> (DatabaseSource, rusqlite::Connection) {
+        static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let uri = format!(
+            "file:jobs_test_{}?mode=memory&cache=shared",
+            DB_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_URI;
+        let connection = rusqlite::Connection::open_with_flags(&uri, flags).unwrap();
         connection
             .execute_batch(
                 "PRAGMA foreign_keys = ON;
@@ -709,22 +730,39 @@ mod tests {
             )
             .unwrap();
 
-        DatabaseSource::Sqlite(Arc::new(Mutex::new(connection)))
+        let observer = rusqlite::Connection::open_with_flags(&uri, flags).unwrap();
+        (
+            DatabaseSource::Sqlite(Arc::new(SqliteSource::new(connection))),
+            observer,
+        )
+    }
+
+    fn assert_only_old_job(connection: &rusqlite::Connection) {
+        for (table, column) in [
+            ("job_configs", "id"),
+            ("job_statuses", "id"),
+            ("checkpoints", "job_id"),
+        ] {
+            let ids: Vec<String> = connection
+                .prepare(&format!("SELECT {column} FROM {table}"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(ids, vec!["job_old"], "{table} should be unchanged");
+        }
     }
 
     #[tokio::test]
     async fn replace_job_without_state_replaces_terminal_job_and_deletes_history() {
-        let database = sqlite_job("Stopped");
+        let (database, connection) = sqlite_job("Stopped");
 
         let new_job_id = replace_job_without_state(&database, "pl_1", &auth())
             .await
             .unwrap();
 
         assert_ne!(new_job_id, "job_old");
-        let DatabaseSource::Sqlite(connection) = &database else {
-            unreachable!()
-        };
-        let connection = connection.lock().unwrap();
 
         let job: (String, String, i64, String, String, String, String, String) = connection
             .query_row(
@@ -779,20 +817,64 @@ mod tests {
 
     #[tokio::test]
     async fn replace_job_without_state_rejects_non_terminal_job() {
-        let database = sqlite_job("Running");
+        let (database, connection) = sqlite_job("Running");
 
         let error = replace_job_without_state(&database, "pl_1", &auth())
             .await
             .unwrap_err();
 
         assert_eq!(error.status_code, StatusCode::CONFLICT);
-        let DatabaseSource::Sqlite(connection) = &database else {
-            unreachable!()
-        };
-        let connection = connection.lock().unwrap();
         let job_id: String = connection
             .query_row("SELECT id FROM job_configs", [], |row| row.get(0))
             .unwrap();
         assert_eq!(job_id, "job_old");
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_rolls_back_on_failure() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        // fail the final statement, after the new job has been created and checkpoints deleted
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_job_delete BEFORE DELETE ON job_configs
+                 BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+            )
+            .unwrap();
+
+        replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_only_old_job(&connection);
+
+        // the database remains usable after the rollback
+        connection
+            .execute_batch("DROP TRIGGER fail_job_delete")
+            .unwrap();
+        replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_conflicts_when_old_job_already_replaced() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        // simulate a concurrent replacement having already deleted the old job, which on
+        // PostgreSQL leaves this transaction's delete matching no rows
+        connection
+            .execute_batch(
+                "CREATE TRIGGER skip_job_delete BEFORE DELETE ON job_configs
+                 BEGIN SELECT RAISE(IGNORE); END;",
+            )
+            .unwrap();
+
+        let error = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::CONFLICT);
+        assert_only_old_job(&connection);
     }
 }

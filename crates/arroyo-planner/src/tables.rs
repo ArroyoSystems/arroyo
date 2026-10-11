@@ -10,13 +10,13 @@ use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
-use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
 use arroyo_rpc::config::PipelineCompilerConfigs;
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::{ConnectorOptions, INTERNAL_FIELD_PREFIX, is_internal_field_name};
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{Column, DataFusionError, plan_err};
@@ -673,6 +673,11 @@ impl Table {
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
+                if is_internal_field_name(&name) {
+                    return plan_err!(
+                        "column name '{name}' in table '{table_name}' is invalid; names starting with '{INTERNAL_FIELD_PREFIX}' are reserved"
+                    );
+                }
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options

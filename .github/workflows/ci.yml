@@ -7,18 +7,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Run prettier
-        run: |
-          cd webui
-          pnpm check
+        working-directory: webui
+        run: pnpm check
 
   build-rust:
     runs-on: ubuntu-22.04-32
@@ -26,8 +25,8 @@ jobs:
       DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
+        uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: "temurin"
           java-version: "17"
@@ -36,7 +35,7 @@ jobs:
         with:
           components: clippy, rustfmt
           toolchain: 1.95
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/bin/
@@ -47,17 +46,17 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Check Formatting
         run: cargo fmt -- --check
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         name: Setup Python
         with:
           python-version: "3.12"
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install OpenAPI Generator
         run: |
           pnpm install @openapitools/openapi-generator-cli -g
@@ -97,9 +96,8 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
       - name: Build console
-        run: |
-          cd webui
-          pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Build
         run: cargo build --all-features
       - name: Run Clippy
@@ -165,15 +163,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Build console
-        run: |
-          cd webui
-          pnpm build
+        working-directory: webui
+        run: pnpm build

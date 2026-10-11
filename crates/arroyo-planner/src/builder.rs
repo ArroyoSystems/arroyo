@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use arrow::datatypes::IntervalMonthDayNanoType;
 use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
 use async_trait::async_trait;
@@ -221,7 +222,7 @@ impl<'a> Planner<'a> {
             ),
             Expr::Column(datafusion::common::Column {
                 relation: None,
-                name: "_timestamp".into(),
+                name: TIMESTAMP_FIELD.into(),
                 spans: Spans::new(),
             }),
         ]);

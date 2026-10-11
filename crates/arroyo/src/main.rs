@@ -9,7 +9,7 @@ use arroyo_server_common::start_admin_server;
 use arroyo_worker::{WorkerServer, utils};
 use clap::{Args, Parser, Subcommand};
 use clio::Input;
-use cornucopia_async::DatabaseSource;
+use cornucopia_async::{DatabaseSource, SqliteSource};
 use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use std::env::temp_dir;
 use std::path::PathBuf;
@@ -311,7 +311,7 @@ async fn db_source() -> DatabaseSource {
     match config().database.r#type {
         DatabaseType::Postgres => DatabaseSource::Postgres(pg_pool().await),
         DatabaseType::Sqlite => {
-            DatabaseSource::Sqlite(Arc::new(std::sync::Mutex::new(sqlite_connection())))
+            DatabaseSource::Sqlite(Arc::new(SqliteSource::new(sqlite_connection())))
         }
     }
 }

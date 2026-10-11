@@ -46,8 +46,8 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, log_and_map,
-    not_found, paginate_results, required_field, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, conflict,
+    log_and_map, not_found, paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
@@ -413,8 +413,11 @@ pub(crate) async fn create_pipeline_int(
     let tags_json = serde_json::to_value(tags)
         .map_err(|e| log_and_map(anyhow!("pipeline tags serialization failed: {e}")))?;
 
+    let mut client = db.client().await?;
+    let tx = client.transaction().await?;
+
     api_queries::execute_create_pipeline(
-        &db.client().await?,
+        &tx,
         &pub_id,
         &auth.organization_id,
         &auth.user_id,
@@ -429,13 +432,12 @@ pub(crate) async fn create_pipeline_int(
     )
     .await?;
 
-    let pipeline_id =
-        api_queries::fetch_get_pipeline_id(&db.client().await?, &pub_id, &auth.organization_id)
-            .await
-            .map_err(log_and_map)?
-            .first()
-            .unwrap()
-            .id;
+    let pipeline_id = api_queries::fetch_get_pipeline_id(&tx, &pub_id, &auth.organization_id)
+        .await
+        .map_err(log_and_map)?
+        .first()
+        .unwrap()
+        .id;
 
     if !is_preview {
         for connection in compiled.connection_ids {
@@ -444,14 +446,20 @@ pub(crate) async fn create_pipeline_int(
                     "compiled pipeline references connection {connection} without a resolved version"
                 ))
             })?;
-            api_queries::execute_add_pipeline_connection_table(
-                &db.client().await?,
+            let inserted = api_queries::execute_add_pipeline_connection_table(
+                &tx,
                 &generate_id(IdTypes::ConnectionTablePipeline),
                 &pipeline_id,
                 connection_version,
                 &connection,
             )
             .await?;
+            if inserted != 1 {
+                return Err(conflict(
+                    "a connection table used by this pipeline was deleted while the pipeline was \
+                    being created; retry the request",
+                ));
+            }
         }
     }
 
@@ -460,12 +468,14 @@ pub(crate) async fn create_pipeline_int(
         pipeline_id,
         is_preview,
         &auth,
-        db,
+        &tx,
         env_vars,
         scheduler_config,
         pipeline_config,
     )
     .await?;
+
+    tx.commit().await?;
 
     log_event!(
         "job_created",

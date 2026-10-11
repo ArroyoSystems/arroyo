@@ -13,7 +13,7 @@ use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::formats::{Format, JsonFormat};
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ControlMessage, ControlResp};
+use arroyo_rpc::{ControlMessage, ControlResp, TIMESTAMP_FIELD};
 use arroyo_types::{ArrowMessage, ChainInfo, TaskInfo, to_nanos};
 use rand::random;
 use rumqttc::mqttbytes::QoS;
@@ -151,7 +151,7 @@ impl MqttTopicTester {
             Some(Arc::new(ArroyoSchema::new_unkeyed(
                 Arc::new(Schema::new(vec![
                     Field::new(
-                        "_timestamp",
+                        TIMESTAMP_FIELD,
                         DataType::Timestamp(TimeUnit::Nanosecond, None),
                         false,
                     ),

@@ -1,5 +1,5 @@
 use crate::grpc::api;
-use crate::{Converter, TIMESTAMP_FIELD};
+use crate::{Converter, TIMESTAMP_FIELD, timestamp_field_index};
 use anyhow::Result;
 use arrow::compute::kernels::numeric::div;
 use arrow::compute::{filter_record_batch, take};
@@ -133,14 +133,11 @@ impl ArroyoSchema {
     }
 
     pub fn from_schema_unkeyed(schema: Arc<Schema>) -> DFResult<Self> {
-        let timestamp_index = schema
-            .column_with_name(TIMESTAMP_FIELD)
-            .ok_or_else(|| {
-                DataFusionError::Plan(format!(
-                    "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
-                ))
-            })?
-            .0;
+        let timestamp_index = timestamp_field_index(&schema).ok_or_else(|| {
+            DataFusionError::Plan(format!(
+                "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
+            ))
+        })?;
 
         Ok(Self {
             schema,
@@ -151,14 +148,11 @@ impl ArroyoSchema {
     }
 
     pub fn from_schema_keys(schema: Arc<Schema>, key_indices: Vec<usize>) -> DFResult<Self> {
-        let timestamp_index = schema
-            .column_with_name(TIMESTAMP_FIELD)
-            .ok_or_else(|| {
-                DataFusionError::Plan(format!(
-                    "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
-                ))
-            })?
-            .0;
+        let timestamp_index = timestamp_field_index(&schema).ok_or_else(|| {
+            DataFusionError::Plan(format!(
+                "no {TIMESTAMP_FIELD} field in schema, schema is {schema:?}"
+            ))
+        })?;
 
         Ok(Self {
             schema,
@@ -380,7 +374,9 @@ impl ArroyoSchema {
                 .map(|(_, field)| field.as_ref().clone())
                 .collect::<Vec<_>>(),
         );
-        let timestamp_index = unkeyed_schema.index_of(TIMESTAMP_FIELD)?;
+        let timestamp_index = timestamp_field_index(&unkeyed_schema).ok_or_else(|| {
+            ArrowError::SchemaError(format!("no {TIMESTAMP_FIELD} field in schema"))
+        })?;
         Ok(Self {
             schema: Arc::new(unkeyed_schema),
             timestamp_index,
@@ -395,7 +391,9 @@ impl ArroyoSchema {
             self.schema.metadata.clone(),
         ));
 
-        let timestamp_index = schema.index_of(TIMESTAMP_FIELD)?;
+        let timestamp_index = timestamp_field_index(&schema).ok_or_else(|| {
+            ArrowError::SchemaError(format!("no {TIMESTAMP_FIELD} field in schema"))
+        })?;
         let max_index = *[&self.key_indices, &self.routing_key_indices]
             .iter()
             .map(|indices| indices.as_ref().and_then(|k| k.iter().max()))

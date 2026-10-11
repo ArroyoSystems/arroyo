@@ -426,6 +426,13 @@ impl WorkerJobController {
             }
         }
 
+        // Reset `last_heartbeat` before worker timeout monitoring starts, so that slow worker
+        // initialisation does not result in immediate timeout detection
+        let now = Instant::now();
+        for worker in self.model.workers.values_mut() {
+            worker.last_heartbeat = now;
+        }
+
         let mut interval = interval(Duration::from_millis(200));
         loop {
             tokio::select! {

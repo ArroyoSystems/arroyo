@@ -37,7 +37,7 @@ use arroyo_rpc::grpc::api::{
 use arroyo_rpc::{
     TIMESTAMP_FIELD, UPDATING_META_FIELD,
     grpc::api::{DebeziumDecodeNode, arroyo_exec_node::Node},
-    updating_meta_field, updating_meta_fields,
+    timestamp_field_index, updating_meta_field, updating_meta_fields,
 };
 use datafusion::catalog::memory::MemorySourceConfig;
 use datafusion::datasource::memory::DataSourceExec;
@@ -725,6 +725,14 @@ pub struct DebeziumUnrollingExec {
     primary_keys: Vec<usize>,
 }
 
+/// Index of the timestamp field, accepting the legacy name used by programs compiled before
+/// the rename
+fn timestamp_index(schema: &Schema) -> Result<usize> {
+    timestamp_field_index(schema).ok_or_else(|| {
+        DataFusionError::Plan(format!("no {TIMESTAMP_FIELD} field in schema {schema:?}"))
+    })
+}
+
 impl DebeziumUnrollingExec {
     pub fn try_new(input: Arc<dyn ExecutionPlan>, primary_keys: Vec<usize>) -> Result<Self> {
         let input_schema = input.schema();
@@ -732,7 +740,7 @@ impl DebeziumUnrollingExec {
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
         let op_index = input_schema.index_of("op")?;
-        let _timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+        timestamp_index(&input_schema)?;
         let before_type = input_schema.field(before_index).data_type();
         let after_type = input_schema.field(after_index).data_type();
         if before_type != after_type {
@@ -859,7 +867,7 @@ impl DebeziumUnrollingStream {
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
         let op_index = input_schema.index_of("op")?;
-        let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+        let timestamp_index = timestamp_index(&input_schema)?;
 
         Ok(Self {
             input,
@@ -974,7 +982,7 @@ pub struct ToDebeziumExec {
 impl ToDebeziumExec {
     pub fn try_new(input: Arc<dyn ExecutionPlan>) -> Result<Self> {
         let input_schema = input.schema();
-        let timestamp_index = input_schema.index_of(TIMESTAMP_FIELD)?;
+        let timestamp_index = timestamp_index(&input_schema)?;
         let struct_fields: Vec<_> = input_schema
             .fields()
             .into_iter()
@@ -1065,7 +1073,7 @@ impl ExecutionPlan for ToDebeziumExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         let updating_meta_index = self.input.schema().index_of(UPDATING_META_FIELD).ok();
-        let timestamp_index = self.input.schema().index_of(TIMESTAMP_FIELD)?;
+        let timestamp_index = timestamp_index(&self.input.schema())?;
         let struct_projection = (0..self.input.schema().fields().len())
             .filter(|index| {
                 updating_meta_index
