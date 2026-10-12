@@ -98,6 +98,18 @@ enum RetryHint {
   WITH_BACKOFF = 1;
 }
 
+message RetryPolicy {
+  message NoRetry {}
+  message Backoff {
+    optional uint32 max_retries = 1;
+  }
+
+  oneof policy {
+    NoRetry no_retry = 1;
+    Backoff with_backoff = 2;
+  }
+}
+
 message TaskError {
   string operator_id = 1;
   uint32 task_id = 2;
@@ -106,6 +118,9 @@ message TaskError {
   ErrorDomain error_domain = 5;
   RetryHint retry_hint = 6;
   string details = 7;
+  // Replaces retry_hint, which is retained for older peers and will be
+  // deprecated once the compatibility rollout is complete.
+  RetryPolicy retry_policy = 8;
 }
 
 message TaskFailedReq {
@@ -296,6 +311,9 @@ message JobFailure {
   ErrorDomain error_domain = 5;
   RetryHint retry_hint = 6;
   string details = 7;
+  // Replaces retry_hint, which is retained for older peers and will be
+  // deprecated once the compatibility rollout is complete.
+  RetryPolicy retry_policy = 8;
 }
 
 message JobStatus {
