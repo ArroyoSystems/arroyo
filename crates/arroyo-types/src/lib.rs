@@ -19,14 +19,6 @@ pub const PIPELINE_ID_ENV: &str = "PIPELINE_ID";
 // telemetry configuration
 pub const TELEMETRY_KEY: &str = "phc_ghJo7Aa9QOo4inoWFYZP7o2aKszllEUyH77QeFgznUe";
 
-// These seeds were randomly generated; changing them will break existing state
-pub const HASH_SEEDS: [u64; 4] = [
-    5093852630788334730,
-    1843948808084437226,
-    8049205638242432149,
-    17942305062735447798,
-];
-
 #[derive(Debug, Hash, Eq, PartialEq, Copy, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct WorkerId(pub u64);
