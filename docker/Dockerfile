@@ -28,7 +28,7 @@ RUN mkdir -p /etc/apt/keyrings && \
 COPY docker/install_deps.sh /install_deps.sh
 RUN sh /install_deps.sh
 
-COPY webui/pnpm-lock.yaml webui/pnpm-lock.yaml
+COPY webui/pnpm-lock.yaml webui/pnpm-workspace.yaml webui/
 RUN pnpm --dir webui fetch
 
 COPY Cargo.toml Cargo.toml
