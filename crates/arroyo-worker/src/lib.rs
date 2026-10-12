@@ -8,6 +8,7 @@ use crate::job_controller::{
 use crate::network_manager::NetworkManager;
 use anyhow::{Context, Result, anyhow};
 
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp,
@@ -578,7 +579,8 @@ impl WorkerState {
                                     subtask_idx,
                                     error: maybe_truncate(error.message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::from(error.domain) as i32,
-                                    retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
+                                    retry_hint: error.retry_hint.legacy_hint() as i32,
+                                    retry_policy: Some(error.retry_hint.into()),
                                     operator_id: error.operator_id.unwrap_or_default(),
                                     details: maybe_truncate(
                                         error.details.unwrap_or_default(),
@@ -605,6 +607,7 @@ impl WorkerState {
                                     error: maybe_truncate(message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::External as i32,
                                     retry_hint: rpc::RetryHint::NoRetry as i32,
+                                    retry_policy: Some(RetryHint::NoRetry.into()),
                                     details: maybe_truncate(details, MAX_TASK_ERROR_FIELD_BYTES),
                                 }),
                             };
@@ -1331,7 +1334,7 @@ impl JobControllerGrpc for LeaderServer {
             task_id: err.task_id,
             subtask_idx: err.subtask_idx,
             error_domain: err.error_domain().into(),
-            retry_hint: err.retry_hint().into(),
+            retry_hint: RetryHint::from_rpc(err.retry_policy.as_ref(), err.retry_hint()),
             operator_id: err.operator_id,
             reason: err.error,
             details: err.details,
