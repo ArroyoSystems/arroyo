@@ -76,6 +76,7 @@ impl BatchData {
 #[derive(Debug)]
 enum IncrementalState {
     Sliding {
+        expr: Arc<AggregateFunctionExpr>,
         accumulator: Box<dyn Accumulator>,
     },
     Batch {
@@ -290,11 +291,23 @@ impl IncrementalAggregatingFunc {
                 generation_builder.append_value(generation);
 
                 for (state, agg) in accumulators.iter_mut().zip(self.aggregates.iter()) {
-                    let IncrementalState::Sliding { accumulator } = state else {
+                    let IncrementalState::Sliding { expr, accumulator } = state else {
                         continue;
                     };
 
-                    let state = accumulator.state().unwrap();
+                    let state = accumulator.state().unwrap_or_else(|_| {
+                        // if it doesn't support immutable state, we'll use the mutable one and
+                        // copy and restore the state -- this should in practice never happen,
+                        // because the accumulators that don't support immutable state also don't
+                        // support retract, but we have this fallback in case someone implements
+                        // a new aggregator that doesn't uphold that relationship
+                        let state = accumulator.state().unwrap();
+                        *accumulator = expr.create_sliding_accumulator().unwrap();
+                        let states: Vec<_> =
+                            state.iter().map(|s| s.to_array()).try_collect().unwrap();
+                        accumulator.merge_batch(&states).unwrap();
+                        state
+                    });
 
                     assert_eq!(
                         agg.state_cols.len(),
@@ -751,6 +764,7 @@ impl IncrementalAggregatingFunc {
             .iter()
             .map(|agg| match agg.accumulator_type {
                 AccumulatorType::Sliding => IncrementalState::Sliding {
+                    expr: agg.func.clone(),
                     accumulator: agg.func.create_sliding_accumulator().unwrap(),
                 },
                 AccumulatorType::Batch => IncrementalState::Batch {
