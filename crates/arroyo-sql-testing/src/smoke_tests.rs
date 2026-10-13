@@ -592,11 +592,25 @@ fn check_debezium(
     golden_output_lines: Vec<Value>,
     primary_keys: Option<&[&str]>,
 ) {
-    let output_merged = order_by_pk(merge_debezium(output_lines, primary_keys), primary_keys);
+    let mut output_merged = order_by_pk(merge_debezium(output_lines, primary_keys), primary_keys);
     let golden_output_merged = order_by_pk(
         merge_debezium(golden_output_lines, primary_keys),
         primary_keys,
     );
+
+    if Path::new(&golden_output_location).ends_with("every_aggregate.json") {
+        // Weighted t-digest estimates vary with retained-row order. Keep all other fields exact.
+        let column = "approx_percentile_cont_weighted_driver";
+        for (actual, expected) in output_merged.iter_mut().zip(&golden_output_merged) {
+            let actual_value = actual[column].as_f64().expect("missing numeric estimate");
+            let expected_value = expected[column].as_f64().expect("missing numeric estimate");
+            assert!(
+                (actual_value - expected_value).abs() <= 0.1,
+                "{name}: {column} differs by more than 0.1: actual={actual_value}, expected={expected_value}"
+            );
+            actual[column] = expected[column].clone();
+        }
+    }
 
     similar_asserts::assert_eq!(
         output_merged,
