@@ -1,0 +1,2 @@
+{"before":null,"after":{"group_id":"one_remaining","total_count":49,"distinct_count":2,"distinct_label_count":2,"distinct_sum":16},"op":"c"}
+{"before":null,"after":{"group_id":"all_removed","total_count":48,"distinct_count":1,"distinct_label_count":1,"distinct_sum":9},"op":"c"}

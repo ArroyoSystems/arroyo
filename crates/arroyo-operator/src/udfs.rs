@@ -103,7 +103,7 @@ impl Accumulator for ArroyoUdaf {
         std::mem::size_of_val(self) + values
     }
 
-    fn state(&mut self) -> Result<Vec<ScalarValue>> {
+    fn state(&self) -> Result<Vec<ScalarValue>> {
         let states: Result<Vec<_>> = self
             .args
             .iter()
