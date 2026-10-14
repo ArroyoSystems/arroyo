@@ -168,7 +168,7 @@ impl IncrementalState {
                 )?;
                 let mut acc = expr.create_accumulator()?;
                 acc.update_batch(&input)?;
-                acc.evaluate_mut()
+                acc.evaluate()
             }
         }
     }
