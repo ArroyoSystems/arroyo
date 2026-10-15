@@ -14,13 +14,14 @@ use rdkafka::util::Timeout;
 
 use rdkafka::ClientConfig;
 
-use arrow::array::{Array, AsArray, RecordBatch};
+use arrow::array::{Array, RecordBatch};
 use arrow::datatypes::{DataType, TimeUnit};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{ArrowOperator, AsDisplayable, DisplayableOperator};
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_types::CheckpointBarrier;
+use arroyo_types::strings::StringArrayRef;
 use async_trait::async_trait;
 use prost::Message;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
@@ -106,7 +107,7 @@ impl KafkaSinkFunc {
     fn set_key_col(&mut self, schema: &ArroyoSchema) {
         if let Some(f) = &self.key_field {
             if let Ok(f) = schema.schema.field_with_name(f) {
-                if matches!(f.data_type(), DataType::Utf8) {
+                if matches!(f.data_type(), DataType::Utf8 | DataType::Utf8View) {
                     self.key_col = Some(schema.schema.index_of(f.name()).unwrap());
                 } else {
                     warn!(
@@ -297,7 +298,9 @@ impl ArrowOperator for KafkaSinkFunc {
             .as_any()
             .downcast_ref::<arrow::array::TimestampNanosecondArray>();
 
-        let keys = self.key_col.map(|i| batch.column(i).as_string::<i32>());
+        let keys = self.key_col.map(|i| {
+            StringArrayRef::new(batch.column(i).as_ref()).expect("Kafka key must be a string")
+        });
 
         for (i, v) in values.enumerate() {
             // kafka timestamp as unix millis

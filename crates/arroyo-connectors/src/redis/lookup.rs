@@ -1,12 +1,12 @@
 use crate::redis::RedisClient;
 use crate::redis::sink::GeneralConnection;
-use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
-use arrow::datatypes::DataType;
+use arrow::array::{ArrayRef, RecordBatch};
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};
 use arroyo_operator::connector::LookupConnector;
 use arroyo_rpc::MetadataField;
 use arroyo_rpc::errors::DataflowError;
 use arroyo_types::LOOKUP_KEY_INDEX_FIELD;
+use arroyo_types::strings::StringArrayRef;
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
 use redis::{Value, cmd};
@@ -31,19 +31,15 @@ impl LookupConnector for RedisLookup {
         }
 
         assert_eq!(keys.len(), 1, "redis lookup can only have a single key");
-        assert_eq!(
-            *keys[0].data_type(),
-            DataType::Utf8,
-            "redis lookup key must be a string"
-        );
 
         let connection = self.connection.as_mut().unwrap();
 
         let mut mget = cmd("mget");
 
-        let keys = keys[0].as_string::<i32>();
+        let keys =
+            StringArrayRef::new(keys[0].as_ref()).expect("redis lookup key must be a string");
 
-        for k in keys {
+        for k in keys.iter() {
             mget.arg(k.unwrap());
         }
 
@@ -53,13 +49,13 @@ impl LookupConnector for RedisLookup {
 
         assert_eq!(
             vs.len(),
-            keys.len(),
+            keys.iter().len(),
             "Redis sent back the wrong number of values"
         );
 
         let mut additional = HashMap::new();
 
-        for (idx, (v, k)) in vs.iter().zip(keys).enumerate() {
+        for (idx, (v, k)) in vs.iter().zip(keys.iter()).enumerate() {
             additional.insert(
                 LOOKUP_KEY_INDEX_FIELD,
                 FieldValueType::UInt64(Some(idx as u64)),

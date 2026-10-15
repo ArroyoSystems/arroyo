@@ -637,7 +637,9 @@ fn read_message(schema: SchemaRef, data: Vec<u8>) -> anyhow::Result<RecordBatch>
 
 #[cfg(test)]
 mod test {
-    use arrow_array::{ArrayRef, RecordBatch, TimestampNanosecondArray, UInt64Array};
+    use arrow_array::{
+        ArrayRef, RecordBatch, StringViewArray, TimestampNanosecondArray, UInt64Array,
+    };
     use arrow_schema::{Field, Schema, TimeUnit};
     use std::sync::Arc;
     use std::time::SystemTime;
@@ -689,6 +691,7 @@ mod test {
 
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", arrow_schema::DataType::UInt64, false),
+            Field::new("text", arrow_schema::DataType::Utf8View, true),
             Field::new(
                 "time",
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
@@ -698,6 +701,18 @@ mod test {
 
         let columns: Vec<ArrayRef> = vec![
             Arc::new(UInt64Array::from((0..10).collect::<Vec<_>>())),
+            Arc::new(StringViewArray::from(vec![
+                Some("short"),
+                None,
+                Some("a string longer than twelve bytes"),
+                Some("é水🙂"),
+                Some(""),
+                Some("six"),
+                Some("seven"),
+                Some("eight"),
+                Some("nine"),
+                Some("ten"),
+            ])),
             Arc::new(TimestampNanosecondArray::from(vec![
                 to_nanos(time) as i64;
                 10

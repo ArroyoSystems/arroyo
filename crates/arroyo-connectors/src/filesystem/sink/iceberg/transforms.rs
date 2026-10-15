@@ -3,7 +3,8 @@
 
 use crate::filesystem::config::Transform;
 use arrow::array::{
-    Array, ArrayRef, BinaryArray, PrimitiveArray, StringArray, as_primitive_array, downcast_array,
+    Array, ArrayRef, AsArray, BinaryArray, PrimitiveArray, StringArray, StringViewArray,
+    as_primitive_array, downcast_array,
 };
 use arrow::buffer::ScalarBuffer;
 use arrow::compute::{DatePart, binary, cast, date_part, unary};
@@ -11,6 +12,7 @@ use arrow::datatypes::{
     DataType, Date32Type, Int16Type, Int32Type, Int64Type, TimeUnit, TimestampMicrosecondType,
 };
 use arrow::error::ArrowError;
+use arroyo_types::strings::StringArrayRef;
 use datafusion::common::{ScalarValue, exec_datafusion_err, exec_err};
 use datafusion::error::Result as DFResult;
 use datafusion::execution::FunctionRegistry;
@@ -143,6 +145,14 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 |value| value.map(|value| truncate_str(value, width as usize)),
             ))))
         }
+        (DataType::Utf8View, Transform::Truncate { arg0: width }) => {
+            Ok(Arc::new(StringViewArray::from_iter(
+                array
+                    .as_string_view()
+                    .iter()
+                    .map(|value| value.map(|value| truncate_str(value, width as usize))),
+            )))
+        }
         (DataType::Binary, Transform::Truncate { arg0: width }) => {
             let local_array = downcast_array::<BinaryArray>(&array);
             Ok(Arc::new(BinaryArray::from_iter(local_array.iter().map(
@@ -197,9 +207,9 @@ pub fn transform_arrow(array: ArrayRef, transform: Transform) -> Result<ArrayRef
                 },
             )))
         }
-        (DataType::Utf8, Transform::Bucket { arg0: n }) => {
+        (DataType::Utf8 | DataType::Utf8View, Transform::Bucket { arg0: n }) => {
             let nulls = array.nulls();
-            let local_array: StringArray = downcast_array::<StringArray>(&array);
+            let local_array = StringArrayRef::new(array.as_ref())?;
 
             Ok(Arc::new(PrimitiveArray::<Int32Type>::new(
                 ScalarBuffer::from_iter(local_array.iter().map(|a| {
@@ -286,11 +296,14 @@ fn truncate_return_type(arg_types: &[DataType]) -> DFResult<DataType> {
         return Ok(DataType::Null);
     };
     match lhs {
-        DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Utf8 | DataType::Binary => {
-            Ok(lhs.clone())
-        }
+        DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::Utf8
+        | DataType::Utf8View
+        | DataType::Binary => Ok(lhs.clone()),
         other => Err(exec_datafusion_err!(
-            "ice_truncate expects Int16/Int32/Int64/Utf8/Binary as first arg, got {other:?}"
+            "ice_truncate expects Int16/Int32/Int64/Utf8/Utf8View/Binary as first arg, got {other:?}"
         )),
     }
 }
@@ -365,6 +378,7 @@ make_transform_udf!(
             TypeSignature::Exact(vec![DataType::Int32, DataType::Int32]),
             TypeSignature::Exact(vec![DataType::Int64, DataType::Int32]),
             TypeSignature::Exact(vec![DataType::Utf8, DataType::Int32]),
+            TypeSignature::Exact(vec![DataType::Utf8View, DataType::Int32]),
             TypeSignature::Exact(vec![DataType::Binary, DataType::Int32]),
         ],),
         Volatility::Immutable
@@ -440,9 +454,30 @@ fn datepart_to_months(year: i32, month: i32) -> i32 {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
     use arrow::array::{ArrayRef, Date32Array, TimestampMicrosecondArray};
+
+    #[test]
+    fn utf8view_transforms_match_utf8() {
+        let values = vec![
+            Some("iceberg"),
+            Some("é水🙂longer than twelve bytes"),
+            None,
+            Some(""),
+        ];
+        let utf8: ArrayRef = Arc::new(StringArray::from(values.clone()));
+        let views: ArrayRef = Arc::new(StringViewArray::from(values));
+        for (transform, expected_type) in [
+            (Transform::Truncate { arg0: 2 }, DataType::Utf8View),
+            (Transform::Bucket { arg0: 100 }, DataType::Int32),
+        ] {
+            let expected = transform_arrow(utf8.clone(), transform).unwrap();
+            let actual = transform_arrow(views.clone(), transform).unwrap();
+            assert_eq!(actual.data_type(), &expected_type);
+            let actual = cast(&actual, expected.data_type()).unwrap();
+            assert_eq!(actual.as_ref(), expected.as_ref());
+        }
+    }
 
     fn create_date32_array() -> ArrayRef {
         Arc::new(Date32Array::from(vec![

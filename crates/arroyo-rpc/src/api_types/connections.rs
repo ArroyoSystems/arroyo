@@ -391,8 +391,10 @@ impl TryFrom<Field> for SourceField {
                     unit: TimestampUnit::Nanosecond,
                 })
             }
-            (DataType::Utf8, None) => FieldType::String,
-            (DataType::Utf8, Some(ArroyoExtensionType::JSON)) => FieldType::Json,
+            (DataType::Utf8 | DataType::Utf8View, None) => FieldType::String,
+            (DataType::Utf8 | DataType::Utf8View, Some(ArroyoExtensionType::JSON)) => {
+                FieldType::Json
+            }
             (DataType::Struct(fields), None) => {
                 let fields: Result<_, String> = fields
                     .into_iter()
@@ -795,6 +797,24 @@ mod tests {
         assert_eq!(arrow.data_type(), &DataType::Utf8);
         let back: SourceField = arrow.try_into().unwrap();
         assert_eq!(back.field_type, FieldType::Json);
+    }
+
+    #[test]
+    fn utf8view_fields_keep_public_string_types() {
+        for (extension, expected) in [
+            (None, FieldType::String),
+            (Some(ArroyoExtensionType::JSON), FieldType::Json),
+        ] {
+            let arrow = ArroyoExtensionType::add_metadata(
+                extension,
+                ArrowField::new("payload", DataType::Utf8View, true),
+            );
+            let field: SourceField = arrow.try_into().unwrap();
+            assert_eq!(field.field_type, expected);
+            assert!(!field.required);
+            let source: ArrowField = field.into();
+            assert_eq!(source.data_type(), &DataType::Utf8);
+        }
     }
 
     #[test]

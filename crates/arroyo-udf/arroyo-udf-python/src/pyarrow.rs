@@ -118,6 +118,7 @@ impl Converter {
             // },
             DataType::Utf8 => get_pyobject!(StringArray, py, array, i),
             DataType::LargeUtf8 => get_pyobject!(LargeStringArray, py, array, i),
+            DataType::Utf8View => get_pyobject!(StringViewArray, py, array, i),
             DataType::Binary => get_pyobject!(BinaryArray, py, array, i),
             DataType::LargeBinary => get_pyobject!(LargeBinaryArray, py, array, i),
             DataType::List(_) => {
@@ -173,6 +174,17 @@ impl Converter {
             //     _ => build_array!(StringBuilder, &str, py, values),
             // },
             DataType::LargeUtf8 => build_array!(LargeStringBuilder, &str, py, values),
+            DataType::Utf8View => {
+                let mut builder = StringViewBuilder::with_capacity(values.len());
+                for value in values {
+                    if value.is_none(py) {
+                        builder.append_null();
+                    } else {
+                        builder.append_value(value.extract::<&str>(py)?);
+                    }
+                }
+                Ok(Arc::new(builder.finish()))
+            }
             DataType::Binary => build_array!(BinaryBuilder, &[u8], py, values),
             DataType::LargeBinary => build_array!(LargeBinaryBuilder, &[u8], py, values),
             // list
@@ -252,5 +264,28 @@ impl Converter {
                 "Unimplemented datatype {other}"
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8view_python_roundtrip() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let array = StringViewArray::from(vec![
+                Some("short"),
+                Some("é水🙂longer than twelve bytes"),
+                None,
+                Some(""),
+            ]);
+            let values: Vec<_> = (0..array.len())
+                .map(|index| Converter::get_pyobject(py, &array, index).unwrap())
+                .collect();
+            let restored = Converter::build_array(&DataType::Utf8View, py, &values).unwrap();
+            assert_eq!(restored.to_data(), array.to_data());
+        });
     }
 }
