@@ -695,8 +695,9 @@ impl TreeNodeVisitor<'_> for TimeWindowUdfChecker {
     }
 }
 
-/// Rejects user-written aliases that collide with Arroyo's internal columns. Must run before
-/// the plan is rewritten, as the rewriters add aliases using those names.
+/// Rejects user-written aliases that collide with Arroyo's internal columns. Must run on
+/// the original query plan before optimization or rewriting. INSERT sources must be checked
+/// separately, before DataFusion adds target-column aliases using internal field names.
 pub struct ReservedFieldNameChecker {}
 
 impl TreeNodeVisitor<'_> for ReservedFieldNameChecker {

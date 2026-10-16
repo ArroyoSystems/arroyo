@@ -1,4 +1,5 @@
 use crate::extension::remote_table::RemoteTableExtension;
+use crate::rewriters::ReservedFieldNameChecker;
 use crate::types::convert_data_type;
 use crate::{
     ArroyoSchemaProvider, DFField,
@@ -146,6 +147,13 @@ fn produce_optimized_plan(
     );
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+
+    // INSERT sources are validated separately by infer_sink_schema, before DataFusion adds
+    // target-column aliases that can include Arroyo's internal timestamp. Check other plans
+    // before optimization can remove user-written aliases.
+    if !matches!(statement, Statement::Insert(_)) {
+        plan.visit_with_subqueries(&mut ReservedFieldNameChecker {})?;
+    }
 
     let analyzed_plan = schema_provider.analyzer.execute_and_check(
         plan,
