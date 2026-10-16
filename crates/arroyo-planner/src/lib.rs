@@ -53,6 +53,7 @@ use crate::plan::ArroyoRewriter;
 use arroyo_datastream::logical::{DylibUdfConfig, ProgramConfig, PythonUdfConfig};
 use arroyo_rpc::api_types::connections::ConnectionProfile;
 use datafusion::common::DataFusionError;
+use datafusion::config::ConfigOptions;
 use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
@@ -74,6 +75,7 @@ use arroyo_udf_host::ParsedUdfFile;
 use arroyo_udf_host::parse::{UdfDef, inner_type};
 use arroyo_udf_python::PythonUDF;
 use datafusion::execution::{FunctionRegistry, SessionStateBuilder, SessionStateDefaults};
+use datafusion::functions::datetime::now::NowFunc;
 use datafusion::functions_aggregate::variance::var_samp_udaf;
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
@@ -137,6 +139,15 @@ pub fn register_functions(registry: &mut dyn FunctionRegistry) {
     for p in SessionStateDefaults::default_scalar_functions() {
         registry.register_udf(p).unwrap();
     }
+
+    // Set the UTC return type (and JSON's trailing Z) for now()
+    let mut config = ConfigOptions::default();
+    config.execution.time_zone = Some("+00:00".into());
+    registry
+        .register_udf(Arc::new(ScalarUDF::new_from_impl(
+            NowFunc::new_with_config(&config),
+        )))
+        .unwrap();
 
     for p in SessionStateDefaults::default_aggregate_functions() {
         registry.register_udaf(p).unwrap();

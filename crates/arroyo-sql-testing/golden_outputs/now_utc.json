@@ -1,0 +1,3 @@
+{"counter":0,"event_ts":"2023-10-09T17:13:20","source_type":"Timestamp(ms)","now_type":"Timestamp(ns, \"+00:00\")","coalesced_type":"Timestamp(ms, \"+00:00\")","coalesced":"2023-10-09T17:13:20Z","value_matches":true}
+{"counter":1,"event_ts":null,"source_type":"Timestamp(ms)","now_type":"Timestamp(ns, \"+00:00\")","coalesced_type":"Timestamp(ms, \"+00:00\")","coalesced":null,"value_matches":true}
+{"counter":99,"event_ts":"2023-10-09T17:13:39.800","source_type":"Timestamp(ms)","now_type":"Timestamp(ns, \"+00:00\")","coalesced_type":"Timestamp(ms, \"+00:00\")","coalesced":"2023-10-09T17:13:39.800Z","value_matches":true}
