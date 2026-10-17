@@ -48,6 +48,9 @@ data:
         name-prefix: "{{ include "arroyo.fullname" . }}"
         task-slots: {{ .Values.worker.slots }}
         labels: {{- include "arroyo.labels" . | nindent 10 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 10 }}
+        {{- end }}
         annotations:
           {{- if .Values.prometheus.setAnnotations }}
           prometheus.io/scrape: "true"
