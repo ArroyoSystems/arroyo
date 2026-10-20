@@ -341,21 +341,25 @@ impl WorkerJobController {
 
             try_join_all(futures).await?;
 
-            let mut subtasks_to_commit = HashSet::new();
-
-            for (op, data) in &commit_req.committing_data {
-                for t in data.committing_data.values() {
-                    for subtask in t.commit_data_by_subtask.keys() {
-                        subtasks_to_commit.insert((op.clone(), *subtask));
-                    }
-                }
-            }
+            let mut subtasks_to_commit =
+                replay_commit_acks(&commit_req, &self.model.program.tasks_per_operator())?;
 
             // now wait for ack's
-            info!(job_id =? self.worker_context.job_id, "waiting for subtasks to commit...");
+            info!(job_id =? self.worker_context.job_id, subtasks = subtasks_to_commit.len(),
+                "waiting for subtasks to commit...");
             // no timeout here, we rely on the controller to kill us if we take too long to initialize
+            let mut progress_log = interval(Duration::from_secs(30));
+            // the first tick completes immediately
+            progress_log.tick().await;
             while !subtasks_to_commit.is_empty() {
                 tokio::select! {
+                    _ = progress_log.tick() => {
+                        let mut outstanding: Vec<_> = subtasks_to_commit.iter().collect();
+                        outstanding.sort();
+                        warn!(job_id = *self.worker_context.job_id, generation =? self.worker_context.generation,
+                            remaining = outstanding.len(), outstanding =? outstanding,
+                            "still waiting for subtasks to finish replaying the initial commit");
+                    }
                     msg = self.rx.recv() => {
                         match msg {
                             Some(RunningMessage::TaskCheckpointEvent(event))
@@ -924,4 +928,148 @@ fn manifest_into_commit_req(manifest: CheckpointManifest) -> anyhow::Result<Comm
         epoch: manifest.epoch,
         committing_data,
     })
+}
+
+/// Computes the `(operator_id, subtask_index)` acks the leader must wait for when replaying the
+/// commit of a recovery checkpoint.
+///
+/// The commit data in `commit_req` is keyed by the subtask indices of the run that *took* the
+/// checkpoint, but the acks come from the subtasks of the *current* run: every running subtask of a
+/// committing operator receives the commit and acknowledges it with its own subtask index. The two
+/// can differ when the job is restarted at a different parallelism after a checkpoint whose commit
+/// never completed (e.g., a stop-with-checkpoint or rescale whose final commit failed). Waiting for
+/// the checkpoint's indices would hang forever when the parallelism was reduced, so we wait for
+/// every subtask of the current run instead.
+///
+/// Operators whose commit data is empty for every subtask are skipped; they have nothing to replay
+/// (and may not ack a replayed commit at all).
+fn replay_commit_acks(
+    commit_req: &CommitReq,
+    tasks_per_operator: &HashMap<String, usize>,
+) -> anyhow::Result<HashSet<(String, u32)>> {
+    let mut acks = HashSet::new();
+
+    for (operator_id, data) in &commit_req.committing_data {
+        let has_commit_data = data
+            .committing_data
+            .values()
+            .any(|t| !t.commit_data_by_subtask.is_empty());
+
+        if !has_commit_data {
+            continue;
+        }
+
+        let parallelism = *tasks_per_operator.get(operator_id).ok_or_else(|| {
+            anyhow!(
+                "recovery checkpoint has commit data for operator {operator_id}, which is not \
+                part of the current program"
+            )
+        })?;
+
+        for subtask_index in 0..parallelism {
+            acks.insert((operator_id.clone(), subtask_index as u32));
+        }
+    }
+
+    Ok(acks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn commit_req(operators: &[(&str, &[(&str, &[u32])])]) -> CommitReq {
+        CommitReq {
+            epoch: 5,
+            committing_data: operators
+                .iter()
+                .map(|(op, tables)| {
+                    (
+                        op.to_string(),
+                        OperatorCommitData {
+                            committing_data: tables
+                                .iter()
+                                .map(|(table, subtasks)| {
+                                    (
+                                        table.to_string(),
+                                        TableCommitData {
+                                            commit_data_by_subtask: subtasks
+                                                .iter()
+                                                .map(|i| (*i, vec![*i as u8]))
+                                                .collect(),
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn parallelism(ops: &[(&str, usize)]) -> HashMap<String, usize> {
+        ops.iter().map(|(op, p)| (op.to_string(), *p)).collect()
+    }
+
+    fn expected(ops: &[(&str, u32)]) -> HashSet<(String, u32)> {
+        ops.iter()
+            .flat_map(|(op, p)| (0..*p).map(|i| (op.to_string(), i)))
+            .collect()
+    }
+
+    // checkpoint taken at parallelism 4 for both a sink and a source
+    const CHECKPOINT: &[(&str, &[(&str, &[u32])])] = &[
+        ("sink_1", &[("p", &[0, 1, 2, 3])]),
+        ("source_0", &[("offsets", &[0, 1, 2, 3])]),
+    ];
+
+    #[test]
+    fn replay_at_same_parallelism_waits_for_all_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 4), ("sink_1", 4), ("map_2", 4)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 4), ("source_0", 4)]));
+    }
+
+    #[test]
+    fn replay_at_lower_parallelism_only_waits_for_running_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 2), ("sink_1", 2)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 2), ("source_0", 2)]));
+    }
+
+    #[test]
+    fn replay_at_higher_parallelism_waits_for_new_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 8), ("sink_1", 8)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 8), ("source_0", 8)]));
+    }
+
+    #[test]
+    fn operators_with_empty_commit_data_are_not_waited_on() {
+        // e.g., the exactly-once kafka sink has a two-phase-commit table but never writes commit
+        // data, and does not ack replayed commits
+        let acks = replay_commit_acks(
+            &commit_req(&[
+                ("sink_1", &[("p", &[0, 1])]),
+                ("kafka_sink_3", &[("i", &[])]),
+            ]),
+            &parallelism(&[("sink_1", 2), ("kafka_sink_3", 2)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 2)]));
+    }
 }
