@@ -1,3 +1,4 @@
+use crate::DataSizeUnit;
 use anyhow::{anyhow, bail};
 use arc_swap::ArcSwapOption;
 use figment::providers::{Env, Format, Json, Toml, Yaml};
@@ -193,6 +194,9 @@ fn load_config(paths: &[PathBuf]) -> Figment {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
+    /// gRPC transport configuration
+    pub grpc: GrpcConfig,
+
     /// API service configuration
     pub api: ApiConfig,
 
@@ -333,6 +337,43 @@ pub enum ApiAuthMode {
         #[serde(rename = "api-key")]
         api_key: Sensitive<String>,
     },
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct GrpcConfig {
+    /// Maximum received gRPC message size, specified as a string such as "16mb".
+    /// Each process enforces its own limit on requests and responses it receives.
+    #[serde(
+        deserialize_with = "deserialize_grpc_max_message_size",
+        serialize_with = "serialize_grpc_max_message_size"
+    )]
+    pub max_message_size: usize,
+}
+
+fn deserialize_grpc_max_message_size<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    let (unit, quantity) = DataSizeUnit::parse(&value).map_err(de::Error::custom)?;
+    let bytes = unit.as_bytes(quantity).map_err(de::Error::custom)?;
+
+    if bytes == 0 || bytes > u64::from(u32::MAX) {
+        return Err(de::Error::custom(format!(
+            "gRPC max-message-size must be between 1 and {} bytes",
+            u32::MAX
+        )));
+    }
+
+    usize::try_from(bytes).map_err(de::Error::custom)
+}
+
+fn serialize_grpc_max_message_size<S>(bytes: &usize, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.collect_str(bytes)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

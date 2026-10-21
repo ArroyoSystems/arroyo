@@ -133,7 +133,8 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
                 service_unavailable("compiler-service")
             })?;
 
-    Ok(CompilerGrpcClient::new(channel))
+    Ok(CompilerGrpcClient::new(channel)
+        .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()))
 }
 
 pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
