@@ -188,10 +188,8 @@ impl TransitionTo<Scheduling> for Compiling {}
 impl TransitionTo<LeaderRunning> for Scheduling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            if ctx.status.start_time.is_none() || ctx.status.finish_time.is_some() {
-                ctx.status.start_time = Some(OffsetDateTime::now_utc());
-                ctx.status.finish_time = None;
-            }
+            ctx.status.start_time = Some(OffsetDateTime::now_utc());
+            ctx.status.finish_time = None;
         })
     }
 }
