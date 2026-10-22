@@ -484,6 +484,15 @@ impl ControllerServer {
                 );
                 update_job_state_metrics(&state_counts);
 
+                {
+                    // Missing jobs may still be shutting down, so retain them until their state
+                    // machine finishes.
+                    let current_job_ids: HashSet<_> = res.iter().map(|p| p.id.as_str()).collect();
+                    jobs.lock()
+                        .await
+                        .retain(|id, sm| current_job_ids.contains(id.as_str()) || !sm.done());
+                }
+
                 for p in res {
                     let id = Arc::new(p.id);
                     let config = JobConfig {
@@ -537,9 +546,15 @@ impl ControllerServer {
                         state_context,
                     };
 
-                    if let Some(sm) = jobs.get_mut(&*id) {
+                    let final_state = job_in_final_state(&config, &status);
+
+                    // Final jobs remain in the database, so remove their completed state machines
+                    // explicitly.
+                    if final_state && jobs.get(&*id).is_some_and(StateMachine::done) {
+                        jobs.remove(&*id);
+                    } else if let Some(sm) = jobs.get_mut(&*id) {
                         sm.update(config, status, &guard).await;
-                    } else if !job_in_final_state(&config, &status) {
+                    } else if !final_state {
                         jobs.insert(
                             (*id).clone(),
                             StateMachine::new(
