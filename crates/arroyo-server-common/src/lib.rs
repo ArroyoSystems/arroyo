@@ -175,6 +175,12 @@ pub fn init_logging_with_filter(
         }
     }));
 
+    let max_message_size = arroyo_rpc::grpc_max_message_size();
+    tracing::info!(
+        max_message_size,
+        "gRPC max message size: {max_message_size} bytes"
+    );
+
     guard
 }
 

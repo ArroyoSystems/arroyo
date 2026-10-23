@@ -293,7 +293,10 @@ pub async fn start_server(guard: ShutdownGuard) -> MachineId {
             .await
             .expect("could not create gRPC server with TLS")
             .max_frame_size(Some((1 << 24) - 1)) // 16MB
-            .add_service(NodeGrpcServer::new(server))
+            .add_service(
+                NodeGrpcServer::new(server)
+                    .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()),
+            )
             .serve(bind_addr)
     } else {
         info!(
@@ -303,7 +306,10 @@ pub async fn start_server(guard: ShutdownGuard) -> MachineId {
 
         arroyo_server_common::grpc_server()
             .max_frame_size(Some((1 << 24) - 1)) // 16MB
-            .add_service(NodeGrpcServer::new(server))
+            .add_service(
+                NodeGrpcServer::new(server)
+                    .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()),
+            )
             .serve(bind_addr)
     };
 

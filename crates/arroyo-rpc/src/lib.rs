@@ -1088,12 +1088,17 @@ pub async fn connect_controller(our_name: &str, our_tls: &Option<TlsConfig>) -> 
     connect_grpc(our_name, endpoint, our_tls, &config().controller.tls, None).await
 }
 
+/// Maximum message size accepted by this process's gRPC servers and clients.
+pub fn grpc_max_message_size() -> usize {
+    config().grpc.max_message_size
+}
+
 pub async fn controller_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
 ) -> Result<ControllerGrpcClient<Channel>> {
     let channel = connect_controller(our_name, our_tls).await?;
-    Ok(ControllerGrpcClient::new(channel))
+    Ok(ControllerGrpcClient::new(channel).max_decoding_message_size(grpc_max_message_size()))
 }
 
 pub async fn job_controller_client(
@@ -1109,9 +1114,10 @@ pub async fn job_controller_client(
     };
 
     let channel = connect_grpc(our_name, addr, our_tls, their_tls, None).await?;
-    Ok(job_controller_grpc_client::JobControllerGrpcClient::new(
-        channel,
-    ))
+    Ok(
+        job_controller_grpc_client::JobControllerGrpcClient::new(channel)
+            .max_decoding_message_size(grpc_max_message_size()),
+    )
 }
 
 pub async fn job_status_client(
@@ -1134,7 +1140,8 @@ pub async fn job_status_client(
         job_status_grpc_client::JobStatusGrpcClient::with_interceptor(
             channel,
             InjectWorkerId::new(worker_id),
-        ),
+        )
+        .max_decoding_message_size(grpc_max_message_size()),
     )
 }
 
