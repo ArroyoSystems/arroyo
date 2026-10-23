@@ -3,8 +3,8 @@ use arrow::row::{RowConverter, SortField};
 use arrow_array::builder::{FixedSizeBinaryBuilder, ListBuilder, StringBuilder};
 use arrow_array::cast::{AsArray, as_string_array};
 use arrow_array::types::{Float64Type, Int64Type};
-use arrow_array::{Array, ArrayRef, StringArray, UnionArray};
-use arrow_schema::{DataType, Field, UnionFields, UnionMode};
+use arrow_array::{Array, ArrayRef, StringArray, TimestampNanosecondArray, UnionArray};
+use arrow_schema::{DataType, Field, TimeUnit, UnionFields, UnionMode};
 use datafusion::common::{DataFusionError, ScalarValue};
 use datafusion::common::{Result, TableReference};
 use datafusion::execution::FunctionRegistry;
@@ -19,6 +19,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::{Debug, Write};
 use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const SERIALIZE_JSON_UNION: &str = "serialize_json_union";
 
@@ -51,6 +52,7 @@ macro_rules! make_udf_function {
 }
 
 make_udf_function!(MultiHashFunction, MULTI_HASH, multi_hash);
+make_udf_function!(WallclockFunction, WALLCLOCK, wallclock);
 
 pub fn register_all(registry: &mut dyn FunctionRegistry) {
     registry
@@ -94,6 +96,7 @@ pub fn register_all(registry: &mut dyn FunctionRegistry) {
         .unwrap();
 
     registry.register_udf(multi_hash()).unwrap();
+    registry.register_udf(wallclock()).unwrap();
 }
 
 fn parse_path(name: &str, path: &ScalarValue) -> Result<Arc<JsonPath>> {
@@ -201,6 +204,78 @@ impl ScalarUDFImpl for MultiHashFunction {
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
         self.invoke(&args.args)
+    }
+}
+
+/// Returns the current wallclock (system) time, i.e. the actual time at which the row is
+/// being processed.
+///
+/// This is distinct from `now()`, which is resolved once at query-plan time and therefore
+/// returns the same value for the lifetime of the query, and from `row_time()`, which returns
+/// the event time of the row. `wallclock()` is volatile: it is evaluated fresh for every row,
+/// so it can be used to compute processing time / ingestion latency (e.g.
+/// `wallclock() - row_time()`).
+#[derive(Debug)]
+pub struct WallclockFunction {
+    signature: Signature,
+}
+
+impl WallclockFunction {
+    fn invoke(&self, args: &ScalarFunctionArgs) -> Result<ColumnarValue> {
+        if !args.args.is_empty() {
+            return Err(DataFusionError::Internal(format!(
+                "{} does not accept arguments",
+                self.name()
+            )));
+        }
+
+        let values: Vec<i64> = (0..args.number_rows)
+            .map(|_| current_time_nanos())
+            .collect();
+
+        Ok(ColumnarValue::Array(Arc::new(
+            TimestampNanosecondArray::from(values).with_timezone("+00:00"),
+        )))
+    }
+}
+
+fn current_time_nanos() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock is set before the Unix epoch")
+        .as_nanos() as i64
+}
+
+impl Default for WallclockFunction {
+    fn default() -> Self {
+        Self {
+            signature: Signature::nullary(Volatility::Volatile),
+        }
+    }
+}
+
+impl ScalarUDFImpl for WallclockFunction {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn name(&self) -> &str {
+        "wallclock"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Timestamp(
+            TimeUnit::Nanosecond,
+            Some("+00:00".into()),
+        ))
+    }
+
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> Result<ColumnarValue> {
+        self.invoke(&args)
     }
 }
 
@@ -475,6 +550,49 @@ mod test {
     use arrow_array::builder::{ListBuilder, StringBuilder};
     use datafusion::common::ScalarValue;
     use std::sync::Arc;
+
+    #[test]
+    fn test_wallclock() {
+        use arrow_array::Array;
+        use arrow_schema::{DataType, Field, TimeUnit};
+        use datafusion::logical_expr::{ScalarFunctionArgs, ScalarUDFImpl};
+
+        let wallclock = super::WallclockFunction::default();
+
+        let args = ScalarFunctionArgs {
+            args: vec![],
+            arg_fields: vec![],
+            number_rows: 3,
+            return_field: Arc::new(Field::new(
+                "wallclock",
+                DataType::Timestamp(TimeUnit::Nanosecond, Some("+00:00".into())),
+                false,
+            )),
+        };
+
+        let before = super::current_time_nanos();
+        let result = wallclock.invoke_with_args(args).unwrap();
+        let after = super::current_time_nanos();
+
+        let super::ColumnarValue::Array(array) = result else {
+            panic!("expected wallclock() to return an array");
+        };
+        let array = array
+            .as_any()
+            .downcast_ref::<super::TimestampNanosecondArray>()
+            .unwrap();
+
+        // wallclock() must produce one value per row, each a real, current timestamp -- unlike
+        // now(), which is fixed once at query-plan time.
+        assert_eq!(array.len(), 3);
+        for i in 0..array.len() {
+            let ts = array.value(i);
+            assert!(
+                ts >= before && ts <= after,
+                "wallclock() value {ts} was not between {before} and {after}"
+            );
+        }
+    }
 
     #[test]
     fn test_extract_json() {
