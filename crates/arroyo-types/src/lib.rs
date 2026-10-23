@@ -157,8 +157,8 @@ pub fn string_to_map(s: &str, pair_delimeter: char) -> Option<HashMap<String, St
 
     s.split(',')
         .map(|s| {
-            let mut kv = s.trim().split(pair_delimeter);
-            Some((kv.next()?.trim().to_string(), kv.next()?.trim().to_string()))
+            let (k, v) = s.trim().split_once(pair_delimeter)?;
+            Some((k.trim().to_string(), v.trim().to_string()))
         })
         .collect()
 }
@@ -698,6 +698,28 @@ mod tests {
             server_for_hash(u64::MAX, n),
             "u64::MAX not in last range"
         );
+    }
+
+    #[test]
+    fn test_string_to_map_keeps_delimiter_in_value() {
+        let headers = string_to_map(
+            "Authorization: Bearer abc, Referer: https://example.com:8443/path",
+            ':',
+        )
+        .unwrap();
+        assert_eq!(headers.get("Authorization").unwrap(), "Bearer abc");
+        assert_eq!(
+            headers.get("Referer").unwrap(),
+            "https://example.com:8443/path"
+        );
+
+        let configs = string_to_map("sasl.oauthbearer.config=principal=admin", '=').unwrap();
+        assert_eq!(
+            configs.get("sasl.oauthbearer.config").unwrap(),
+            "principal=admin"
+        );
+
+        assert_eq!(string_to_map("no-delimiter", ':'), None);
     }
 
     #[test]
