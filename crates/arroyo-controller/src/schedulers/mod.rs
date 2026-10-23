@@ -602,7 +602,8 @@ impl NodeScheduler {
             None,
         )
         .await?;
-        Ok(NodeGrpcClient::new(channel))
+        Ok(NodeGrpcClient::new(channel)
+            .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()))
     }
 
     async fn stop_worker(

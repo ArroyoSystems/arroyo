@@ -1,4 +1,8 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
+
+[grpc]
+max-message-size = "16mb"
+
 [pipeline]
 source-batch-size = 512
 source-batch-linger = "100ms"

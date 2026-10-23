@@ -56,8 +56,8 @@ use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
 use arroyo_rpc::{
-    CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
-    local_address, retry,
+    CompactionResult, ControlMessage, ControlResp, controller_client, grpc_max_message_size,
+    job_controller_client, local_address, retry,
 };
 
 use crate::job_controller::job_metrics::JobMetrics;
@@ -763,11 +763,13 @@ impl WorkerServer {
         };
 
         let job_controller = JobControllerGrpcServer::new(leader.clone())
+            .max_decoding_message_size(grpc_max_message_size())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 
         let leader = InterceptedService::new(
             JobStatusGrpcServer::new(leader)
+                .max_decoding_message_size(grpc_max_message_size())
                 .send_compressed(CompressionEncoding::Zstd)
                 .accept_compressed(CompressionEncoding::Zstd),
             VerifyWorkerId {
@@ -785,8 +787,9 @@ impl WorkerServer {
                     info!("Started worker-rpc with TLS on {}", local_addr);
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
                             VerifyWorkerId {
                                 service: "worker-grpc",
                                 worker_id: context.worker_id,
@@ -798,8 +801,9 @@ impl WorkerServer {
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
                     arroyo_server_common::grpc_server()
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
                             VerifyWorkerId {
                                 service: "worker-grpc",
                                 worker_id: context.worker_id,

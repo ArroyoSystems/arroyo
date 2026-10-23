@@ -585,6 +585,7 @@ impl ControllerServer {
         let local_addr = listener.local_addr()?;
 
         let controller_service = ControllerGrpcServer::new(self.clone())
+            .max_decoding_message_size(arroyo_rpc::grpc_max_message_size())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 

@@ -8,6 +8,7 @@
 //! unique across jobs, runs, and clusters.
 
 use crate::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
+use crate::grpc_max_message_size;
 use arroyo_types::WorkerId;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
@@ -25,6 +26,7 @@ pub type WorkerClient = WorkerGrpcClient<InterceptedService<Channel, InjectWorke
 /// Construct a worker client that injects `target` as `x-target-worker-id`.
 pub fn worker_client(channel: Channel, target: WorkerId) -> WorkerClient {
     WorkerGrpcClient::with_interceptor(channel, InjectWorkerId::new(target))
+        .max_decoding_message_size(grpc_max_message_size())
 }
 
 /// Client interceptor: injects target worker_id into request metadata.
