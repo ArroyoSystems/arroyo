@@ -27,4 +27,4 @@ CREATE TABLE passengers (
 
 select passenger_id, car_id
 from passengers
-join cars ON passenger_id < car_id;
+join cars ON CAST(passenger_id AS TEXT) < car_id;
