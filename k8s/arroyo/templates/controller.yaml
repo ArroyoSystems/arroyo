@@ -6,7 +6,7 @@ metadata:
     {{- include "arroyo.labels" . | nindent 4 }}
     app: {{ include "arroyo.fullname" . }}-controller
 spec:
-  replicas: {{ .Values.controller.replicas }}
+  replicas: 1
   selector:
     matchLabels:
       app: {{ include "arroyo.fullname" . }}-controller
@@ -128,15 +128,15 @@ spec:
         - name: arroyo-user-config
           mountPath: /config
         {{- end }}
-      {{- with .Values.controller.nodeSelector }}
+      {{- with .Values.controller.nodeSelector | default .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.controller.affinity }}
+      {{- with .Values.controller.affinity | default .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.controller.tolerations }}
+      {{- with .Values.controller.tolerations | default .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}

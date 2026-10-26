@@ -8,7 +8,7 @@ Once the release is fully deployed, you can navigate to the web ui by running
   $ kubectl get service/{{ include "arroyo.fullname" . }} -w
 
 and use the EXTERNAL-IP with port {{ .Values.controller.service.httpPort }}.
-{{- else if .Values.ingress.enabled }}
+{{- else if and .Values.ingress.enabled .Values.ingress.hosts }}
 
   $ curl http://{{ (index .Values.ingress.hosts 0).host }}
 

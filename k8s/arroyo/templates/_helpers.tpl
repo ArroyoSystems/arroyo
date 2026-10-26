@@ -1,7 +1,15 @@
+{{/*
+Expand the name of the chart.
+*/}}
 {{- define "arroyo.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+Create a default fully qualified app name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+If release name contains chart name it will be used as a full name.
+*/}}
 {{- define "arroyo.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
@@ -15,10 +23,16 @@
 {{- end }}
 {{- end }}
 
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
 {{- define "arroyo.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{/*
+Common labels
+*/}}
 {{- define "arroyo.labels" -}}
 helm.sh/chart: {{ include "arroyo.chart" . }}
 {{ include "arroyo.selectorLabels" . }}
@@ -28,11 +42,17 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
+{{/*
+Selector labels
+*/}}
 {{- define "arroyo.selectorLabels" -}}
 app.kubernetes.io/name: {{ include "arroyo.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+{{/*
+Create the name of the service account to use
+*/}}
 {{- define "arroyo.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create }}
 {{- default (include "arroyo.fullname" .) .Values.serviceAccount.name }}
@@ -41,6 +61,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{/*
+Create the name of the role to use
+*/}}
 {{- define "arroyo.roleName" -}}
 {{- if .Values.role.create }}
 {{- default (include "arroyo.fullname" .) .Values.role.name }}
@@ -49,6 +72,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 
+{{/*
+Env var with the postgres password, from the in-cluster postgres secret
+or from postgresql.externalDatabase.existingSecret
+*/}}
 {{- define "arroyo.databasePasswordEnv" -}}
 {{- if .Values.postgresql.deploy }}
 - name: ARROYO__DATABASE__POSTGRES__PASSWORD
