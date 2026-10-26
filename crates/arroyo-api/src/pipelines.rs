@@ -28,10 +28,10 @@ use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
 use arroyo_formats::ser::ArrowSerializer;
-use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, SqlConfig};
+use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig};
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
-use arroyo_rpc::public_ids::{IdTypes, generate_id};
+use arroyo_rpc::public_ids::{IdTypes, generate_id, validate_public_id};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
 use arroyo_rpc::{OperatorConfig, error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
@@ -46,13 +46,13 @@ use crate::queries::api_queries;
 use crate::queries::api_queries::{DbPipeline, DbPipelineJob, fetch_get_udfs};
 use crate::rest::AppState;
 use crate::rest_utils::{
-    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, log_and_map,
-    not_found, paginate_results, required_field, validate_pagination_params,
+    ApiError, BearerAuth, ErrorResp, PipelinePath, authenticate, bad_request, conflict,
+    log_and_map, not_found, paginate_results, required_field, validate_pagination_params,
 };
 use crate::types::public::{PipelineType, RestartMode, StopMode};
 use crate::udfs::build_udf;
 use crate::{connection_tables, to_micros};
-use arroyo_rpc::config::{JobControllerMode, config};
+use arroyo_rpc::config::{PipelineCompilerConfigs, config};
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_types::to_millis;
 use cornucopia_async::{Database, DatabaseSource};
@@ -65,7 +65,8 @@ async fn compile_sql(
     auth_data: &AuthData,
     validate_only: bool,
     db: &DatabaseSource,
-) -> Result<CompiledSql, ErrorResp> {
+    compiler_config: &PipelineCompilerConfigs,
+) -> Result<Result<(CompiledSql, HashMap<i64, i32>), PlannerError>, ErrorResp> {
     let mut schema_provider = ArroyoSchemaProvider::new();
 
     let global_udfs = fetch_get_udfs(&db.client().await?, &auth_data.organization_id)
@@ -140,8 +141,15 @@ async fn compile_sql(
         }
     }
 
+    // TODO: Allow pipeline requests to select explicit connection versions. For now,
+    // compile against each connection's current version and persist that resolution.
     let tables =
         connection_tables::get_all_connection_tables(auth_data, &db.client().await?).await?;
+
+    let connection_versions = tables
+        .iter()
+        .map(|table| (table.id, table.version))
+        .collect();
 
     for table in tables {
         let Some(connector) = connector_for_type(&table.connector) else {
@@ -174,15 +182,13 @@ async fn compile_sql(
         schema_provider.add_connection_profile(profile);
     }
 
-    arroyo_planner::parse_and_get_program(
+    Ok(arroyo_planner::parse_and_get_program(
         &query,
         schema_provider,
-        SqlConfig {
-            default_parallelism: parallelism,
-        },
+        SqlConfig::new(parallelism, compiler_config),
     )
     .await
-    .map_err(|err| bad_request(err.to_string()))
+    .map(|compiled| (compiled, connection_versions)))
 }
 
 fn set_parallelism(program: &mut LogicalProgram, parallelism: usize) {
@@ -296,17 +302,18 @@ pub(crate) async fn create_pipeline_int(
     query: String,
     udfs: Vec<Udf>,
     parallelism: u64,
-    checkpoint_interval: Duration,
     is_preview: bool,
     enable_sinks: bool,
     auth: AuthData,
     db: &DatabaseSource,
     mut compiled: CompiledSql,
+    connection_versions: HashMap<i64, i32>,
     pub_id: Option<String>,
     state_url: Option<String>,
     tags: HashMap<String, String>,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
     if parallelism > auth.org_metadata.max_parallelism as u64 {
         return Err(bad_request(format!(
@@ -317,6 +324,7 @@ pub(crate) async fn create_pipeline_int(
     }
 
     let pub_id = pub_id.unwrap_or_else(|| generate_id(IdTypes::Pipeline));
+    validate_pipeline_id(&pub_id)?;
 
     if compiled.program.graph.node_count() > auth.org_metadata.max_operators as usize {
         return Err(bad_request(
@@ -324,9 +332,15 @@ pub(crate) async fn create_pipeline_int(
                 contact support@arroyo.systems for an increase", auth.org_metadata.max_operators)));
     }
 
+    let effective_pipeline_config = config()
+        .pipeline
+        .try_merge(&pipeline_config)
+        .map_err(|e| bad_request(format!("pipeline_config is invalid: {e}")))?;
+
     set_parallelism(&mut compiled.program, parallelism as usize);
 
     if is_preview {
+        let default_sink = default_sink(&effective_pipeline_config.compiler);
         // in Preview, we either replace sinks with a preview sink, or add a preview sink
         // next to them depending on the `enable_sinks` option
         let g = &mut compiled.program.graph;
@@ -334,8 +348,7 @@ pub(crate) async fn create_pipeline_int(
             let should_replace = {
                 let node = &g.node_weight(idx).unwrap().operator_chain;
                 node.is_sink()
-                    && node.iter().next().unwrap().0.operator_config
-                        != default_sink().encode_to_vec()
+                    && node.iter().next().unwrap().0.operator_config != default_sink.encode_to_vec()
             };
             if should_replace {
                 if enable_sinks {
@@ -352,7 +365,7 @@ pub(crate) async fn create_pipeline_int(
                                     .operator_id
                             ),
                             operator_name: OperatorName::ConnectorSink,
-                            operator_config: default_sink().encode_to_vec(),
+                            operator_config: default_sink.encode_to_vec(),
                         }),
                         parallelism: 1,
                     });
@@ -372,7 +385,7 @@ pub(crate) async fn create_pipeline_int(
                         .next()
                         .unwrap()
                         .0
-                        .operator_config = default_sink().encode_to_vec();
+                        .operator_config = default_sink.encode_to_vec();
                 }
             }
         }
@@ -400,8 +413,11 @@ pub(crate) async fn create_pipeline_int(
     let tags_json = serde_json::to_value(tags)
         .map_err(|e| log_and_map(anyhow!("pipeline tags serialization failed: {e}")))?;
 
+    let mut client = db.client().await?;
+    let tx = client.transaction().await?;
+
     api_queries::execute_create_pipeline(
-        &db.client().await?,
+        &tx,
         &pub_id,
         &auth.organization_id,
         &auth.user_id,
@@ -416,37 +432,50 @@ pub(crate) async fn create_pipeline_int(
     )
     .await?;
 
-    let pipeline_id =
-        api_queries::fetch_get_pipeline_id(&db.client().await?, &pub_id, &auth.organization_id)
-            .await
-            .map_err(log_and_map)?
-            .first()
-            .unwrap()
-            .id;
+    let pipeline_id = api_queries::fetch_get_pipeline_id(&tx, &pub_id, &auth.organization_id)
+        .await
+        .map_err(log_and_map)?
+        .first()
+        .unwrap()
+        .id;
 
     if !is_preview {
         for connection in compiled.connection_ids {
-            api_queries::execute_add_pipeline_connection_table(
-                &db.client().await?,
+            let connection_version = connection_versions.get(&connection).ok_or_else(|| {
+                log_and_map(anyhow!(
+                    "compiled pipeline references connection {connection} without a resolved version"
+                ))
+            })?;
+            let inserted = api_queries::execute_add_pipeline_connection_table(
+                &tx,
                 &generate_id(IdTypes::ConnectionTablePipeline),
                 &pipeline_id,
+                connection_version,
                 &connection,
             )
             .await?;
+            if inserted != 1 {
+                return Err(conflict(
+                    "a connection table used by this pipeline was deleted while the pipeline was \
+                    being created; retry the request",
+                ));
+            }
         }
     }
 
     let job_id = jobs::create_job(
         &name,
         pipeline_id,
-        checkpoint_interval,
         is_preview,
         &auth,
-        db,
+        &tx,
         env_vars,
         scheduler_config,
+        pipeline_config,
     )
     .await?;
+
+    tx.commit().await?;
 
     log_event!(
         "job_created",
@@ -473,7 +502,6 @@ impl TryInto<Pipeline> for DbPipeline {
         let running_desired = self.stop == StopMode::none;
         let state = self.state.unwrap_or_else(|| "Created".to_string());
         let (action_text, action, action_in_progress) = get_action(&state, &running_desired);
-
         let mut program: LogicalProgram = ArrowProgram::decode(&self.program[..])
             .map_err(log_and_map)?
             .try_into()
@@ -503,7 +531,6 @@ impl TryInto<Pipeline> for DbPipeline {
             name: self.name,
             query: self.textual_repr,
             udfs: serde_json::from_value(self.udfs).map_err(log_and_map)?,
-            checkpoint_interval_micros: self.checkpoint_interval_micros as u64,
             stop,
             created_at: to_micros(self.created_at),
             graph: program.try_into().map_err(log_and_map)?,
@@ -537,6 +564,7 @@ impl From<DbPipelineJob> for Job {
             }),
             created_at: to_micros(val.created_at),
             scheduler_config: val.scheduler_config,
+            pipeline_config: val.pipeline_config,
             env_vars: val.env_vars,
         }
     }
@@ -560,6 +588,7 @@ pub async fn validate_query(
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let udfs = validate_query_post.udfs.unwrap_or(vec![]);
+    let global_config = config();
 
     let pipeline_graph_validation_result = match compile_sql(
         validate_query_post.query,
@@ -568,16 +597,17 @@ pub async fn validate_query(
         &auth_data,
         true,
         &state.database,
+        &global_config.pipeline.compiler,
     )
-    .await
+    .await?
     {
-        Ok(CompiledSql { program, .. }) => QueryValidationResult {
+        Ok((CompiledSql { program, .. }, _)) => QueryValidationResult {
             graph: Some(program.try_into().map_err(log_and_map)?),
             errors: vec![],
         },
         Err(e) => QueryValidationResult {
             graph: None,
-            errors: vec![e.message],
+            errors: e.diagnostics,
         },
     };
 
@@ -637,6 +667,10 @@ pub async fn put_pipeline(
     create_pipeline_inner(state, bearer_auth, Some(id), pipeline_post).await
 }
 
+fn validate_pipeline_id(id: &str) -> Result<(), ErrorResp> {
+    validate_public_id(id).map_err(|reason| bad_request(format!("invalid pipeline id: {reason}")))
+}
+
 async fn create_pipeline_inner(
     state: AppState,
     bearer_auth: BearerAuth,
@@ -645,34 +679,39 @@ async fn create_pipeline_inner(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let checkpoint_interval = pipeline_post
-        .checkpoint_interval_micros
-        .map(Duration::from_micros)
-        .unwrap_or(*config().default_checkpoint_interval);
+    let pipeline_config = match pipeline_post.pipeline_config {
+        None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
+        Some(v) => v,
+    };
+    let effective_pipeline_config = config()
+        .pipeline
+        .try_merge(&pipeline_config)
+        .map_err(|e| bad_request(format!("pipeline_config is invalid: {e}")))?;
 
     let udfs = pipeline_post.udfs.unwrap_or_default();
 
-    let compiled = compile_sql(
+    let (compiled, connection_versions) = compile_sql(
         pipeline_post.query.clone(),
         &udfs,
         pipeline_post.parallelism as usize,
         &auth_data,
         false,
         &state.database,
+        &effective_pipeline_config.compiler,
     )
-    .await?;
+    .await??;
 
     let pipeline_id = create_pipeline_int(
         pipeline_post.name,
         pipeline_post.query,
         udfs,
         pipeline_post.parallelism,
-        checkpoint_interval,
         /* is_preview */ false,
         /* enable_sinks */ true,
         auth_data.clone(),
         &state.database,
         compiled,
+        connection_versions,
         pub_id,
         pipeline_post.state_url,
         pipeline_post.tags.unwrap_or_default(),
@@ -681,6 +720,7 @@ async fn create_pipeline_inner(
             None | Some(serde_json::Value::Null) => serde_json::Value::Object(Default::default()),
             Some(v) => v,
         },
+        pipeline_config,
     )
     .await?;
 
@@ -710,32 +750,40 @@ pub async fn create_preview_pipeline(
 
     let udfs = req.udfs.unwrap_or_default();
 
-    let compiled = compile_sql(
+    let mut effective_pipeline_config = config().pipeline.clone();
+    effective_pipeline_config.worker.checkpoint.interval = Duration::from_secs(24 * 60 * 60).into();
+
+    let (compiled, connection_versions) = compile_sql(
         req.query.clone(),
         &udfs,
         1,
         &auth_data,
         false,
         &state.database,
+        &effective_pipeline_config.compiler,
     )
-    .await?;
+    .await??;
+
+    let pipeline_config = serde_json::to_value(effective_pipeline_config)
+        .map_err(|e| log_and_map(anyhow!("failed to serialize preview config: {e}")))?;
 
     let pipeline_id = create_pipeline_int(
         format!("preview_{}", to_millis(SystemTime::now())),
         req.query,
         udfs,
         1,
-        Duration::MAX,
         /* is_preview */ true,
         req.enable_sinks,
         auth_data.clone(),
         &state.database,
         compiled,
+        connection_versions,
         None,
         None,
         HashMap::default(),
         HashMap::default(),
         serde_json::Value::Object(Default::default()),
+        pipeline_config,
     )
     .await?;
 
@@ -770,17 +818,13 @@ pub async fn patch_pipeline(
     let db = state.database.client().await?;
 
     // this assumes there is just one job for the pipeline
-    let job_id =
+    let job =
         api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &pipeline_pub_id)
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| not_found("Job for pipeline"))?
-            .id;
-
-    let interval = pipeline_patch
-        .checkpoint_interval_micros
-        .map(Duration::from_micros);
+            .ok_or_else(|| not_found("Job for pipeline"))?;
+    let job_id = job.id.clone();
 
     let stop = &pipeline_patch.stop.map(|s| match s {
         StopType::None => types::public::StopMode::none,
@@ -789,14 +833,6 @@ pub async fn patch_pipeline(
         StopType::Checkpoint => types::public::StopMode::checkpoint,
         StopType::Force => types::public::StopMode::force,
     });
-
-    if let Some(interval) = interval
-        && (interval < Duration::from_secs(1) || interval > Duration::from_secs(24 * 60 * 60))
-    {
-        return Err(bad_request(
-            "checkpoint_interval_micros must be between 1 second and 1 day".to_string(),
-        ));
-    }
 
     let parallelism_overrides = if let Some(parallelism) = pipeline_patch.parallelism {
         let res = api_queries::fetch_get_job_details(&db, &auth_data.organization_id, &job_id)
@@ -822,20 +858,40 @@ pub async fn patch_pipeline(
         .map(|e| serde_json::to_value(e).map_err(log_and_map))
         .transpose()?;
 
-    let scheduler_config = pipeline_patch.scheduler_config.map(|v| match v {
-        serde_json::Value::Null => serde_json::Value::Object(Default::default()),
-        v => v,
-    });
+    if !matches!(
+        pipeline_patch.scheduler_config,
+        None | Some(serde_json::Value::Object(_))
+    ) {
+        return Err(bad_request("scheduler_config field must be an object"));
+    }
+
+    if let Some(pc) = &pipeline_patch.pipeline_config {
+        let global_config = config();
+        let current_pipeline_config = global_config
+            .pipeline
+            .try_merge(&job.pipeline_config)
+            .map_err(|e| log_and_map(anyhow!("stored pipeline_config is invalid: {e}")))?;
+        let updated_pipeline_config = global_config
+            .pipeline
+            .try_merge(pc)
+            .map_err(|e| bad_request(format!("pipeline_config is invalid: {e}")))?;
+
+        if current_pipeline_config.compiler != updated_pipeline_config.compiler {
+            return Err(bad_request(
+                "compiler pipeline config cannot be changed after pipeline creation",
+            ));
+        }
+    }
 
     let res = api_queries::execute_update_job(
         &db,
         &OffsetDateTime::now_utc(),
         &auth_data.user_id,
         stop,
-        &interval.map(|i| i.as_micros() as i64),
         &parallelism_overrides,
         &env_vars,
-        &scheduler_config,
+        &pipeline_patch.scheduler_config,
+        &pipeline_patch.pipeline_config,
         &job_id,
         &auth_data.organization_id,
     )
@@ -869,13 +925,22 @@ pub async fn restart_pipeline(
 ) -> Result<Json<Pipeline>, ErrorResp> {
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
+    if req.ignore_state.unwrap_or(false) {
+        jobs::replace_job_without_state(&state.database, &id, &auth_data).await?;
+
+        let db = state.database.client().await?;
+        let pipeline = query_pipeline_by_pub_id(&id, &db, &auth_data).await?;
+        return Ok(Json(pipeline));
+    }
+
     let db = state.database.client().await?;
 
-    let job = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
+    let job_id = api_queries::fetch_get_pipeline_jobs(&db, &auth_data.organization_id, &id)
         .await?
         .into_iter()
         .next()
-        .ok_or_else(|| bad_request("No jobs for pipeline"))?;
+        .ok_or_else(|| bad_request("No jobs for pipeline"))?
+        .id;
 
     let mode = if req.force == Some(true) {
         RestartMode::force
@@ -883,40 +948,12 @@ pub async fn restart_pipeline(
         RestartMode::safe
     };
 
-    let ignore_before_epoch = if req.ignore_state.unwrap_or(false) {
-        match config().job_controller {
-            JobControllerMode::Controller => {
-                // Controller mode uses this as an epoch threshold.
-                api_queries::fetch_max_checkpoint_epoch(&db, &job.id, &auth_data.organization_id)
-                    .await?
-                    .into_iter()
-                    .next()
-                    .and_then(|r| r.max_epoch)
-                    .map(|max_epoch| max_epoch + 1)
-            }
-            JobControllerMode::Worker => {
-                // Leader mode uses this as the generation that should start without state.
-                Some(
-                    job.run_id
-                        .unwrap_or(0)
-                        .max(0)
-                        .checked_add(1)
-                        .and_then(|generation| generation.try_into().ok())
-                        .ok_or_else(|| bad_request("Job generation is too large to restart"))?,
-                )
-            }
-        }
-    } else {
-        None
-    };
-
     let res = api_queries::execute_restart_job(
         &db,
         &OffsetDateTime::now_utc(),
         &auth_data.user_id,
         &mode,
-        &ignore_before_epoch,
-        &job.id,
+        &job_id,
         &auth_data.organization_id,
     )
     .await?;
@@ -1045,7 +1082,7 @@ pub async fn delete_pipeline(
         .any(|job| job.state != "Stopped" && job.state != "Finished" && job.state != "Failed")
     {
         return Err(bad_request("Pipeline's jobs must be in a terminal state (stopped, finished, or failed) before it can be deleted"
-                .to_string()
+            .to_string()
         ));
     }
 

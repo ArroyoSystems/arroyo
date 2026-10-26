@@ -534,8 +534,11 @@ impl ConnectionSchema {
                     "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
                 );
             }
+            Some(Format::Parquet(parquet_format)) => {
+                parquet_format.validate()?;
+            }
             _ => {
-                // Right now only RawString has checks, but we may add checks for other formats in the future
+                // Other formats don't have checks yet, but we may add them in the future
             }
         }
 
@@ -575,6 +578,8 @@ pub struct ConnectionTable {
     #[serde(rename = "id")]
     pub pub_id: String,
     pub name: String,
+    pub version: i32,
+    pub latest: i32,
     pub created_at: u64,
     pub connector: String,
     pub connection_profile: Option<ConnectionProfile>,
@@ -657,6 +662,7 @@ pub struct ConfluentSchemaQueryParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::formats::ParquetFormat;
     use arrow_schema::{DataType, Field as ArrowField, TimeUnit};
     use serde_json::{Value as J, json};
     use std::sync::Arc;
@@ -707,6 +713,27 @@ mod tests {
             err.to_string(),
             "invalid field names in schema.events[]: Schema error: Schema contains duplicate unqualified field name id"
         );
+    }
+
+    #[test]
+    fn validate_parquet_row_group_bytes() {
+        let schema = |row_group_bytes| ConnectionSchema {
+            format: Some(Format::Parquet(ParquetFormat {
+                compression: Default::default(),
+                row_group_bytes,
+            })),
+            bad_data: None,
+            framing: None,
+            fields: vec![source_field("id", FieldType::Int64)],
+            definition: None,
+            inferred: None,
+            primary_keys: HashSet::default(),
+        };
+
+        assert!(schema(None).validate().is_ok());
+        assert!(schema(Some(128 * 1024 * 1024)).validate().is_ok());
+        assert!(schema(Some(0)).validate().is_err());
+        assert!(schema(Some(u64::MAX)).validate().is_err());
     }
 
     #[test]

@@ -161,7 +161,10 @@ impl OperatorNode {
                     &source_context.task_info,
                 );
 
-                s.operator.on_start(&mut source_context).await?;
+                s.operator
+                    .on_start(&mut source_context)
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 ready.wait().await;
                 info!(
@@ -179,11 +182,16 @@ impl OperatorNode {
                     .await
                     .unwrap();
 
-                let result = s.operator.run(&mut source_context, &mut collector).await?;
+                let result = s
+                    .operator
+                    .run(&mut source_context, &mut collector)
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
-                    .await?;
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 if let Some(final_message) = result.into() {
                     collector.broadcast(final_message).await;

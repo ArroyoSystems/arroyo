@@ -209,6 +209,8 @@ impl Connector for IcebergConnector {
             .ok_or_else(|| anyhow!("no schema defined for Iceberg connection"))?;
 
         let IcebergTable::Sink(sink) = &table;
+        sink.rolling_policy.validate()?;
+        sink.multipart.validate()?;
 
         let arrow_schema = schema.arroyo_schema().schema.clone();
 

@@ -6,7 +6,7 @@ use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::{ArroyoSchemaProvider, fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arroyo_datastream::WindowType;
-use arroyo_rpc::UPDATING_META_FIELD;
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
@@ -123,7 +123,7 @@ impl JoinRewriter<'_> {
         let mut schema_with_timestamp = fields_with_qualifiers(&schema);
         let timestamp_fields = schema_with_timestamp
             .iter()
-            .filter(|field| field.name() == "_timestamp")
+            .filter(|field| field.name() == TIMESTAMP_FIELD)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -131,7 +131,7 @@ impl JoinRewriter<'_> {
             return not_impl_err!("join must have two timestamp fields");
         }
 
-        schema_with_timestamp.retain(|field| field.name() != "_timestamp");
+        schema_with_timestamp.retain(|field| field.name() != TIMESTAMP_FIELD);
         let mut projection_expr = schema_with_timestamp
             .iter()
             .map(|field| {

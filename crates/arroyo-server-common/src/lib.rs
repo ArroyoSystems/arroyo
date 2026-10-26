@@ -50,7 +50,7 @@ use uuid::Uuid;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const VERSION: &str = "0.16.0-dev";
+pub const VERSION: &str = "0.17.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
@@ -175,6 +175,12 @@ pub fn init_logging_with_filter(
         }
     }));
 
+    let max_message_size = arroyo_rpc::grpc_max_message_size();
+    tracing::info!(
+        max_message_size,
+        "gRPC max message size: {max_message_size} bytes"
+    );
+
     guard
 }
 
@@ -268,7 +274,7 @@ impl EventLogger for AnalyticsEventLogger {
                     .send()
                     .await
                 {
-                    debug!("Failed to record event: {}", e);
+                    debug!("Failed to record event: {:#}", anyhow::Error::new(e));
                 }
             });
         }

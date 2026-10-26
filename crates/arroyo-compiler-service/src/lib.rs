@@ -41,7 +41,8 @@ pub async fn start_service() -> anyhow::Result<()> {
     let config = config();
 
     let addr: SocketAddr = SocketAddr::new(config.compiler.bind_address, config.compiler.rpc_port);
-    let grpc_service = CompilerGrpcServer::new(service);
+    let grpc_service = CompilerGrpcServer::new(service)
+        .max_decoding_message_size(arroyo_rpc::grpc_max_message_size());
 
     if let Some(tls_config) = config.get_tls_config(&config.compiler.tls) {
         info!("Starting compiler service with TLS at {}", addr);

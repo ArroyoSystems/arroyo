@@ -9,6 +9,7 @@ use crate::job_controller::{
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
@@ -51,6 +52,7 @@ pub struct WorkerJobController {
     cleanup_backoff: Option<SystemTime>,
     rx: Receiver<RunningMessage>,
     stopping: bool,
+    checkpoint_stopping: bool,
     failing: bool,
     final_checkpoint_started: bool,
     replay_commits: Option<(CommitReq, CommitPermit)>,
@@ -160,9 +162,6 @@ impl WorkerJobController {
                 job_id: worker_context.job_id.clone(),
                 generation: Generation(worker_context.generation),
                 updated_at: SystemTime::now(),
-                // The controller passes no parent checkpoint when this generation should start
-                // without state (or when there is no state available).
-                ignore_state: parent_ref.is_none(),
             },
             false,
         )
@@ -196,7 +195,7 @@ impl WorkerJobController {
 
         // Note: There are panics in some of these branches because they indicate a bug in the controller
         // or worker, not just inconsistent state. We are working around some limitations in adapting
-        // the existing worker lifecycle to the worker leader mode, such that we need the controller
+        // the existing worker lifecycle to the worker-leader architecture, such that we need the controller
         // to look up the checkpoint information to initialize the workers. If on the leader side
         // we end up with a different view of the checkpoint state, that indicates something has
         // gone very wrong and our best choice is to panic and have the controller clean us up.
@@ -271,8 +270,6 @@ impl WorkerJobController {
                 ),
                 checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
-                worker_leader_mode: true,
-                storage_role: StorageProviderFor::Worker,
                 finished_operators: vec![],
                 generation_manifest: Some(generation_manifest),
             },
@@ -282,6 +279,7 @@ impl WorkerJobController {
             cleanup_backoff: None,
             rx,
             stopping: false,
+            checkpoint_stopping: false,
             failing: false,
             final_checkpoint_started: false,
             replay_commits,
@@ -323,10 +321,8 @@ impl WorkerJobController {
 
                 // TODO: this really should happen after we've replayed the initial commit, but
                 //  that requires a significant reworking on the worker lifecycle. However, Committing
-                //  concurrently with startup is how the existing controller has always worked, so in
-                //  practice it doesn't seem to be likely that workers outrun the commit, but it is
-                //  possible and we should look at fixing this at some point in the future when we
-                //  remove the legacy code paths.
+                //  Workers currently begin running concurrently with the commit, so it is possible
+                //  for them to outrun it. Fixing this requires reworking the worker lifecycle.
                 status.connect.job_controller_init(JobControllerInitReq {}).await?;
 
                 Ok(())
@@ -431,6 +427,13 @@ impl WorkerJobController {
             }
         }
 
+        // Reset `last_heartbeat` before worker timeout monitoring starts, so that slow worker
+        // initialisation does not result in immediate timeout detection
+        let now = Instant::now();
+        for worker in self.model.workers.values_mut() {
+            worker.last_heartbeat = now;
+        }
+
         let mut interval = interval(Duration::from_millis(200));
         loop {
             tokio::select! {
@@ -502,6 +505,8 @@ impl WorkerJobController {
                                 message: err.to_string(),
                                 error_domain: rpc::ErrorDomain::Internal.into(),
                                 retry_hint: rpc::RetryHint::WithBackoff.into(),
+                                details: String::new(),
+                                retry_policy: Some(RetryHint::WithBackoff.into()),
                             })
                             .await?;
                             return Ok(());
@@ -526,12 +531,14 @@ impl WorkerJobController {
 
         if self.stopping {
             if stop_mode == JobStopMode::JobStopImmediate {
+                self.checkpoint_stopping = false;
                 self.stop_job(StopMode::Immediate).await?;
             }
             return Ok(());
         }
 
         self.stopping = true;
+        self.checkpoint_stopping = stop_mode == JobStopMode::JobStopCheckpoint;
         self.status.transition(rpc::JobState::JobStopping)?;
 
         match stop_mode {
@@ -560,11 +567,6 @@ impl WorkerJobController {
         // have any tasks failed?
         if let Some(event) = self.model.task_failed() {
             return Ok(ControllerProgress::TaskFailed(event));
-        }
-
-        // if we're stopping and all tasks have finished, we're done
-        if self.stopping && self.model.all_tasks_finished() {
-            return Ok(ControllerProgress::Stopped);
         }
 
         if !self.stopping && self.model.all_tasks_finished() {
@@ -625,7 +627,9 @@ impl WorkerJobController {
             }
         }
 
-        if self.stopping && !self.final_checkpoint_started && self.model.checkpoint_state.is_none()
+        if self.checkpoint_stopping
+            && !self.final_checkpoint_started
+            && self.model.checkpoint_state.is_none()
         {
             info!(
                 message = "retrying deferred final checkpoint",
@@ -644,6 +648,16 @@ impl WorkerJobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // on final checkpoint we have to wait until we've written the metadata before shutting
+        // down the job controller
+        if self.stopping
+            && self.model.all_tasks_finished()
+            && (!self.checkpoint_stopping
+                || (self.final_checkpoint_started && self.model.checkpoint_state.is_none()))
+        {
+            return Ok(ControllerProgress::Stopped);
         }
 
         // do we need to start cleaning?

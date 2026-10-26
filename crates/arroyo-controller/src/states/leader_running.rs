@@ -1,15 +1,15 @@
 use super::{JobContext, State, Transition, controller_job_failure};
 use crate::JobMessage;
-use crate::states::StateError;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
+use crate::states::{StateError, fatal};
 use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::{ErrorDomain, JobFailure, RetryHint};
+use arroyo_rpc::grpc::rpc::{ErrorDomain, RetryHint};
 use arroyo_rpc::log_event;
 use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
@@ -27,7 +27,7 @@ impl State for LeaderRunning {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        let pipeline_config = &config().clone().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         let mut log_interval = tokio::time::interval(Duration::from_secs(60));
         log_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -65,7 +65,7 @@ impl State for LeaderRunning {
                 .await;
         }
 
-        let operator_parallelism = ctx.program.tasks_per_node();
+        let operator_parallelism = ctx.program.decoded.tasks_per_node();
 
         loop {
             if ctx.leader_manager().last_heartbeat.elapsed()
@@ -112,11 +112,14 @@ impl State for LeaderRunning {
                                 ));
                             }
 
-                            // env_vars and scheduler_config are only applied when workers are
+                            // env_vars, scheduler_config, and pipeline_config are applied when workers are
                             // (re)scheduled, so a change to either while the job is running
                             // requires a restart to take effect.
                             if c.scheduler_config != ctx.config.scheduler_config
-                                || c.env_vars != ctx.config.env_vars {
+                                || c.env_vars != ctx.config.env_vars
+                                || c.pipeline_config()?.worker
+                                    != ctx.config.pipeline_config()?.worker
+                            {
                                 return Ok(Transition::next(
                                     *self,
                                     LeaderRestarting {
@@ -125,14 +128,10 @@ impl State for LeaderRunning {
                                 ));
                             }
 
-                            for (node_id, p) in &c.parallelism_overrides {
-                                if let Some(actual) = operator_parallelism.get(node_id)
-                                    && *actual != *p {
-                                    return Ok(Transition::next(
-                                        *self,
-                                        LeaderRescaling {},
-                                    ));
-                                }
+                            let desired = ctx.program.decoded.effective_parallelism(&c.parallelism_overrides)
+                                .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
+                            if desired != operator_parallelism {
+                                return Ok(Transition::next(*self, LeaderRescaling {}));
                             }
 
                         }
@@ -141,7 +140,7 @@ impl State for LeaderRunning {
                                 job_id = %ctx.config.id,
                                 pipeline_id = *ctx.pipeline_info.pipeline_id,
                                 msg =? msg,
-                                "unexpected job message in leader mode"
+                                "unexpected job message while monitoring worker leader"
                             );
                         }
                         None => {
@@ -179,14 +178,11 @@ impl State for LeaderRunning {
                             };
                             match state {
                                 rpc::JobState::JobInitializing => {
-                                    return ctx.handle_job_failure(*self, JobFailure {
-                                        operator_id: None,
-                                        task_id: None,
-                                        subtask_index: None,
-                                        message: "job unexpectedly in Initializing state, should be running".to_string(),
-                                        error_domain: ErrorDomain::Internal as i32,
-                                        retry_hint: RetryHint::WithBackoff as i32,
-                                    }).await;
+                                    return ctx.handle_job_failure(*self, controller_job_failure(
+                                        "job unexpectedly in Initializing state, should be running",
+                                        ErrorDomain::Internal,
+                                        RetryHint::WithBackoff,
+                                    )).await;
                                 }
                                 rpc::JobState::JobRunning => {
                                     // in progress

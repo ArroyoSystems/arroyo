@@ -1,15 +1,14 @@
-use std::{sync::Arc, time::SystemTime};
-
 use arrow::datatypes::{DataType, Field};
-use datafusion::common::{Result, plan_datafusion_err, plan_err};
-
 use arrow_schema::{DECIMAL_DEFAULT_SCALE, DECIMAL128_MAX_PRECISION, IntervalUnit, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use datafusion::error::DataFusionError;
+use datafusion::common::{
+    DataFusionError, Diagnostic, Result, Span, plan_datafusion_err, plan_err,
+};
 use datafusion::sql::sqlparser::ast::{
-    ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
+    ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, Spanned, TimezoneInfo,
 };
 use itertools::Itertools;
+use std::{sync::Arc, time::SystemTime};
 // Pulled from DataFusion
 
 pub(crate) fn convert_data_type(
@@ -117,7 +116,13 @@ fn convert_simple_data_type(
 
             Ok(DataType::Struct(fields.into()))
         }
-        _ => return plan_err!("Unsupported SQL type {sql_type:?}"),
+        SQLDataType::Custom(name, _) => {
+            let message = format!("Unsupported SQL type '{name}'");
+            let diagnostic =
+                Diagnostic::new_error(message.clone(), Span::try_from_sqlparser_span(name.span()));
+            return plan_err!("{message}"; diagnostic = diagnostic);
+        }
+        _ => return plan_err!("Unsupported SQL type '{sql_type}'"),
     };
 
     Ok((dt?, None))

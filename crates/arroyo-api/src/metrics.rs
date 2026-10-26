@@ -51,32 +51,23 @@ pub async fn get_operator_metric_groups(
     .next()
     .ok_or_else(|| not_found("Job"))?;
 
-    let state_context: Option<StateContext> = job
+    let leader = job
         .state_context
         .map(serde_json::from_value)
         .transpose()
         .with_context(|| format!("converting state context for job {}", job_pub_id))
-        .map_err(log_and_map)?;
+        .map_err(log_and_map)?
+        .and_then(|ctx: StateContext| ctx.leader)
+        .ok_or_else(|| service_unavailable("job leader"))?;
 
-    let mut controller = if let Some(ctx) = state_context
-        && let Some(leader) = ctx.leader
-    {
-        job_controller_client("api", &config().api.tls, leader.rpc_address, true).await
-    } else {
-        job_controller_client(
-            "api",
-            &config().api.tls,
-            config().controller_endpoint(),
-            false,
-        )
+    let mut controller = job_controller_client("api", &config().api.tls, leader.rpc_address)
         .await
-    }
-    .map_err(|e| {
-        error!("Failed to connect to controller service: {}", e);
-        service_unavailable("controller-service")
-    })?
-    .accept_compressed(CompressionEncoding::Zstd)
-    .send_compressed(CompressionEncoding::Zstd);
+        .map_err(|e| {
+            error!("Failed to connect to job leader: {}", e);
+            service_unavailable("job leader")
+        })?
+        .accept_compressed(CompressionEncoding::Zstd)
+        .send_compressed(CompressionEncoding::Zstd);
 
     let data = match controller
         .job_metrics(JobMetricsReq { job_id: job.id })

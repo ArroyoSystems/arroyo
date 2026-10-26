@@ -6,8 +6,10 @@ use crate::job_controller::{
     CheckpointHistory, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
 };
 use crate::network_manager::NetworkManager;
+use crate::program::{ProgramAdmissionError, validate_start_execution_program};
 use anyhow::{Context, Result, anyhow};
 
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp,
@@ -47,15 +49,15 @@ use crate::job_controller::controller::WorkerJobController;
 use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{PipelineWorkerConfigs, config, update};
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
 use arroyo_rpc::{
-    CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
-    local_address, retry,
+    CompactionResult, ControlMessage, ControlResp, controller_client, grpc_max_message_size,
+    job_controller_client, local_address, retry,
 };
 
 use crate::job_controller::job_metrics::JobMetrics;
@@ -76,6 +78,7 @@ pub mod arrow;
 pub mod engine;
 pub mod job_controller;
 mod network_manager;
+mod program;
 pub mod utils;
 
 pub static TIMER_TABLE: char = '[';
@@ -322,6 +325,11 @@ impl WorkerState {
         shutdown_guard: ShutdownGuard,
         req: StartExecutionReq,
     ) -> Result<()> {
+        let pipeline_worker_config: PipelineWorkerConfigs =
+            serde_json::from_str(&req.pipeline_worker_config_json)
+                .context("invalid pipeline worker config")?;
+        update(|config| config.pipeline.worker = pipeline_worker_config.clone());
+
         let mut registry = new_registry();
         let logical = Arc::new(
             LogicalProgram::try_from(req.program.expect("Program is None"))
@@ -386,7 +394,7 @@ impl WorkerState {
                     Epoch(req.start_epoch),
                     Epoch(req.min_epoch),
                     &shutdown_guard,
-                    Duration::from_micros(req.checkpoint_interval_micros),
+                    *config().pipeline.worker.checkpoint.interval,
                     parent.clone(),
                 )
                 .await?
@@ -404,13 +412,9 @@ impl WorkerState {
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
 
-            let file_path_layout = if req.wait_for_leader || req.is_leader {
-                CheckpointFilePathLayout::Protocol {
-                    pipeline_id: self.worker_context.pipeline_id.clone(),
-                    generation: self.worker_context.generation,
-                }
-            } else {
-                CheckpointFilePathLayout::Legacy
+            let file_path_layout = CheckpointFilePathLayout::Protocol {
+                pipeline_id: self.worker_context.pipeline_id.clone(),
+                generation: self.worker_context.generation,
             };
 
             let program = Program::from_logical(
@@ -449,32 +453,13 @@ impl WorkerState {
 
         let mut phase_guard = self.phase.lock().unwrap();
 
-        let job_controller_addr = req
-            .job_controller_addr
-            .clone()
-            .unwrap_or_else(|| config().controller_endpoint());
-
-        if req.wait_for_leader {
-            info!("waiting for leader");
-            *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
-                control_rx,
-                engine_state,
-                job_controller_addr,
-            };
-            drop(phase_guard);
-        } else {
-            info!("Worker moving to running phase");
-            *phase_guard = WorkerExecutionPhase::Running(engine_state);
-            drop(phase_guard);
-
-            let cancel_token = shutdown_guard.token();
-            shutdown_guard
-                .child("control-thread")
-                .into_spawn_task(async move {
-                    self.run_control_loop(cancel_token, control_rx, job_controller_addr, false)
-                        .await
-                });
-        }
+        info!("waiting for leader");
+        *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
+            control_rx,
+            engine_state,
+            job_controller_addr: req.job_controller_addr,
+        };
+        drop(phase_guard);
 
         info!("Initialization completed successfully");
         Ok(())
@@ -485,18 +470,12 @@ impl WorkerState {
         cancel_token: CancellationToken,
         control_rx: Receiver<ControlResp>,
         job_controller_addr: String,
-        is_worker_job_controller: bool,
     ) -> Result<()> {
         // TODO: We need this just for sending TaskStarted notifications to the actual controller for
         //  scheduling; it would be nicer if we didn't need to retain it for the entire job lifecycle
         let mut controller = controller_client("worker", &config().worker.tls).await?;
-        let mut job_controller = job_controller_client(
-            "worker",
-            &config().worker.tls,
-            job_controller_addr,
-            is_worker_job_controller,
-        )
-        .await?;
+        let mut job_controller =
+            job_controller_client("worker", &config().worker.tls, job_controller_addr).await?;
 
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -578,7 +557,8 @@ impl WorkerState {
                                     subtask_idx,
                                     error: maybe_truncate(error.message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::from(error.domain) as i32,
-                                    retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
+                                    retry_hint: error.retry_hint.legacy_hint() as i32,
+                                    retry_policy: Some(error.retry_hint.into()),
                                     operator_id: error.operator_id.unwrap_or_default(),
                                     details: maybe_truncate(
                                         error.details.unwrap_or_default(),
@@ -605,6 +585,7 @@ impl WorkerState {
                                     error: maybe_truncate(message, MAX_TASK_ERROR_FIELD_BYTES),
                                     error_domain: rpc::ErrorDomain::External as i32,
                                     retry_hint: rpc::RetryHint::NoRetry as i32,
+                                    retry_policy: Some(RetryHint::NoRetry.into()),
                                     details: maybe_truncate(details, MAX_TASK_ERROR_FIELD_BYTES),
                                 }),
                             };
@@ -782,11 +763,13 @@ impl WorkerServer {
         };
 
         let job_controller = JobControllerGrpcServer::new(leader.clone())
+            .max_decoding_message_size(grpc_max_message_size())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 
         let leader = InterceptedService::new(
             JobStatusGrpcServer::new(leader)
+                .max_decoding_message_size(grpc_max_message_size())
                 .send_compressed(CompressionEncoding::Zstd)
                 .accept_compressed(CompressionEncoding::Zstd),
             VerifyWorkerId {
@@ -804,8 +787,9 @@ impl WorkerServer {
                     info!("Started worker-rpc with TLS on {}", local_addr);
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
                             VerifyWorkerId {
                                 service: "worker-grpc",
                                 worker_id: context.worker_id,
@@ -817,8 +801,9 @@ impl WorkerServer {
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
                     arroyo_server_common::grpc_server()
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
                             VerifyWorkerId {
                                 service: "worker-grpc",
                                 worker_id: context.worker_id,
@@ -895,17 +880,20 @@ impl WorkerGrpc for WorkerServer {
         &self,
         request: Request<StartExecutionReq>,
     ) -> Result<Response<StartExecutionResp>, Status> {
+        let req = request.into_inner();
         let mut phase = self.state.phase.lock().unwrap();
 
         match &*phase {
             WorkerExecutionPhase::Idle => {
+                validate_start_execution_program(&req)
+                    .map_err(ProgramAdmissionError::into_status)?;
+
                 *phase = WorkerExecutionPhase::Initializing {
                     started_at: SystemTime::now(),
                 };
 
                 // Spawn async initialization
                 let state = self.state.clone();
-                let req = request.into_inner();
                 let shutdown_guard = self.shutdown_guard.clone_temporary();
 
                 self.shutdown_guard.spawn_temporary(async move {
@@ -1096,13 +1084,6 @@ impl WorkerGrpc for WorkerServer {
     ) -> Result<Response<JobFinishedResp>, Status> {
         let is_worker_leader = self.state.job_controller_tx.get().is_some();
 
-        let mut phase = self.state.phase.lock().unwrap();
-        if let WorkerExecutionPhase::Running(engine_state) = &*phase {
-            engine_state.shutdown_guard.cancel();
-        }
-        *phase = WorkerExecutionPhase::Idle;
-        drop(phase);
-
         if is_worker_leader {
             // Keep the worker leader reachable so the controller can observe the
             // terminal job status before explicitly stopping the worker process.
@@ -1114,6 +1095,13 @@ impl WorkerGrpc for WorkerServer {
                 generation = self.state.worker_context.generation,
             );
         } else {
+            let mut phase = self.state.phase.lock().unwrap();
+            if let WorkerExecutionPhase::Running(engine_state) = &*phase {
+                engine_state.shutdown_guard.cancel();
+            }
+            *phase = WorkerExecutionPhase::Idle;
+            drop(phase);
+
             let token = self.shutdown_guard.token();
             tokio::task::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -1188,7 +1176,7 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(async move {
                 state
-                    .run_control_loop(cancel_token, control_rx, job_controller_addr, true)
+                    .run_control_loop(cancel_token, control_rx, job_controller_addr)
                     .await
             });
 
@@ -1331,7 +1319,7 @@ impl JobControllerGrpc for LeaderServer {
             task_id: err.task_id,
             subtask_idx: err.subtask_idx,
             error_domain: err.error_domain().into(),
-            retry_hint: err.retry_hint().into(),
+            retry_hint: RetryHint::from_rpc(err.retry_policy.as_ref(), err.retry_hint()),
             operator_id: err.operator_id,
             reason: err.error,
             details: err.details,

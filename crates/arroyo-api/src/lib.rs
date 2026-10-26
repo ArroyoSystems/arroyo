@@ -23,7 +23,8 @@ use crate::connection_profiles::{
 };
 use crate::connection_tables::{
     __path_create_connection_table, __path_delete_connection_table, __path_get_connection_tables,
-    __path_test_connection_table, __path_test_schema,
+    __path_patch_connection_table, __path_test_connection_table, __path_test_schema,
+    ConnectionTablePatch,
 };
 use crate::connectors::__path_get_connectors;
 use crate::jobs::{
@@ -37,7 +38,7 @@ use crate::pipelines::{
     __path_get_pipeline, __path_get_pipeline_jobs, __path_patch_pipeline, __path_put_pipeline,
     __path_restart_pipeline, __path_validate_query,
 };
-use crate::rest::__path_ping;
+use crate::rest::{__path_get_configs, __path_ping};
 use crate::rest_utils::{ErrorResp, service_unavailable};
 use crate::udfs::{__path_create_udf, __path_delete_udf, __path_get_udfs, __path_validate_udf};
 use arroyo_rpc::api_types::{checkpoints::*, connections::*, metrics::*, pipelines::*, udfs::*, *};
@@ -132,7 +133,8 @@ pub async fn compiler_service() -> Result<CompilerGrpcClient<Channel>, ErrorResp
                 service_unavailable("compiler-service")
             })?;
 
-    Ok(CompilerGrpcClient::new(channel))
+    Ok(CompilerGrpcClient::new(channel)
+        .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()))
 }
 
 pub async fn start_server(database: DatabaseSource, guard: ShutdownGuard) -> anyhow::Result<u16> {
@@ -247,6 +249,7 @@ impl IntoResponse for HttpError {
     servers((url = "/api/")),
     paths(
         ping,
+        get_configs,
         validate_query,
         validate_udf,
         create_pipeline,
@@ -270,6 +273,7 @@ impl IntoResponse for HttpError {
         get_connection_profile_autocomplete,
         get_connection_tables,
         create_connection_table,
+        patch_connection_table,
         create_connection_profile,
         delete_connection_table,
         test_connection_table,
@@ -314,6 +318,7 @@ impl IntoResponse for HttpError {
         ConnectionAutocompleteResp,
         ConnectionProfileCollection,
         ConnectionTable,
+        ConnectionTablePatch,
         ConnectionTablePost,
         ConnectionTableCollection,
         ConnectionSchema,
@@ -356,9 +361,13 @@ impl IntoResponse for HttpError {
         GlobalUdf,
         GlobalUdfCollection,
         BadData,
+        SqlDiagnostic,
+        SqlSpan,
+        SqlLocation
     )),
     tags(
         (name = "ping", description = "Ping endpoint"),
+        (name = "configs", description = "Controller configuration endpoint"),
         (name = "connection_profiles", description = "Connection profiles management endpoints"),
         (name = "connection_tables", description = "Connection tables management endpoints"),
         (name = "pipelines", description = "Pipeline management endpoints"),

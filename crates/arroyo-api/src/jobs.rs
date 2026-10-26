@@ -1,7 +1,7 @@
-use crate::queries::api_queries::{DbCheckpoint, DbLogMessage, DbPipelineJob};
+use crate::queries::api_queries::{DbLogMessage, DbPipelineJob};
 use anyhow::Context;
 use arroyo_rpc::api_types::checkpoints::{
-    Checkpoint, CheckpointType, JobCheckpointSpan, OperatorCheckpointGroup, SubtaskCheckpointGroup,
+    Checkpoint, OperatorCheckpointGroup, SubtaskCheckpointGroup,
 };
 use arroyo_rpc::api_types::pipelines::{JobLogLevel, JobLogMessage, OutputData, StopType};
 use arroyo_rpc::api_types::{
@@ -29,7 +29,8 @@ use crate::pipelines::{query_job_by_pub_id, query_pipeline_by_pub_id};
 use crate::rest::AppState;
 use crate::rest_utils::{
     BearerAuth, ErrorResp, PipelineJobCheckpointPath, PipelineJobPath, authenticate, bad_request,
-    log_and_map, not_found, paginate_results, validate_pagination_params,
+    conflict, internal_server_error, log_and_map, not_found, paginate_results, service_unavailable,
+    validate_pagination_params,
 };
 use crate::types::public::LogLevel;
 use crate::{AuthData, queries::api_queries, to_micros, types::public};
@@ -39,7 +40,7 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{GetCheckpointDetailsReq, GetJobCheckpointsReq};
 use arroyo_rpc::identity::InjectWorkerId;
-use cornucopia_async::DatabaseSource;
+use cornucopia_async::{Database, DatabaseSource};
 use http::StatusCode;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
@@ -114,32 +115,21 @@ fn operator_checkpoint_groups(
     operators
 }
 
+/// Creates a job and its status for a pipeline
+///
+/// This should be called within the same transaction that created the pipeline.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_job(
     pipeline_name: &str,
     pipeline_id: i64,
-    checkpoint_interval: Duration,
     preview: bool,
     auth: &AuthData,
-    db: &DatabaseSource,
+    db: &Database<'_>,
     env_vars: HashMap<String, String>,
     scheduler_config: serde_json::Value,
+    pipeline_config: serde_json::Value,
 ) -> Result<String, ErrorResp> {
-    let checkpoint_interval = if preview {
-        Duration::from_secs(24 * 60 * 60)
-    } else {
-        checkpoint_interval
-    };
-
-    if checkpoint_interval < Duration::from_secs(1)
-        || checkpoint_interval > Duration::from_secs(24 * 60 * 60)
-    {
-        return Err(bad_request(
-            "Checkpoint_interval_micros must be between 1 second and 1 day.".to_string(),
-        ));
-    }
-
-    let running_jobs = api_queries::fetch_get_jobs(&db.client().await?, &auth.organization_id)
+    let running_jobs = api_queries::fetch_get_jobs(db, &auth.organization_id)
         .await?
         .iter()
         .filter(|j| {
@@ -167,13 +157,12 @@ pub(crate) async fn create_job(
 
     // TODO: handle chance of collision in ids
     api_queries::execute_create_job(
-        &db.client().await?,
+        db,
         &job_id,
         &auth.organization_id,
         &pipeline_name,
         &auth.user_id,
         &pipeline_id,
-        &(checkpoint_interval.as_micros() as i64),
         &(if preview {
             Some(PREVIEW_TTL.as_micros() as i64)
         } else {
@@ -181,11 +170,12 @@ pub(crate) async fn create_job(
         }),
         &env_vars_json,
         &scheduler_config,
+        &pipeline_config,
     )
     .await?;
 
     api_queries::execute_create_job_status(
-        &db.client().await?,
+        db,
         &generate_id(IdTypes::JobStatus),
         &job_id,
         &auth.organization_id,
@@ -193,6 +183,74 @@ pub(crate) async fn create_job(
     .await?;
 
     Ok(job_id)
+}
+
+fn replaceable_job(jobs: Vec<(String, String)>) -> Result<String, ErrorResp> {
+    let count = jobs.len();
+    let Some((job_id, state)) = jobs.into_iter().next() else {
+        return Err(not_found("Job for pipeline"));
+    };
+
+    if count != 1 {
+        return Err(internal_server_error(format!(
+            "expected one job for pipeline, found {count}"
+        )));
+    }
+
+    if state != "Stopped" && state != "Failed" {
+        return Err(conflict(format!(
+            "cannot restart job {job_id} without state while it is in state {state}; stop the job first"
+        )));
+    }
+
+    Ok(job_id)
+}
+
+/// Replaces a pipeline's job with a new one with the same configuration but a different job id
+///
+/// This is used to implement start/restart without restoring checkpoint state.
+pub(crate) async fn replace_job_without_state(
+    db: &DatabaseSource,
+    pipeline_pub_id: &str,
+    auth: &AuthData,
+) -> Result<String, ErrorResp> {
+    let new_job_id = generate_id(IdTypes::JobConfig);
+    let new_status_id = generate_id(IdTypes::JobStatus);
+    let mut client = db.client().await?;
+    let tx = client.transaction().await?;
+
+    let jobs = api_queries::fetch_get_pipeline_jobs(&tx, &auth.organization_id, &pipeline_pub_id)
+        .await?
+        .into_iter()
+        .map(|job| (job.id, job.state.unwrap_or_else(|| "Created".to_string())))
+        .collect();
+    let old_job_id = replaceable_job(jobs)?;
+
+    let inserted =
+        api_queries::execute_clone_job_without_state(&tx, &new_job_id, &auth.user_id, &old_job_id)
+            .await?;
+    if inserted != 1 {
+        return Err(internal_server_error("failed to clone job configuration"));
+    }
+
+    api_queries::execute_create_job_status(&tx, &new_status_id, &new_job_id, &auth.organization_id)
+        .await?;
+
+    // Deleting job_configs cascades to statuses and log messages on both backends, and to
+    // checkpoints on PostgreSQL. SQLite checkpoints do not have the corresponding foreign key.
+    api_queries::execute_delete_job_checkpoints(&tx, &old_job_id).await?;
+
+    // On PostgreSQL, concurrent replacements can both read and clone the old job; whichever
+    // deletes it second finds nothing left and must roll back, or the pipeline ends up with two jobs
+    if api_queries::execute_delete_job_config(&tx, &old_job_id).await? != 1 {
+        return Err(conflict(format!(
+            "job {old_job_id} was replaced concurrently; reload the pipeline and retry"
+        )));
+    }
+
+    tx.commit().await?;
+
+    Ok(new_job_id)
 }
 
 pub(crate) fn get_action(state: &str, running_desired: &bool) -> (String, Option<StopType>, bool) {
@@ -368,38 +426,29 @@ pub async fn get_job_checkpoints(
     .next()
     .ok_or_else(|| not_found("Job"))?;
 
-    let state_context: Option<StateContext> = job
+    let leader = job
         .state_context
         .map(serde_json::from_value)
         .transpose()
         .with_context(|| format!("converting state context for job {}", job_pub_id))
-        .map_err(log_and_map)?;
+        .map_err(log_and_map)?
+        .and_then(|ctx: StateContext| ctx.leader)
+        .ok_or_else(|| service_unavailable("job leader"))?;
 
-    let checkpoints = if let Some(state_context) = state_context
-        && let Some(leader) = state_context.leader
-    {
-        fetch_from_leader(leader, move |mut client, generation| async move {
-            client
-                .get_job_checkpoints(GetJobCheckpointsReq {
-                    job_id: job.id,
-                    generation,
-                })
-                .await
-        })
-        .await?
-        .into_inner()
-        .checkpoints
-        .into_iter()
-        .map(Checkpoint::from)
-        .collect()
-    } else {
-        api_queries::fetch_get_job_checkpoints(&db, &job_pub_id, &auth_data.organization_id)
+    let checkpoints = fetch_from_leader(leader, move |mut client, generation| async move {
+        client
+            .get_job_checkpoints(GetJobCheckpointsReq {
+                job_id: job.id,
+                generation,
+            })
             .await
-            .map_err(log_and_map)?
-            .into_iter()
-            .filter_map(|m| m.try_into().ok())
-            .collect()
-    };
+    })
+    .await?
+    .into_inner()
+    .checkpoints
+    .into_iter()
+    .map(Checkpoint::from)
+    .collect();
 
     Ok(Json(CheckpointCollection { data: checkpoints }))
 }
@@ -441,50 +490,27 @@ pub async fn get_checkpoint_details(
     .next()
     .ok_or_else(|| not_found("Job"))?;
 
-    let state_context: Option<StateContext> = job
+    let leader = job
         .state_context
         .map(serde_json::from_value)
         .transpose()
         .with_context(|| format!("converting state context for job {}", job_pub_id))
-        .map_err(log_and_map)?;
-
-    let operators = if let Some(state_context) = state_context
-        && let Some(leader) = state_context.leader
-    {
-        fetch_from_leader(leader, move |mut client, generation| async move {
-            client
-                .get_checkpoint_details(GetCheckpointDetailsReq {
-                    job_id: job.id,
-                    generation,
-                    epoch: epoch as u64,
-                })
-                .await
-        })
-        .await?
-        .into_inner()
-        .operators
-    } else {
-        let checkpoint_details = api_queries::fetch_get_checkpoint_details(
-            &db,
-            &job_pub_id,
-            &auth_data.organization_id,
-            &(epoch as i32),
-        )
-        .await
         .map_err(log_and_map)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            not_found(&format!(
-                "Checkpoint with epoch {epoch} for job '{job_pub_id}'"
-            ))
-        })?;
+        .and_then(|ctx: StateContext| ctx.leader)
+        .ok_or_else(|| service_unavailable("job leader"))?;
 
-        checkpoint_details
-            .operators
-            .map(|o| serde_json::from_value(o).unwrap())
-            .unwrap_or_else(HashMap::<String, OperatorCheckpointDetail>::new)
-    };
+    let operators = fetch_from_leader(leader, move |mut client, generation| async move {
+        client
+            .get_checkpoint_details(GetCheckpointDetailsReq {
+                job_id: job.id,
+                generation,
+                epoch: epoch as u64,
+            })
+            .await
+    })
+    .await?
+    .into_inner()
+    .operators;
 
     let operators = operator_checkpoint_groups(operators);
 
@@ -607,19 +633,248 @@ pub async fn get_jobs(
     }))
 }
 
-impl TryFrom<DbCheckpoint> for Checkpoint {
-    type Error = anyhow::Error;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::OrgMetadata;
+    use cornucopia_async::SqliteSource;
+    use rusqlite::OpenFlags;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn try_from(val: DbCheckpoint) -> anyhow::Result<Self> {
-        let events: Vec<JobCheckpointSpan> = serde_json::from_value(val.event_spans)?;
+    fn auth() -> AuthData {
+        AuthData {
+            user_id: "user_2".to_string(),
+            organization_id: "org_1".to_string(),
+            role: "user".to_string(),
+            org_metadata: OrgMetadata::default(),
+        }
+    }
 
-        Ok(Checkpoint {
-            epoch: val.epoch as u64,
-            backend: val.state_backend,
-            checkpoint_type: CheckpointType::from_is_stopping(val.is_stopping),
-            start_time: to_micros(val.start_time),
-            finish_time: val.finish_time.map(to_micros),
-            events: events.into_iter().map(|e| e.into()).collect(),
-        })
+    /// Returns the database along with a second connection to it for inspecting committed state
+    fn sqlite_job(state: &str) -> (DatabaseSource, rusqlite::Connection) {
+        static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let uri = format!(
+            "file:jobs_test_{}?mode=memory&cache=shared",
+            DB_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
+            | OpenFlags::SQLITE_OPEN_CREATE
+            | OpenFlags::SQLITE_OPEN_URI;
+        let connection = rusqlite::Connection::open_with_flags(&uri, flags).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA foreign_keys = ON;
+                CREATE TABLE pipelines (
+                    id INTEGER PRIMARY KEY,
+                    pub_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL
+                );
+                CREATE TABLE job_configs (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT,
+                    pipeline_name TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_by TEXT,
+                    updated_at TIMESTAMP,
+                    ttl_micros INTEGER,
+                    stop TEXT DEFAULT 'none' NOT NULL,
+                    parallelism_overrides TEXT DEFAULT '{}' NOT NULL,
+                    pipeline_id INTEGER NOT NULL,
+                    restart_nonce INTEGER DEFAULT 0 NOT NULL,
+                    restart_mode TEXT DEFAULT 'safe' NOT NULL,
+                    env_vars TEXT DEFAULT '{}' NOT NULL,
+                    scheduler_config TEXT DEFAULT '{}' NOT NULL,
+                    pipeline_config TEXT DEFAULT '{}' NOT NULL
+                );
+                CREATE TABLE job_statuses (
+                    pub_id TEXT NOT NULL UNIQUE,
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT,
+                    run_id INTEGER DEFAULT 0 NOT NULL,
+                    start_time TIMESTAMP,
+                    finish_time TIMESTAMP,
+                    tasks INTEGER,
+                    failure_message TEXT,
+                    failure_domain TEXT,
+                    state TEXT DEFAULT 'Created' NOT NULL,
+                    state_context TEXT DEFAULT '{\"version\": 1}' NOT NULL,
+                    FOREIGN KEY (id) REFERENCES job_configs(id) ON DELETE CASCADE
+                );
+                CREATE TABLE checkpoints (job_id TEXT NOT NULL);
+                CREATE TABLE job_log_messages (
+                    job_id TEXT NOT NULL,
+                    FOREIGN KEY (job_id) REFERENCES job_configs(id) ON DELETE CASCADE
+                );
+                INSERT INTO pipelines (id, pub_id, organization_id)
+                    VALUES (1, 'pl_1', 'org_1');
+                INSERT INTO job_configs
+                    (id, organization_id, pipeline_name, created_by, updated_by, ttl_micros, stop,
+                     parallelism_overrides, pipeline_id, restart_nonce, restart_mode,
+                     env_vars, scheduler_config, pipeline_config)
+                    VALUES
+                    ('job_old', 'org_1', 'pipeline', 'user_1', 'user_1', 123, 'immediate',
+                     '{\"1\": 4}', 1, 3, 'force',
+                     '{\"ENV\": \"value\"}', '{\"scheduler\": true}',
+                     '{\"allowed_restarts\": 3}');
+                INSERT INTO checkpoints (job_id) VALUES ('job_old');
+                INSERT INTO job_log_messages (job_id) VALUES ('job_old');",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO job_statuses (pub_id, id, organization_id, run_id, state)
+                 VALUES ('js_old', 'job_old', 'org_1', 7, ?1)",
+                [state],
+            )
+            .unwrap();
+
+        let observer = rusqlite::Connection::open_with_flags(&uri, flags).unwrap();
+        (
+            DatabaseSource::Sqlite(Arc::new(SqliteSource::new(connection))),
+            observer,
+        )
+    }
+
+    fn assert_only_old_job(connection: &rusqlite::Connection) {
+        for (table, column) in [
+            ("job_configs", "id"),
+            ("job_statuses", "id"),
+            ("checkpoints", "job_id"),
+        ] {
+            let ids: Vec<String> = connection
+                .prepare(&format!("SELECT {column} FROM {table}"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(ids, vec!["job_old"], "{table} should be unchanged");
+        }
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_replaces_terminal_job_and_deletes_history() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        let new_job_id = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap();
+
+        assert_ne!(new_job_id, "job_old");
+
+        let job: (String, String, i64, String, String, String, String, String) = connection
+            .query_row(
+                "SELECT id, stop, restart_nonce, restart_mode, updated_by,
+                        env_vars, scheduler_config, pipeline_config
+                 FROM job_configs",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            job,
+            (
+                new_job_id.clone(),
+                "none".to_string(),
+                0,
+                "safe".to_string(),
+                "user_2".to_string(),
+                "{\"ENV\": \"value\"}".to_string(),
+                "{\"scheduler\": true}".to_string(),
+                "{\"allowed_restarts\": 3}".to_string(),
+            )
+        );
+
+        let status: (String, i64, String) = connection
+            .query_row("SELECT id, run_id, state FROM job_statuses", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(status, (new_job_id, 0, "Created".to_string()));
+
+        for table in ["checkpoints", "job_log_messages"] {
+            let count: i64 = connection
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be cleared");
+        }
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_rejects_non_terminal_job() {
+        let (database, connection) = sqlite_job("Running");
+
+        let error = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::CONFLICT);
+        let job_id: String = connection
+            .query_row("SELECT id FROM job_configs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(job_id, "job_old");
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_rolls_back_on_failure() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        // fail the final statement, after the new job has been created and checkpoints deleted
+        connection
+            .execute_batch(
+                "CREATE TRIGGER fail_job_delete BEFORE DELETE ON job_configs
+                 BEGIN SELECT RAISE(ABORT, 'injected failure'); END;",
+            )
+            .unwrap();
+
+        replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_only_old_job(&connection);
+
+        // the database remains usable after the rollback
+        connection
+            .execute_batch("DROP TRIGGER fail_job_delete")
+            .unwrap();
+        replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn replace_job_without_state_conflicts_when_old_job_already_replaced() {
+        let (database, connection) = sqlite_job("Stopped");
+
+        // simulate a concurrent replacement having already deleted the old job, which on
+        // PostgreSQL leaves this transaction's delete matching no rows
+        connection
+            .execute_batch(
+                "CREATE TRIGGER skip_job_delete BEFORE DELETE ON job_configs
+                 BEGIN SELECT RAISE(IGNORE); END;",
+            )
+            .unwrap();
+
+        let error = replace_job_without_state(&database, "pl_1", &auth())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status_code, StatusCode::CONFLICT);
+        assert_only_old_job(&connection);
     }
 }

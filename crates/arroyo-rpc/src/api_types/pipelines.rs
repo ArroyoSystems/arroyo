@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use crate::api_types::udfs::Udf;
 use crate::errors::ErrorDomain;
 use crate::grpc as grpc_proto;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -17,7 +16,34 @@ pub struct ValidateQueryPost {
 #[serde(rename_all = "snake_case")]
 pub struct QueryValidationResult {
     pub graph: Option<PipelineGraph>,
-    pub errors: Vec<String>,
+    pub errors: Vec<SqlDiagnostic>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlLocation {
+    pub line: u64,
+    pub column: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlSpan {
+    pub start: SqlLocation,
+    pub end: SqlLocation,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+pub struct SqlDiagnostic {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<SqlSpan>,
+}
+impl SqlDiagnostic {
+    pub fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            span: None,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -27,7 +53,6 @@ pub struct PipelinePost {
     pub query: String,
     pub udfs: Option<Vec<Udf>>,
     pub parallelism: u64,
-    pub checkpoint_interval_micros: Option<u64>,
     pub state_url: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     /// Per-job environment variables forwarded to workers.
@@ -39,6 +64,11 @@ pub struct PipelinePost {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay. The shape mirrors the
+    /// controller's global `pipeline` config block and is merged on top
+    /// of it when the job runs. An omitted field, `null`, or an empty
+    /// object all mean "use the global pipeline config unchanged".
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -54,7 +84,6 @@ pub struct PreviewPost {
 #[serde(rename_all = "snake_case")]
 pub struct PipelinePatch {
     pub parallelism: Option<u64>,
-    pub checkpoint_interval_micros: Option<u64>,
     pub stop: Option<StopType>,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: Option<HashMap<String, String>>,
@@ -65,6 +94,9 @@ pub struct PipelinePatch {
     /// all mean "use the controller's global scheduler config
     /// unchanged".
     pub scheduler_config: Option<serde_json::Value>,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// Supplying this field replaces the job's existing overlay.
+    pub pipeline_config: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
@@ -81,7 +113,6 @@ pub struct Pipeline {
     pub name: String,
     pub query: String,
     pub udfs: Vec<Udf>,
-    pub checkpoint_interval_micros: u64,
     pub stop: StopType,
     pub created_at: u64,
     pub action: Option<StopType>,
@@ -156,6 +187,10 @@ pub struct Job {
     /// An empty object means "no overrides, use the controller's
     /// global scheduler config unchanged".
     pub scheduler_config: serde_json::Value,
+    /// Per-job pipeline configuration overlay (see `PipelinePost`).
+    /// An empty object means "no overrides, use the global pipeline
+    /// config unchanged".
+    pub pipeline_config: serde_json::Value,
     /// Per-job environment variables forwarded to workers.
     pub env_vars: serde_json::Value,
 }

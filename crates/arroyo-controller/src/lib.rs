@@ -5,28 +5,18 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::config::config;
-use arroyo_rpc::grpc::rpc;
+use arroyo_rpc::config::{PipelineConfig, config};
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
-use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
-    JobControllerGrpc, JobControllerGrpcServer,
-};
 use arroyo_rpc::grpc::rpc::{
-    GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, HeartbeatReq, HeartbeatResp,
-    JobMetricsReq, JobMetricsResp, NonfatalErrorReq, OutputData, RegisterNodeReq, RegisterNodeResp,
-    RegisterWorkerReq, RegisterWorkerResp, SinkDataReq, SinkDataResp, TaskCheckpointCompletedReq,
-    TaskCheckpointCompletedResp, TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq,
-    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, TaskStartedResp,
-    WorkerErrorRes, WorkerFinishedReq, WorkerFinishedResp, WorkerInitializationCompleteReq,
-    WorkerInitializationCompleteResp,
+    GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, OutputData, RegisterNodeReq,
+    RegisterNodeResp, RegisterWorkerReq, RegisterWorkerResp, SinkDataReq, SinkDataResp,
+    TaskStartedReq, TaskStartedResp, WorkerFinishedReq, WorkerFinishedResp,
+    WorkerInitializationCompleteReq, WorkerInitializationCompleteResp,
 };
-use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
-use arroyo_rpc::{StateContext, config, errors};
+use arroyo_rpc::{StateContext, config};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
-use arroyo_types::{MachineId, PipelineId, WorkerId, from_micros};
-use arroyo_worker::job_controller::job_metrics::JobMetrics;
+use arroyo_types::{MachineId, PipelineId, WorkerId};
 use cornucopia_async::DatabaseSource;
 use lazy_static::lazy_static;
 use prometheus::{IntGaugeVec, register_int_gauge_vec};
@@ -39,7 +29,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
@@ -48,7 +37,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
 //pub mod compiler;
-pub mod job_controller;
+pub mod leader_manager;
 pub mod schedulers;
 mod states;
 
@@ -94,10 +83,8 @@ fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
-use types::public::LogLevel;
+use crate::states::{StateError, fatal};
 use types::public::{RestartMode, StopMode};
-
-pub const CHECKPOINTS_TO_KEEP: u32 = 5;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct JobConfig {
@@ -106,21 +93,26 @@ pub struct JobConfig {
     pipeline_name: String,
     pipeline_id: i64,
     stop_mode: StopMode,
-    checkpoint_interval: Duration,
     ttl: Option<Duration>,
-    parallelism_overrides: HashMap<u32, usize>,
+    parallelism_overrides: HashMap<u32, u32>,
     restart_nonce: i32,
     restart_mode: RestartMode,
-    /// Minimum checkpoint epoch in controller mode; generation to start without state in leader
-    /// mode.
-    ignore_state_before_epoch: Option<i32>,
     /// Per-job environment variables forwarded to workers at scheduling time.
     env_vars: serde_json::Value,
     /// Per-job scheduler configuration overlay as raw JSON (same
-    /// shape as the controller-wide scheduler config). The scheduler
-    /// interprets this; the controller treats it as opaque. An empty
-    /// object is the no-override case.
+    /// shape as the controller-wide scheduler config)
     scheduler_config: serde_json::Value,
+    /// The process-wide pipeline config with this job's overlay applied
+    pipeline_config: serde_json::Value,
+}
+
+impl JobConfig {
+    pub fn pipeline_config(&self) -> Result<PipelineConfig, StateError> {
+        config()
+            .pipeline
+            .try_merge(&self.pipeline_config)
+            .map_err(|e| fatal("invalid pipeline_config", e))
+    }
 }
 
 /// Per-pipeline data that doesn't change for the lifetime of a job.
@@ -188,7 +180,7 @@ fn job_in_final_state(config: &JobConfig, status: &JobStatus) -> bool {
 
 #[derive(Debug)]
 pub enum JobMessage {
-    ConfigUpdate(JobConfig),
+    ConfigUpdate(Box<JobConfig>),
     WorkerConnect {
         worker_id: WorkerId,
         machine_id: MachineId,
@@ -207,7 +199,6 @@ pub enum JobMessage {
         task_id: u32,
         subtask_idx: u32,
     },
-    RunningMessage(RunningMessage),
 }
 
 #[derive(Clone)]
@@ -215,17 +206,7 @@ pub struct ControllerServer {
     job_state: Arc<tokio::sync::Mutex<HashMap<String, StateMachine>>>,
     data_txs: Arc<tokio::sync::Mutex<HashMap<String, Vec<Sender<Result<OutputData, Status>>>>>>,
     scheduler: Arc<dyn Scheduler>,
-    metrics: Arc<RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
-}
-
-#[allow(clippy::result_large_err)]
-fn job_id_from_context(worker_context: &Option<rpc::WorkerContext>) -> Result<String, Status> {
-    Ok(worker_context
-        .as_ref()
-        .ok_or_else(|| Status::invalid_argument("missing worker_context"))?
-        .job_id
-        .clone())
 }
 
 #[tonic::async_trait]
@@ -425,197 +406,6 @@ impl ControllerGrpc for ControllerServer {
     }
 }
 
-#[tonic::async_trait]
-impl JobControllerGrpc for ControllerServer {
-    async fn task_checkpoint_event(
-        &self,
-        request: Request<TaskCheckpointEventReq>,
-    ) -> Result<Response<TaskCheckpointEventResp>, Status> {
-        let req = request.into_inner();
-
-        let ctx = req
-            .worker_context
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
-        debug!(
-            job_id = %ctx.job_id,
-            pipeline_id = ctx.pipeline_id,
-            "received task checkpoint event {:?}",
-            req
-        );
-        let job_id = ctx.job_id.clone();
-
-        self.send_to_job_queue(
-            &job_id,
-            JobMessage::RunningMessage(RunningMessage::TaskCheckpointEvent(req)),
-        )
-        .await?;
-
-        Ok(Response::new(TaskCheckpointEventResp {}))
-    }
-
-    async fn task_checkpoint_completed(
-        &self,
-        request: Request<TaskCheckpointCompletedReq>,
-    ) -> Result<Response<TaskCheckpointCompletedResp>, Status> {
-        let req = request.into_inner();
-
-        let ctx = req
-            .worker_context
-            .as_ref()
-            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
-        debug!(
-            job_id = %ctx.job_id,
-            pipeline_id = ctx.pipeline_id,
-            "received task checkpoint completed {:?}",
-            req
-        );
-        let job_id = ctx.job_id.clone();
-
-        self.send_to_job_queue(
-            &job_id,
-            JobMessage::RunningMessage(RunningMessage::TaskCheckpointFinished(req)),
-        )
-        .await?;
-
-        Ok(Response::new(TaskCheckpointCompletedResp {}))
-    }
-
-    async fn task_finished(
-        &self,
-        request: Request<TaskFinishedReq>,
-    ) -> Result<Response<TaskFinishedResp>, Status> {
-        let req = request.into_inner();
-
-        let ctx = req
-            .worker_context
-            .ok_or_else(|| Status::invalid_argument("missing worker_context"))?;
-
-        self.send_to_job_queue(
-            &ctx.job_id,
-            JobMessage::RunningMessage(RunningMessage::TaskFinished {
-                worker_id: WorkerId(ctx.worker_id),
-                time: from_micros(req.time),
-                task_id: req.task_id,
-                subtask_idx: req.subtask_idx,
-            }),
-        )
-        .await?;
-
-        Ok(Response::new(TaskFinishedResp {}))
-    }
-
-    async fn task_failed(
-        &self,
-        request: Request<TaskFailedReq>,
-    ) -> Result<Response<TaskFailedResp>, Status> {
-        let req = request.into_inner();
-        let ctx = req
-            .worker_context
-            .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing worker_context"))?;
-        let err = req
-            .error
-            .ok_or_else(|| Status::invalid_argument("TaskFailedReq missing error"))?;
-
-        self.send_to_job_queue(
-            &ctx.job_id,
-            JobMessage::RunningMessage(RunningMessage::TaskFailed(TaskFailedEvent {
-                worker_id: WorkerId(ctx.worker_id),
-                task_id: err.task_id,
-                subtask_idx: err.subtask_idx,
-                error_domain: err.error_domain().into(),
-                retry_hint: err.retry_hint().into(),
-                operator_id: err.operator_id,
-                reason: err.error,
-                details: err.details,
-            })),
-        )
-        .await?;
-
-        Ok(Response::new(TaskFailedResp {}))
-    }
-
-    async fn heartbeat(
-        &self,
-        request: Request<HeartbeatReq>,
-    ) -> Result<Response<HeartbeatResp>, Status> {
-        let req = request.into_inner();
-
-        let job_id = job_id_from_context(&req.worker_context)?;
-
-        self.send_to_job_queue(
-            &job_id,
-            JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat {
-                worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
-                time: Instant::now(),
-            }),
-        )
-        .await?;
-
-        return Ok(Response::new(HeartbeatResp {}));
-    }
-
-    async fn nonfatal_error(
-        &self,
-        request: Request<NonfatalErrorReq>,
-    ) -> Result<Response<WorkerErrorRes>, Status> {
-        let req = request.into_inner();
-        let ctx = req
-            .worker_context
-            .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing worker_context"))?;
-        let err = req
-            .error
-            .ok_or_else(|| Status::invalid_argument("NonfatalErrorReq missing error"))?;
-
-        info!(
-            job_id = %ctx.job_id,
-            pipeline_id = ctx.pipeline_id,
-            operator_id = err.operator_id,
-            message = "operator error",
-            error_message = err.error,
-            error_details = err.details
-        );
-
-        let client = self.db.client().await.unwrap();
-        match queries::controller_queries::execute_create_job_log_message(
-            &client,
-            &generate_id(IdTypes::JobLogMessage),
-            &ctx.job_id,
-            &err.operator_id,
-            &(err.subtask_idx as i64),
-            &LogLevel::error,
-            &err.error,
-            &err.details,
-            &errors::ErrorDomain::from(err.error_domain()).as_str(),
-            &errors::RetryHint::from(err.retry_hint()).as_str(),
-        )
-        .await
-        {
-            Ok(_) => Ok(Response::new(WorkerErrorRes {})),
-            Err(db_err) => Err(Status::from_error(Box::new(db_err))),
-        }
-    }
-
-    async fn job_metrics(
-        &self,
-        request: Request<JobMetricsReq>,
-    ) -> Result<Response<JobMetricsResp>, Status> {
-        let job_id = request.into_inner().job_id;
-        let metrics = self
-            .metrics
-            .read()
-            .await
-            .get(&job_id)
-            .ok_or_else(|| Status::not_found("No metrics for job"))?
-            .clone();
-
-        // TODO: send this over in a more efficient format like protobuf
-        Ok(Response::new(JobMetricsResp {
-            metrics: serde_json::to_string(&metrics.get_groups()).unwrap(),
-        }))
-    }
-}
-
 impl ControllerServer {
     pub async fn new(database: DatabaseSource) -> Self {
         let scheduler: Arc<dyn Scheduler> = match &config().controller.scheduler {
@@ -646,7 +436,6 @@ impl ControllerServer {
             data_txs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             job_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             db: database,
-            metrics: Default::default(),
         }
     }
 
@@ -679,7 +468,6 @@ impl ControllerServer {
         let db = self.db.clone();
         let jobs = Arc::clone(&self.job_state);
         let scheduler = Arc::clone(&self.scheduler);
-        let metrics = Arc::clone(&self.metrics);
 
         let token = guard.token();
 
@@ -704,9 +492,6 @@ impl ControllerServer {
                         pipeline_id: p.pipeline_id,
                         pipeline_name: p.pipeline_name,
                         stop_mode: p.stop,
-                        checkpoint_interval: Duration::from_micros(
-                            p.checkpoint_interval_micros as u64,
-                        ),
                         ttl: p.ttl_micros.map(|t| Duration::from_micros(t as u64)),
                         parallelism_overrides: p
                             .parallelism_overrides
@@ -714,14 +499,14 @@ impl ControllerServer {
                             .unwrap()
                             .into_iter()
                             .filter_map(|(k, v)| {
-                                Some((u32::from_str(k).ok()?, v.as_u64()? as usize))
+                                Some((u32::from_str(k).ok()?, u32::try_from(v.as_u64()?).ok()?))
                             })
                             .collect(),
                         restart_nonce: p.config_restart_nonce,
                         restart_mode: p.restart_mode,
-                        ignore_state_before_epoch: p.ignore_state_before_epoch,
                         env_vars: p.env_vars,
                         scheduler_config: p.scheduler_config,
+                        pipeline_config: p.pipeline_config,
                     };
 
                     let mut jobs = jobs.lock().await;
@@ -763,7 +548,6 @@ impl ControllerServer {
                                 db.clone(),
                                 scheduler.clone(),
                                 guard.clone_temporary(),
-                                metrics.clone(),
                             )
                             .await,
                         );
@@ -801,10 +585,7 @@ impl ControllerServer {
         let local_addr = listener.local_addr()?;
 
         let controller_service = ControllerGrpcServer::new(self.clone())
-            .send_compressed(CompressionEncoding::Zstd)
-            .accept_compressed(CompressionEncoding::Zstd);
-
-        let job_controller_service = JobControllerGrpcServer::new(self.clone())
+            .max_decoding_message_size(arroyo_rpc::grpc_max_message_size())
             .send_compressed(CompressionEncoding::Zstd)
             .accept_compressed(CompressionEncoding::Zstd);
 
@@ -825,8 +606,7 @@ impl ControllerServer {
             let server = arroyo_server_common::grpc_server_with_tls(tls_config)
                 .await?
                 .accept_http1(true)
-                .add_service(controller_service)
-                .add_service(job_controller_service);
+                .add_service(controller_service);
 
             guard.into_spawn_task(wrap_start(
                 "controller",
@@ -842,7 +622,6 @@ impl ControllerServer {
                 arroyo_server_common::grpc_server()
                     .accept_http1(true)
                     .add_service(controller_service)
-                    .add_service(job_controller_service)
                     .serve_with_incoming(TcpListenerStream::new(listener)),
             ));
         }

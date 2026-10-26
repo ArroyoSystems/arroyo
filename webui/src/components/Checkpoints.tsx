@@ -158,7 +158,7 @@ const Checkpoints: React.FC<CheckpointsProps> = ({
     const checkpointHeading = (
       <Heading size="md">
         Checkpoint {epoch}
-        <Badge marginLeft={2}>{checkpoint.backend}</Badge>
+        <Badge marginLeft={2}>{checkpoint.checkpoint_type}</Badge>
       </Heading>
     );
 

@@ -3,6 +3,7 @@ use crate::extension::{ArroyoExtension, NodeWithIncomingEdges};
 use crate::multifield_partial_ord;
 use crate::schemas::add_timestamp_field;
 use arroyo_datastream::logical::{LogicalEdge, LogicalEdgeType, LogicalNode, OperatorName};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 use arroyo_rpc::grpc::api::ExpressionWatermarkConfig;
 use datafusion::common::{DFSchemaRef, Result, TableReference, internal_err};
@@ -63,7 +64,7 @@ impl UserDefinedLogicalNodeCore for WatermarkNode {
 
         let timestamp_index = self
             .schema
-            .index_of_column_by_name(Some(&self.qualifier), "_timestamp")
+            .index_of_column_by_name(Some(&self.qualifier), TIMESTAMP_FIELD)
             .ok_or_else(|| DataFusionError::Plan("missing timestamp column".to_string()))?;
 
         Ok(Self {
@@ -124,8 +125,8 @@ impl WatermarkNode {
     ) -> Result<Self> {
         let schema = add_timestamp_field(input.schema().clone(), Some(qualifier.clone()))?;
         let timestamp_index = schema
-            .index_of_column_by_name(None, "_timestamp")
-            .ok_or_else(|| DataFusionError::Plan("missing _timestamp column".to_string()))?;
+            .index_of_column_by_name(None, TIMESTAMP_FIELD)
+            .ok_or_else(|| DataFusionError::Plan("missing timestamp column".to_string()))?;
         Ok(Self {
             input,
             qualifier,

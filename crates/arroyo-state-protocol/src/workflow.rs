@@ -71,8 +71,6 @@ pub struct InitializeGenerationRequest {
     pub job_id: JobId,
     pub generation: Generation,
     pub updated_at: SystemTime,
-    /// Start this generation without restoring a checkpoint from an earlier generation.
-    pub ignore_state: bool,
 }
 
 /// Checkpoint, if any, that a newly initialized generation should restore from.
@@ -261,11 +259,7 @@ where
         });
     }
 
-    let recovery = if request.ignore_state {
-        RecoverySearch::Found(GenerationRecovery::NoCheckpoint)
-    } else {
-        find_recovery_checkpoint(store, &paths, request.generation).await?
-    };
+    let recovery = find_recovery_checkpoint(store, &paths, request.generation).await?;
     let base_checkpoint_ref = match &recovery {
         RecoverySearch::Found(recovery) => match recovery {
             GenerationRecovery::NoCheckpoint => None,

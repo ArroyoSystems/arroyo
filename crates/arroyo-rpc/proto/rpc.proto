@@ -98,6 +98,18 @@ enum RetryHint {
   WITH_BACKOFF = 1;
 }
 
+message RetryPolicy {
+  message NoRetry {}
+  message Backoff {
+    optional uint32 max_retries = 1;
+  }
+
+  oneof policy {
+    NoRetry no_retry = 1;
+    Backoff with_backoff = 2;
+  }
+}
+
 message TaskError {
   string operator_id = 1;
   uint32 task_id = 2;
@@ -106,6 +118,9 @@ message TaskError {
   ErrorDomain error_domain = 5;
   RetryHint retry_hint = 6;
   string details = 7;
+  // Replaces retry_hint, which is retained for older peers and will be
+  // deprecated once the compatibility rollout is complete.
+  RetryPolicy retry_policy = 8;
 }
 
 message TaskFailedReq {
@@ -295,6 +310,10 @@ message JobFailure {
   string message = 4;
   ErrorDomain error_domain = 5;
   RetryHint retry_hint = 6;
+  string details = 7;
+  // Replaces retry_hint, which is retained for older peers and will be
+  // deprecated once the compatibility rollout is complete.
+  RetryPolicy retry_policy = 8;
 }
 
 message JobStatus {
@@ -478,20 +497,29 @@ message TaskAssignment {
 }
 
 message StartExecutionReq {
+  // Controllers decode/re-encode this protobuf, leaving runtime payloads opaque.
+  // Prost drops unknown protobuf fields: upgrade controllers before the API/planner
+  // emits new fields, and account for newer persisted programs before rolling back.
   api.ArrowProgram program = 1;
   optional uint64 restore_epoch = 2;
   uint64 start_epoch = 6;
   uint64 min_epoch = 7;
   repeated TaskAssignment tasks = 3;
-  // if none, clients should use the controller address
-  optional string job_controller_addr = 4;
+  string job_controller_addr = 4;
   bool is_leader = 5;
-  // if set, the worker should wait for a job_controller_init message before starting
-  // (used in worker leader mode)
+  // Always send true so older workers wait for job_controller_init before running.
+  // New workers always wait for the leader and ignore this field.
   bool wait_for_leader = 8;
+  // Keep populated for older workers, which do not read pipeline_worker_config_json.
   uint64 checkpoint_interval_micros = 9;
-  // for leader mode, this gives the path to load the restore checkpoint manifest from
+  // Path to the restore checkpoint manifest.
   optional string checkpoint_manifest_ref = 10;
+  // Arroyo serialization version (pipelines.proto_version), not a DataFusion version.
+  // Older controllers omit this field and send v2 programs. Older workers ignore
+  // it, so deployments must still ensure their runtime supports the programs sent.
+  optional uint32 program_version = 11;
+  // JSON-encoded config.PipelineWorkerConfigs
+  string pipeline_worker_config_json = 12;
 }
 
 message StartExecutionResp {

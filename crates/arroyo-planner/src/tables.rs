@@ -1,4 +1,5 @@
 use crate::extension::remote_table::RemoteTableExtension;
+use crate::rewriters::ReservedFieldNameChecker;
 use crate::types::convert_data_type;
 use crate::{
     ArroyoSchemaProvider, DFField,
@@ -10,12 +11,13 @@ use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
-use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
+use arroyo_rpc::config::PipelineCompilerConfigs;
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::{ConnectorOptions, INTERNAL_FIELD_PREFIX, is_internal_field_name};
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{Column, DataFusionError, plan_err};
@@ -57,8 +59,7 @@ use datafusion::{
     },
 };
 use itertools::Itertools;
-use sqlparser::ast;
-use sqlparser::ast::TableConstraint;
+use sqlparser::ast::{self, TableConstraint};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tracing::warn;
@@ -140,9 +141,19 @@ fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
-    let sql_to_rel = SqlToRel::new(schema_provider);
+    let sql_to_rel = SqlToRel::new_with_options(
+        schema_provider,
+        datafusion::sql::planner::ParserOptions::new().with_collect_spans(true),
+    );
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+
+    // INSERT sources are validated separately by infer_sink_schema, before DataFusion adds
+    // target-column aliases that can include Arroyo's internal timestamp. Check other plans
+    // before optimization can remove user-written aliases.
+    if !matches!(statement, Statement::Insert(_)) {
+        plan.visit_with_subqueries(&mut ReservedFieldNameChecker {})?;
+    }
 
     let analyzed_plan = schema_provider.analyzer.execute_and_check(
         plan,
@@ -670,6 +681,11 @@ impl Table {
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
+                if is_internal_field_name(&name) {
+                    return plan_err!(
+                        "column name '{name}' in table '{table_name}' is invalid; names starting with '{INTERNAL_FIELD_PREFIX}' are reserved"
+                    );
+                }
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options
@@ -977,12 +993,12 @@ impl Table {
         }
     }
 
-    pub fn connector_op(&self) -> Result<ConnectorOp> {
+    pub fn connector_op(&self, compiler_config: &PipelineCompilerConfigs) -> Result<ConnectorOp> {
         match self {
             Table::ConnectorTable(c) | Table::LookupTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
-            Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
+            Table::PreviewSink { logical_plan: _ } => Ok(default_sink(compiler_config)),
         }
     }
 

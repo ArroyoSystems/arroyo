@@ -1,5 +1,4 @@
 use anyhow::bail;
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
@@ -97,20 +96,15 @@ const PROCESS_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct StartPipelineReq {
     pub name: String,
-    pub program: LogicalProgram,
     pub wasm_path: String,
     pub pipeline_id: PipelineId,
     pub organization_id: String,
     pub job_id: JobId,
-    pub hash: String,
     pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
     pub pipeline_tags: HashMap<String, String>,
-    /// Per-job scheduler configuration overlay as raw JSON. An empty
-    /// object means "use the controller's global scheduler config
-    /// unchanged". The scheduler interprets the shape; the controller
-    /// treats it as opaque and passes it through verbatim.
+    /// Per-job scheduler configuration overlay as raw JSON
     pub scheduler_config: serde_json::Value,
 }
 
@@ -608,7 +602,8 @@ impl NodeScheduler {
             None,
         )
         .await?;
-        Ok(NodeGrpcClient::new(channel))
+        Ok(NodeGrpcClient::new(channel)
+            .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()))
     }
 
     async fn stop_worker(

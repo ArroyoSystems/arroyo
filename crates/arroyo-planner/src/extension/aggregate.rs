@@ -238,7 +238,7 @@ impl AggregateExtension {
         use_final_projection: bool,
     ) -> Result<LogicalNode> {
         let binning_function = planner.create_physical_expr(
-            &Expr::Column(Column::new_unqualified("_timestamp".to_string())),
+            &Expr::Column(Column::new_unqualified(TIMESTAMP_FIELD.to_string())),
             &input_schema,
         )?;
         let binning_function_proto =

@@ -33,6 +33,7 @@ export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
 export type GlobalUdf = schemas['GlobalUdf'];
 export type PipelineLocalUdf = schemas['Udf'];
 export type UdfValidationResult = schemas['UdfValidationResult'];
+export type SqlDiagnostic = schemas['SqlDiagnostic'];
 
 const base = window.__ARROYO_BASENAME.replace(/\/$/, '') || '';
 const BASE_URL = `${base}/api`;
@@ -59,6 +60,10 @@ const connectorsKey = () => {
 
 const connectionProfilesKey = () => {
   return { key: 'Connections' };
+};
+
+const controllerConfigKey = () => {
+  return { key: 'ControllerConfig' };
 };
 
 const connectionProfileAutocompleteKey = (id: string) => {
@@ -165,6 +170,27 @@ export const usePing = () => {
     ping: data,
     pingLoading: isLoading,
     pingError: error,
+  };
+};
+
+// Controller config
+
+const controllerConfigFetcher = async () => {
+  const { data, error } = await get('/v1/configs', {});
+  return processResponse(data, error);
+};
+
+export const useControllerConfig = () => {
+  const { data, error, isLoading } = useSWR<unknown>(
+    controllerConfigKey(),
+    controllerConfigFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  return {
+    controllerConfig: data,
+    controllerConfigError: error,
+    controllerConfigLoading: isLoading,
   };
 };
 
@@ -503,16 +529,29 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     options
   );
 
-  const updatePipeline = async (params: { stop?: StopType; parallelism?: number }) => {
+  const updatePipeline = async (params: {
+    stop?: StopType;
+    parallelism?: number;
+    pipelineConfig?: unknown;
+  }) => {
     if (!pipelineId) {
       return;
     }
 
-    await patch('/v1/pipelines/{id}', {
+    const {
+      data: updatedPipeline,
+      error: updateError,
+      response,
+    } = await patch('/v1/pipelines/{id}', {
       params: { path: { id: pipelineId } },
-      body: { stop: params.stop, parallelism: params.parallelism },
+      body: {
+        stop: params.stop,
+        parallelism: params.parallelism,
+        pipeline_config: params.pipelineConfig,
+      },
     });
-    await mutate();
+    processResponse(updatedPipeline, updateError, response);
+    await Promise.all([mutate(), globalMutate(pipelineJobsKey(pipelineId))]);
   };
 
   const restartPipeline = async (ignoreState?: boolean) => {
@@ -524,7 +563,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
       params: { path: { id: pipelineId } },
       body: { ignore_state: ignoreState ?? false },
     });
-    await mutate();
+    await Promise.all([mutate(), globalMutate(pipelineJobsKey(pipelineId))]);
   };
 
   const deletePipeline = async () => {

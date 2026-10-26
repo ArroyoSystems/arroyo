@@ -20,12 +20,6 @@ import {
   Grid,
   Heading,
   Icon,
-  Modal,
-  ModalBody,
-  ModalCloseButton,
-  ModalContent,
-  ModalHeader,
-  ModalOverlay,
   Popover,
   PopoverArrow,
   PopoverBody,
@@ -66,24 +60,11 @@ import PipelineNotFound from '../../components/PipelineNotFound';
 import { QuestionOutlineIcon, WarningIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
 import { PipelineOutputs } from './PipelineOutputs';
+import { PipelineConfigs } from './PipelineConfigs';
 import PaginatedContent from '../../components/PaginatedContent';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
 import { useNavbar } from '../../App';
-
-function flattenConfig(value: unknown, prefix = ''): [string, string][] {
-  if (value === null || typeof value !== 'object') {
-    return [[prefix, String(value)]];
-  }
-  if (Array.isArray(value)) {
-    return [[prefix, JSON.stringify(value)]];
-  }
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length === 0) {
-    return prefix ? [[prefix, '{}']] : [];
-  }
-  return entries.flatMap(([key, v]) => flattenConfig(v, prefix ? `${prefix}.${key}` : key));
-}
 
 export function PipelineDetails() {
   const [activeOperator, setActiveOperator] = useState<number | undefined>(undefined);
@@ -96,11 +77,6 @@ export function PipelineDetails() {
     isOpen: restartWithoutStateModalIsOpen,
     onOpen: onRestartWithoutStateModalOpen,
     onClose: onRestartWithoutStateModalClose,
-  } = useDisclosure();
-  const {
-    isOpen: schedulerConfigModalIsOpen,
-    onOpen: onSchedulerConfigModalOpen,
-    onClose: onSchedulerConfigModalClose,
   } = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
 
@@ -144,6 +120,10 @@ export function PipelineDetails() {
   async function updateJobParallelism(parallelism: number) {
     console.log(`Setting pipeline parallelism=${parallelism}`);
     updatePipeline({ parallelism });
+  }
+
+  async function updateJobPipelineConfig(pipelineConfig: Record<string, unknown>) {
+    await updatePipeline({ pipelineConfig });
   }
 
   let operatorDetail = undefined;
@@ -219,32 +199,6 @@ export function PipelineDetails() {
             </Box>
           </Box>
         ) : null}
-        {job.env_vars && Object.keys(job.env_vars as Record<string, string>).length > 0 ? (
-          <Box className="field">
-            <Box className="fieldName">Env Vars</Box>
-            <Box className="fieldValue">
-              <Wrap spacing={1}>
-                {Object.entries(job.env_vars as Record<string, string>).map(([k, v]) => (
-                  <WrapItem key={k}>
-                    <Badge>
-                      {k}: {v}
-                    </Badge>
-                  </WrapItem>
-                ))}
-              </Wrap>
-            </Box>
-          </Box>
-        ) : null}
-        {job.scheduler_config && Object.keys(job.scheduler_config as object).length > 0 ? (
-          <Box className="field">
-            <Box className="fieldName">Scheduler Config</Box>
-            <Box className="fieldValue">
-              <Button size="sm" onClick={onSchedulerConfigModalOpen}>
-                View
-              </Button>
-            </Box>
-          </Box>
-        ) : null}
         {operatorDetail}
       </Stack>
     </TabPanel>
@@ -270,6 +224,12 @@ export function PipelineDetails() {
           checkpointsError={checkpointsError}
         />
       }
+    </TabPanel>
+  );
+
+  const configsTab = (
+    <TabPanel height="100%" overflow="hidden" padding={5}>
+      <PipelineConfigs job={job} updatePipelineConfig={updateJobPipelineConfig} />
     </TabPanel>
   );
 
@@ -319,6 +279,7 @@ export function PipelineDetails() {
         <Tab>Operators</Tab>
         <Tab>Outputs</Tab>
         <Tab>Checkpoints</Tab>
+        <Tab>Configs</Tab>
         <Tab>Query</Tab>
         <Tab>UDFs</Tab>
         <Tab>Errors {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}</Tab>
@@ -327,6 +288,7 @@ export function PipelineDetails() {
         {operatorsTab}
         {outputsTab}
         {checkpointsTab}
+        {configsTab}
         {queryTab}
         {udfsTab}
         {errorsTab}
@@ -460,27 +422,6 @@ export function PipelineDetails() {
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
-      <Modal
-        isOpen={schedulerConfigModalIsOpen}
-        onClose={onSchedulerConfigModalClose}
-        isCentered
-        size="xl"
-      >
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>Scheduler Config</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody pb={6}>
-            <Stack spacing={1}>
-              {flattenConfig(job.scheduler_config).map(([k, v]) => (
-                <Text key={k} fontFamily="mono" fontSize="sm" wordBreak="break-all">
-                  {k}: {v}
-                </Text>
-              ))}
-            </Stack>
-          </ModalBody>
-        </ModalContent>
-      </Modal>
     </>
   );
 }

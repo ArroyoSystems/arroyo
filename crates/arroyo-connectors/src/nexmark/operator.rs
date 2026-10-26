@@ -281,7 +281,9 @@ impl SourceOperator for NexmarkSourceFunc {
             next_event.bid.as_ref().write_into(&mut bid_builder);
             timestamp_builder.append_value(to_nanos(next_event.event_timetamp) as i64);
 
-            if should_flush(records, flush_time) {
+            // Nexmark generates events synthetically with no raw input bytes.
+            // Pass 0 for bytes buffered.
+            if should_flush(records, 0, flush_time) {
                 collector
                     .collect(RecordBatch::try_new(
                         ctx.out_schema.schema.clone(),

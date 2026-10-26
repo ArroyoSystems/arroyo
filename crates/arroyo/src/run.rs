@@ -167,7 +167,7 @@ async fn run_pipeline(
     if !errors.errors.is_empty() {
         eprintln!("There were some issues with the provided query");
         for error in errors.errors {
-            eprintln!("  * {error}");
+            eprintln!("  * {}", error.message);
         }
         exit(1);
     }
@@ -454,7 +454,7 @@ pub async fn run(args: RunArgs) {
             c.controller.scheduler = Scheduler::Process;
         }
 
-        c.pipeline.default_sink = DefaultSink::Stdout;
+        c.pipeline.compiler.default_sink = DefaultSink::Stdout;
     });
 
     let db = db_source().await;

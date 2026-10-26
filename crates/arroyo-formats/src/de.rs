@@ -11,12 +11,12 @@ use arrow_array::builder::{
 use arrow_array::types::GenericBinaryType;
 use arrow_array::{ArrayRef, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Schema, SchemaRef};
+use arroyo_rpc::MetadataField;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
 use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
-use arroyo_rpc::{MetadataField, TIMESTAMP_FIELD};
 use arroyo_types::{LOOKUP_KEY_INDEX_FIELD, to_nanos};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
@@ -36,7 +36,10 @@ pub enum FieldValueType<'a> {
 
 struct ContextBuffer {
     buffer: Vec<Box<dyn ArrayBuilder>>,
-    created: Instant,
+    /// Accumulated raw input bytes since last flush.
+    /// Currently measured as pre-deserialization input size rather than Arrow buffer memory.
+    buffered_bytes: usize,
+    buffered_since: Option<Instant>,
 }
 
 impl ContextBuffer {
@@ -49,7 +52,8 @@ impl ContextBuffer {
 
         Self {
             buffer,
-            created: Instant::now(),
+            buffered_bytes: 0,
+            buffered_since: None,
         }
     }
 
@@ -58,10 +62,14 @@ impl ContextBuffer {
     }
 
     pub fn should_flush(&self) -> bool {
-        should_flush(self.size(), self.created)
+        self.buffered_since.is_some_and(|buffered_since| {
+            should_flush(self.size(), self.buffered_bytes, buffered_since)
+        })
     }
 
-    pub fn finish(&mut self) -> Vec<ArrayRef> {
+    pub fn flush(&mut self) -> Vec<ArrayRef> {
+        self.buffered_bytes = 0;
+        self.buffered_since = None;
         self.buffer.iter_mut().map(|a| a.finish()).collect()
     }
 }
@@ -170,6 +178,9 @@ enum BufferDecoder {
     JsonDecoder {
         decoder: arrow::json::reader::Decoder,
         buffered_count: usize,
+        /// Accumulated raw input bytes since last flush.
+        /// Currently measured as pre-deserialization input size rather than Arrow buffer memory.
+        buffered_bytes: usize,
         buffered_since: Instant,
     },
 }
@@ -180,9 +191,10 @@ impl BufferDecoder {
             BufferDecoder::Buffer(b) => b.should_flush(),
             BufferDecoder::JsonDecoder {
                 buffered_count,
+                buffered_bytes,
                 buffered_since,
                 ..
-            } => should_flush(*buffered_count, *buffered_since),
+            } => should_flush(*buffered_count, *buffered_bytes, *buffered_since),
         }
     }
 
@@ -194,7 +206,7 @@ impl BufferDecoder {
         match self {
             BufferDecoder::Buffer(buffer) => {
                 if buffer.size() > 0 {
-                    Some(Ok((buffer.finish(), None)))
+                    Some(Ok((buffer.flush(), None)))
                 } else {
                     None
                 }
@@ -203,17 +215,26 @@ impl BufferDecoder {
                 decoder,
                 buffered_since,
                 buffered_count,
+                buffered_bytes,
             } => {
                 *buffered_since = Instant::now();
                 *buffered_count = 0;
+                *buffered_bytes = 0;
                 Some(match bad_data {
-                    BadData::Fail { .. } => decoder
-                        .flush()
-                        .map_err(|e| {
-                            SourceError::bad_data(format!("JSON does not match schema: {e:?}"))
-                        })
-                        .transpose()?
-                        .map(|batch| (batch.columns().to_vec(), None)),
+                    BadData::Fail { .. } => match decoder.flush_with_bad_data() {
+                        Ok(Some((batch, _mask, _invalid_records, validation_errors))) => {
+                            if let Some(error) = validation_errors.first() {
+                                Err(SourceError::bad_data(format!(
+                                    "JSON does not match schema: {}",
+                                    format_validation_error(error)
+                                )))
+                            } else {
+                                Ok((batch.columns().to_vec(), None))
+                            }
+                        }
+                        Ok(None) => return None,
+                        Err(_) => Err(SourceError::bad_data("failed to decode JSON")),
+                    },
                     BadData::Drop { .. } => decoder
                         .flush_with_bad_data()
                         .map_err(|e| {
@@ -255,7 +276,7 @@ impl BufferDecoder {
             } => {
                 decoder
                     .decode(msg)
-                    .map_err(|e| SourceError::bad_data(format!("invalid JSON: {e:?}")))?;
+                    .map_err(|_| SourceError::bad_data("invalid JSON"))?;
 
                 *buffered_count += 1;
 
@@ -305,6 +326,16 @@ impl BufferDecoder {
 
                 *buffered_count += 1;
             }
+        }
+    }
+
+    fn add_input_bytes(&mut self, n: usize) {
+        match self {
+            BufferDecoder::Buffer(b) => {
+                b.buffered_bytes += n;
+                b.buffered_since.get_or_insert_with(Instant::now);
+            }
+            BufferDecoder::JsonDecoder { buffered_bytes, .. } => *buffered_bytes += n,
         }
     }
 }
@@ -414,7 +445,9 @@ impl ArrowDeserializer {
             let fields = schema
                 .fields()
                 .iter()
-                .filter(|f| !metadata_names.contains(f.name()) && f.name() != TIMESTAMP_FIELD)
+                .enumerate()
+                .filter(|(i, f)| !metadata_names.contains(f.name()) && Some(*i) != timestamp_idx)
+                .map(|(_, f)| f)
                 .cloned()
                 .collect::<Vec<_>>();
             Arc::new(Schema::new_with_metadata(fields, schema.metadata.clone()))
@@ -440,6 +473,7 @@ impl ArrowDeserializer {
                     .build_decoder()
                     .unwrap(),
                 buffered_count: 0,
+                buffered_bytes: 0,
                 buffered_since: Instant::now(),
             },
             _ => BufferDecoder::Buffer(ContextBuffer::new(schema_without_additional.clone())),
@@ -497,18 +531,26 @@ impl ArrowDeserializer {
         additional_fields: Option<&HashMap<&str, FieldValueType<'_>>>,
     ) -> Vec<DataflowError> {
         let (count, errors) = match &*self.format {
-            Format::Avro(_) => self.deserialize_slice_avro(msg).await,
+            Format::Avro(_) => {
+                let (count, errors) = self.deserialize_slice_avro(msg).await;
+                if count > 0 {
+                    self.buffer_decoder.add_input_bytes(msg.len());
+                }
+                (count, errors)
+            }
             _ => {
                 let mut count = 0;
-                let errors = FramingIterator::new(self.framing.clone(), msg)
-                    .map(|t| self.deserialize_single(t))
-                    .filter_map(|t| {
-                        if t.is_ok() {
+                let mut errors = vec![];
+                for t in FramingIterator::new(self.framing.clone(), msg) {
+                    let len = t.len();
+                    match self.deserialize_single(t) {
+                        Ok(()) => {
                             count += 1;
+                            self.buffer_decoder.add_input_bytes(len);
                         }
-                        t.err()
-                    })
-                    .collect();
+                        Err(e) => errors.push(e),
+                    }
+                }
                 (count, errors)
             }
         };
@@ -588,7 +630,7 @@ impl ArrowDeserializer {
 
         let mut source_errors = vec![];
 
-        if let Some((_, timestamp)) = &mut self.timestamp_builder {
+        if let Some((timestamp_index, timestamp)) = &mut self.timestamp_builder {
             let array = if let Some(error_mask) = &error_mask {
                 let errors = error_mask.false_count();
                 if errors > 0 {
@@ -603,7 +645,11 @@ impl ArrowDeserializer {
                 Arc::new(timestamp.finish())
             };
 
-            arrays.insert(TIMESTAMP_FIELD, array);
+            // use the schema's name, which may be the legacy one for older programs
+            arrays.insert(
+                self.final_schema.field(*timestamp_index).name().as_str(),
+                array,
+            );
         }
 
         let arrays = self
@@ -800,12 +846,16 @@ fn add_additional_fields(
 
 #[cfg(test)]
 mod tests {
-    use crate::de::{ArrowDeserializer, FieldValueType, FramingIterator};
+    use crate::de::{
+        ArrowDeserializer, BufferDecoder, ContextBuffer, FieldValueType, FramingIterator,
+    };
     use arrow::datatypes::Int32Type;
+    use arrow_array::builder::StringBuilder;
     use arrow_array::cast::AsArray;
     use arrow_array::types::{GenericBinaryType, Int64Type, TimestampNanosecondType};
-    use arrow_schema::{DataType, Schema, TimeUnit};
+    use arrow_schema::{DataType, Field, Schema, TimeUnit};
     use arroyo_rpc::MetadataField;
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::df::ArroyoSchema;
     use arroyo_rpc::errors::DataflowError;
     use arroyo_rpc::formats::{
@@ -814,7 +864,48 @@ mod tests {
     use arroyo_types::to_nanos;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::SystemTime;
+    use std::time::{Duration, Instant, SystemTime};
+
+    #[test]
+    fn context_buffer_resets_linger_after_flush() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "value",
+            DataType::Utf8,
+            false,
+        )]));
+        let mut buffer = ContextBuffer::new(schema);
+
+        let builder = buffer.buffer[0]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap();
+        builder.append_value("first");
+        let mut decoder = BufferDecoder::Buffer(buffer);
+        decoder.add_input_bytes(5);
+
+        let BufferDecoder::Buffer(buffer) = &mut decoder else {
+            unreachable!();
+        };
+        buffer.buffered_since = Some(Instant::now() - Duration::from_secs(1));
+        assert!(buffer.should_flush());
+
+        let _ = buffer.flush();
+        assert_eq!(buffer.buffered_bytes, 0);
+        assert_eq!(buffer.buffered_since, None);
+
+        let builder = buffer.buffer[0]
+            .as_any_mut()
+            .downcast_mut::<StringBuilder>()
+            .unwrap();
+        builder.append_value("second");
+        let second_write = Instant::now();
+        decoder.add_input_bytes(6);
+
+        let BufferDecoder::Buffer(buffer) = &decoder else {
+            unreachable!();
+        };
+        assert!(buffer.buffered_since.is_some_and(|t| t >= second_write));
+    }
 
     #[test]
     fn test_line_framing() {
@@ -886,7 +977,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("x", arrow_schema::DataType::Int64, true),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -945,6 +1036,7 @@ mod tests {
     #[tokio::test]
     async fn test_bad_data_fail() {
         let mut deserializer = setup_deserializer(BadData::Fail {});
+        let secret = "sensitive@example.com";
 
         assert!(
             deserializer
@@ -959,7 +1051,7 @@ mod tests {
         assert!(
             deserializer
                 .deserialize_slice(
-                    json!({ "x": "hello" }).to_string().as_bytes(),
+                    json!({ "x": secret }).to_string().as_bytes(),
                     SystemTime::now(),
                     None,
                 )
@@ -969,7 +1061,37 @@ mod tests {
 
         let err = deserializer.flush_buffer().1.remove(0);
 
-        assert!(matches!(err, DataflowError::DataError { .. }));
+        let DataflowError::DataError { details, count } = err else {
+            panic!("expected bad-data error");
+        };
+        assert_eq!(count, 1);
+        assert!(details.contains("field 'x': expected Int64, got string (length: 21)"));
+        assert!(!details.contains(secret));
+        assert!(!details.contains("JsonError"));
+    }
+
+    #[tokio::test]
+    async fn test_bad_data_fail_redacts_invalid_json() {
+        let mut deserializer = setup_deserializer(BadData::Fail {});
+        let secret = "sensitive-value";
+
+        let mut errors = deserializer
+            .deserialize_slice(
+                format!(r#"{{"x":"{secret}""#).as_bytes(),
+                SystemTime::now(),
+                None,
+            )
+            .await;
+        errors.extend(deserializer.flush_buffer().1);
+
+        assert!(!errors.is_empty());
+        for error in errors {
+            let DataflowError::DataError { details, .. } = error else {
+                panic!("expected bad-data error");
+            };
+            assert!(!details.contains(secret));
+            assert!(!details.contains("JsonError"));
+        }
     }
 
     #[tokio::test]
@@ -977,7 +1099,7 @@ mod tests {
         let schema = Arc::new(Schema::new(vec![
             arrow_schema::Field::new("value", arrow_schema::DataType::Binary, false),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -1023,7 +1145,7 @@ mod tests {
             arrow_schema::Field::new("y", arrow_schema::DataType::Int32, true),
             arrow_schema::Field::new("z", arrow_schema::DataType::Utf8, true),
             arrow_schema::Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 arrow_schema::DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),

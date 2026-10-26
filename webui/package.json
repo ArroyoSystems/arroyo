@@ -3,12 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@12.8.1",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "format": "npx prettier --write src/ && npx eslint --fix --ext .js,.jsx,.ts,.tsx src",
-    "check": "npx prettier --check src/ && npx eslint --ext .js,.jsx,.ts,.tsx src",
+    "format": "prettier --write src/ && eslint --fix --ext .js,.jsx,.ts,.tsx src",
+    "check": "prettier --check src/ && eslint --ext .js,.jsx,.ts,.tsx src",
     "openapi": "cargo build --package arroyo-openapi  && pnpm exec openapi-typescript $(pwd)/../target/api-spec.json --output $(pwd)/src/gen/api-types.ts"
   },
   "dependencies": {

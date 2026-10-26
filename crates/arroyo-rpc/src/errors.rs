@@ -148,13 +148,22 @@ impl From<rpc::ErrorDomain> for ErrorDomain {
 pub enum RetryHint {
     NoRetry,
     WithBackoff,
+    WithBackoffLimited(u32),
 }
 
-impl From<RetryHint> for rpc::RetryHint {
+impl From<RetryHint> for rpc::RetryPolicy {
     fn from(value: RetryHint) -> Self {
-        match value {
-            RetryHint::NoRetry => rpc::RetryHint::NoRetry,
-            RetryHint::WithBackoff => rpc::RetryHint::WithBackoff,
+        use rpc::retry_policy::{Backoff, NoRetry, Policy};
+
+        let policy = match value {
+            RetryHint::NoRetry => Policy::NoRetry(NoRetry {}),
+            RetryHint::WithBackoff => Policy::WithBackoff(Backoff { max_retries: None }),
+            RetryHint::WithBackoffLimited(max_retries) => Policy::WithBackoff(Backoff {
+                max_retries: Some(max_retries),
+            }),
+        };
+        Self {
+            policy: Some(policy),
         }
     }
 }
@@ -169,10 +178,41 @@ impl From<rpc::RetryHint> for RetryHint {
 }
 
 impl RetryHint {
+    pub fn from_rpc(policy: Option<&rpc::RetryPolicy>, legacy_hint: rpc::RetryHint) -> Self {
+        use rpc::retry_policy::Policy;
+
+        match policy.and_then(|policy| policy.policy.as_ref()) {
+            Some(Policy::NoRetry(_)) => Self::NoRetry,
+            Some(Policy::WithBackoff(backoff)) => match backoff.max_retries {
+                Some(max_retries) => Self::WithBackoffLimited(max_retries),
+                None => Self::WithBackoff,
+            },
+            None => legacy_hint.into(),
+        }
+    }
+
+    pub fn legacy_hint(&self) -> rpc::RetryHint {
+        match self {
+            Self::NoRetry => rpc::RetryHint::NoRetry,
+            Self::WithBackoff | Self::WithBackoffLimited(_) => rpc::RetryHint::WithBackoff,
+        }
+    }
+
+    pub fn should_retry(&self, retries_attempted: i32) -> bool {
+        match self {
+            Self::NoRetry => false,
+            Self::WithBackoff => true,
+            Self::WithBackoffLimited(max_retries) => {
+                i64::from(retries_attempted) < i64::from(*max_retries)
+            }
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             RetryHint::NoRetry => "no_retry",
             RetryHint::WithBackoff => "with_backoff",
+            RetryHint::WithBackoffLimited(_) => "with_backoff_limited",
         }
     }
 }
@@ -212,7 +252,7 @@ fn classify_datafusion_error(err: &DataFusionError) -> (ErrorDomain, RetryHint) 
 
 impl From<DataflowError> for TaskError {
     fn from(value: DataflowError) -> Self {
-        let message = value.to_string();
+        let mut message = value.to_string();
         let (domain, retry_hint, details) = match value {
             DataflowError::ConnectorError {
                 domain,
@@ -233,12 +273,11 @@ impl From<DataflowError> for TaskError {
             DataflowError::ExternalError(_) => {
                 (ErrorDomain::External, RetryHint::WithBackoff, None)
             }
-            DataflowError::DataError { details, count } => (
-                ErrorDomain::External,
-                RetryHint::WithBackoff,
-                Some(format!("count: {count}, details: {details}")),
-            ),
-            DataflowError::UnknownError(_) => (ErrorDomain::Internal, RetryHint::WithBackoff, None),
+            DataflowError::DataError { details, count } => {
+                message = format!("error deserializing data ({count} times)");
+                (ErrorDomain::External, RetryHint::NoRetry, Some(details))
+            }
+            DataflowError::UnknownError(_) => (ErrorDomain::External, RetryHint::WithBackoff, None),
             DataflowError::WithOperator { error, operator_id } => {
                 let mut inner: TaskError = (*error).into();
                 inner.operator_id = Some(operator_id);
