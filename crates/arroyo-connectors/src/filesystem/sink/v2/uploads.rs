@@ -1,7 +1,7 @@
 use super::{classify_storage_error, map_storage_error};
-use crate::filesystem::sink::FsEventLogger;
+use crate::filesystem::sink::{FsEventLogger, storage_error_message};
 use arroyo_rpc::connector_err;
-use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, RetryHint, StorageError};
+use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, StorageError};
 use arroyo_storage::StorageProvider;
 use bytes::Bytes;
 use futures::future::try_join_all;
@@ -198,35 +198,33 @@ async fn validate_already_there(
             }
         }
         Err(head_error) => {
-            match classify_recovery_head_error(&head_error) {
-                None => {
-                    // we failed to write the file; return the original write error
-                    Err(handle_error(started, logger, e))
-                }
-                Some((domain, retry)) => {
-                    // we failed to determine the state of the file because head also failed
-                    Err(DataflowError::ConnectorError {
-                        domain,
-                        retry,
-                        error: "failed to validate whether failed multipart write successfully completed"
-                            .to_string(),
-                        source: Some(head_error.into()),
-                    })
-                }
-            }
+            Err(map_recovery_head_error(head_error)
+                .unwrap_or_else(|| handle_error(started, logger, e)))
         }
     }
 }
 
-fn classify_recovery_head_error(head_error: &StorageError) -> Option<(ErrorDomain, RetryHint)> {
+fn map_recovery_head_error(head_error: StorageError) -> Option<DataflowError> {
     if matches!(
         head_error,
         StorageError::ObjectStore(object_store::Error::NotFound { .. })
     ) {
-        None
-    } else {
-        Some(classify_storage_error(head_error))
+        return None;
     }
+
+    let (domain, retry) = classify_storage_error(&head_error);
+    let error = match domain {
+        ErrorDomain::User => storage_error_message(&head_error),
+        ErrorDomain::External | ErrorDomain::Internal => {
+            "failed to validate whether failed multipart write successfully completed".to_string()
+        }
+    };
+    Some(DataflowError::ConnectorError {
+        domain,
+        retry,
+        error,
+        source: Some(head_error.into()),
+    })
 }
 
 pub fn create_multipart_finalize_future(
@@ -264,8 +262,8 @@ pub fn create_multipart_finalize_future(
 
 #[cfg(test)]
 mod tests {
-    use super::classify_recovery_head_error;
-    use arroyo_rpc::errors::{ErrorDomain, RetryHint, StorageError};
+    use super::map_recovery_head_error;
+    use arroyo_rpc::errors::{DataflowError, ErrorDomain, RetryHint, StorageError, TaskError};
     use object_store::Error;
     use std::io;
 
@@ -274,21 +272,33 @@ mod tests {
     }
 
     #[test]
-    fn recovery_head_auth_errors_are_user_errors() {
+    fn recovery_head_auth_errors_preserve_original_message_and_details() {
         for error in [
             Error::PermissionDenied {
                 path: "test.parquet".to_string(),
-                source: source(),
+                source: Box::new(io::Error::other("403 Forbidden")),
             },
             Error::Unauthenticated {
                 path: "test.parquet".to_string(),
-                source: source(),
+                source: Box::new(io::Error::other("401 Unauthorized")),
             },
         ] {
+            let expected_message = error.to_string();
+            let head_error = StorageError::ObjectStore(error);
+            let expected_details = head_error.to_string();
+            let mapped: TaskError = map_recovery_head_error(head_error).unwrap().into();
+
+            assert_eq!(mapped.domain, ErrorDomain::User);
+            assert_eq!(mapped.retry_hint, RetryHint::NoRetry);
             assert_eq!(
-                classify_recovery_head_error(&StorageError::ObjectStore(error)),
-                Some((ErrorDomain::User, RetryHint::NoRetry))
+                mapped.message,
+                format!("error in connector: {expected_message}")
             );
+            let details = mapped
+                .details
+                .expect("HEAD error should retain diagnostic details");
+            assert!(details.contains(&expected_details));
+            assert!(details.contains(&expected_message));
         }
     }
 
@@ -299,10 +309,25 @@ mod tests {
             source: source(),
         });
 
+        let expected_source = error.to_string();
+        let mapped = map_recovery_head_error(error).unwrap();
+        let DataflowError::ConnectorError {
+            domain,
+            retry,
+            error,
+            source,
+        } = mapped
+        else {
+            panic!("expected connector error, got {mapped:?}");
+        };
+
+        assert_eq!(domain, ErrorDomain::External);
+        assert_eq!(retry, RetryHint::WithBackoff);
         assert_eq!(
-            classify_recovery_head_error(&error),
-            Some((ErrorDomain::External, RetryHint::WithBackoff))
+            error,
+            "failed to validate whether failed multipart write successfully completed"
         );
+        assert_eq!(source.unwrap().to_string(), expected_source);
     }
 
     #[test]
@@ -312,6 +337,6 @@ mod tests {
             source: source(),
         });
 
-        assert_eq!(classify_recovery_head_error(&error), None);
+        assert!(map_recovery_head_error(error).is_none());
     }
 }

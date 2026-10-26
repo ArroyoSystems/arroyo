@@ -156,19 +156,18 @@ impl<R: BatchBufferingWriter + Send + 'static> FileSystemSink<R> {
 fn map_storage_error(storage_error: StorageError) -> DataflowError {
     let (domain, retry) = classify_storage_error(&storage_error);
 
+    DataflowError::ConnectorError {
+        domain,
+        retry,
+        error: storage_error_message(&storage_error),
+        source: None,
+    }
+}
+
+fn storage_error_message(storage_error: &StorageError) -> String {
     match storage_error {
-        StorageError::ObjectStore(obj_err) => DataflowError::ConnectorError {
-            domain,
-            retry,
-            error: obj_err.to_string(),
-            source: None,
-        },
-        storage_error => DataflowError::ConnectorError {
-            domain,
-            retry,
-            error: storage_error.to_string(),
-            source: None,
-        },
+        StorageError::ObjectStore(obj_err) => obj_err.to_string(),
+        storage_error => storage_error.to_string(),
     }
 }
 
