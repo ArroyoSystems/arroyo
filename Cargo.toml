@@ -121,15 +121,15 @@ split-debuginfo = "unpacked"
 typify = { git = 'https://github.com/ArroyoSystems/typify.git', branch = 'arroyo' }
 parquet = { git = "https://github.com/ArroyoSystems/arrow-rs", branch = "58.4.0/arroyo" }
 arrow-json = { git = "https://github.com/ArroyoSystems/arrow-rs", branch = "58.4.0/arroyo" }
-datafusion = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-common = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-execution = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-expr = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-physical-expr = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-physical-plan = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-proto = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-functions = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
-datafusion-functions-window = { git = "https://github.com/ArroyoSystems/arrow-datafusion", branch = "54.1.0/arroyo" }
+datafusion = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-common = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-execution = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-expr = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-physical-expr = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-physical-plan = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-proto = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-functions = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
+datafusion-functions-window = { git = "https://github.com/ArroyoSystems/arrow-datafusion", rev = "0b17b6de84ede334a292c5e3037beb550a90d184" }
 
 sqlparser = { git = "https://github.com/ArroyoSystems/sqlparser-rs", branch = "0.62.0/arroyo" }
 
