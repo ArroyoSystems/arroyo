@@ -112,7 +112,7 @@ mod tests {
         CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery, GenerationResolution,
         InitializeGenerationRequest, PublishCheckpointRequest, claim_epoch_record, complete_commit,
         initialize_generation, mark_committed, prepare_commit, publish_checkpoint,
-        resolve_generation_manifest,
+        resolve_generation_manifest, verify_stop_checkpoint,
     };
     use arroyo_rpc::grpc::rpc::{
         CheckpointManifest, ExpiringKeyedTimeTableCheckpointMetadata,
@@ -150,6 +150,7 @@ mod tests {
             start_time: 0,
             finish_time: 0,
             needs_commit,
+            is_stop_checkpoint: false,
             operators: vec![],
             parent_checkpoint_ref: parent_checkpoint_ref
                 .map(|checkpoint_ref| checkpoint_ref.to_string()),
@@ -250,6 +251,173 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    async fn completed_stop_checkpoint(
+        needs_commit: bool,
+    ) -> (
+        MemoryProtocolStore,
+        ProtocolPaths,
+        CheckpointRef,
+        CheckpointManifest,
+    ) {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_current_generation(&store, &paths, Generation(1)).await;
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let mut checkpoint = checkpoint(1, None, needs_commit);
+        checkpoint.is_stop_checkpoint = true;
+        let publication = publish_checkpoint(
+            &store,
+            PublishCheckpointRequest {
+                generation_manifest: &generation_manifest(None, None),
+                checkpoint_ref: &checkpoint_ref,
+                checkpoint: &checkpoint,
+                created_at: from_micros(1),
+            },
+        )
+        .await
+        .unwrap();
+        if let CheckpointPublication::CommitRequired { commit_permit, .. } = publication {
+            complete_commit(&store, &commit_permit, Generation(1))
+                .await
+                .unwrap();
+        }
+        (store, paths, checkpoint_ref, checkpoint)
+    }
+
+    #[tokio::test]
+    async fn verifies_completed_stop_with_and_without_external_commits() {
+        for needs_commit in [false, true] {
+            let (store, paths, checkpoint_ref, _) = completed_stop_checkpoint(needs_commit).await;
+            let verified = verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(verified.checkpoint_ref, checkpoint_ref);
+            assert_eq!(verified.epoch, Epoch(1));
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_verification_does_not_claim_or_commit_incomplete_checkpoints() {
+        for missing_epoch in [false, true] {
+            let (store, paths, _, _) = completed_stop_checkpoint(true).await;
+            let missing = if missing_epoch {
+                paths.epoch_record(Epoch(1))
+            } else {
+                paths.committed_marker(Generation(1), Epoch(1))
+            };
+            store.delete_object(&missing).await.unwrap();
+            assert!(
+                verify_stop_checkpoint(&store, &paths, Generation(1))
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(store.read_bytes(&missing).await.unwrap().is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_verification_rejects_an_orphaned_checkpoint() {
+        let (store, paths, _, _) = completed_stop_checkpoint(true).await;
+        let checkpoint = checkpoint_for_generation(Generation(2), 1, None, true);
+        let record = EpochRecord::for_checkpoint(
+            PipelineId::new("P"),
+            Generation(2),
+            paths.checkpoint_manifest(Generation(2), Epoch(1)),
+            &checkpoint,
+            from_micros(1),
+        )
+        .unwrap();
+        put_json(&store, &paths.epoch_record(Epoch(1)), &record)
+            .await
+            .unwrap();
+        assert!(
+            verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_verification_does_not_reuse_an_older_generation_or_base_checkpoint() {
+        let (store, paths, checkpoint_ref, _) = completed_stop_checkpoint(true).await;
+        write_current_generation(&store, &paths, Generation(2)).await;
+        assert!(
+            verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let mut manifest =
+            generation_manifest_for_generation(Generation(2), Some(checkpoint_ref.clone()), None);
+        put_json(&store, &paths.generation_manifest(Generation(2)), &manifest)
+            .await
+            .unwrap();
+        assert!(
+            verify_stop_checkpoint(&store, &paths, Generation(2))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        manifest.latest_checkpoint_ref = Some(checkpoint_ref.clone());
+        put_json(&store, &paths.generation_manifest(Generation(2)), &manifest)
+            .await
+            .unwrap();
+        let StoreError::Protocol(ProtocolError::MetadataMismatch {
+            path,
+            field,
+            expected,
+            actual,
+        }) = verify_stop_checkpoint(&store, &paths, Generation(2))
+            .await
+            .unwrap_err()
+        else {
+            panic!("expected a metadata mismatch");
+        };
+        assert_eq!(path, checkpoint_ref);
+        assert_eq!(field, "generation");
+        assert_eq!(expected, "2");
+        assert_eq!(actual, "1");
+    }
+
+    #[tokio::test]
+    async fn stop_verification_requires_a_ready_parent() {
+        let (store, paths, checkpoint_ref, mut checkpoint) = completed_stop_checkpoint(true).await;
+        let parent_ref = paths.checkpoint_manifest(Generation(1), Epoch(0));
+        checkpoint.parent_checkpoint_ref = Some(parent_ref.to_string());
+        write_canonical_checkpoint(&store, &paths, &checkpoint_ref, &checkpoint).await;
+        assert!(
+            verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let parent = checkpoint_for_generation(Generation(1), 0, None, true);
+        write_canonical_checkpoint(&store, &paths, &parent_ref, &parent).await;
+        assert!(
+            verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        complete_commit(&store, &commit_permit(parent_ref, &parent), Generation(1))
+            .await
+            .unwrap();
+        assert_eq!(
+            verify_stop_checkpoint(&store, &paths, Generation(1))
+                .await
+                .unwrap()
+                .unwrap()
+                .checkpoint_ref,
+            checkpoint_ref
+        );
     }
 
     fn data_ref(paths: &ProtocolPaths, epoch: u64) -> CheckpointRef {

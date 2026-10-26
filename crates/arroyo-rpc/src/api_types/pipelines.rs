@@ -106,6 +106,22 @@ pub struct PipelineRestart {
     pub ignore_state: Option<bool>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CheckpointStopStatus {
+    Unverified,
+    Verified { checkpoint: CheckpointStopResult },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct CheckpointStopResult {
+    pub job_id: String,
+    pub run_id: u64,
+    pub checkpoint_epoch: u64,
+    pub checkpoint_ref: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct Pipeline {

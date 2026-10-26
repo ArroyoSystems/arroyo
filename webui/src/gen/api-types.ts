@@ -156,7 +156,8 @@ export interface paths {
         delete: operations["delete_connection_table"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update a connection table by creating a new version. */
+        patch: operations["patch_connection_table"];
         trace?: never;
     };
     "/v1/connectors": {
@@ -293,6 +294,22 @@ export interface paths {
         head?: never;
         /** Update a pipeline */
         patch: operations["patch_pipeline"];
+        trace?: never;
+    };
+    "/v1/pipelines/{id}/checkpoint-stop-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_checkpoint_stop_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/pipelines/{id}/jobs": {
@@ -507,6 +524,22 @@ export interface components {
             /** Format: int64 */
             start_time: number;
         };
+        CheckpointStopResult: {
+            /** Format: int64 */
+            checkpoint_epoch: number;
+            checkpoint_ref: string;
+            job_id: string;
+            /** Format: int64 */
+            run_id: number;
+        };
+        CheckpointStopStatus: {
+            /** @enum {string} */
+            status: "unverified";
+        } | {
+            checkpoint: components["schemas"]["CheckpointStopResult"];
+            /** @enum {string} */
+            status: "verified";
+        };
         /** @enum {string} */
         CheckpointType: "scheduled" | "stopping";
         ConnectionAutocompleteResp: {
@@ -547,13 +580,20 @@ export interface components {
             /** Format: int64 */
             created_at: number;
             id: string;
+            /** Format: int32 */
+            latest: number;
             name: string;
             schema: components["schemas"]["ConnectionSchema"];
             table_type: components["schemas"]["ConnectionType"];
+            /** Format: int32 */
+            version: number;
         };
         ConnectionTableCollection: {
             data: components["schemas"]["ConnectionTable"][];
             hasMore: boolean;
+        };
+        ConnectionTablePatch: {
+            config?: unknown;
         };
         ConnectionTablePost: {
             config: unknown;
@@ -1290,6 +1330,60 @@ export interface operations {
             };
         };
     };
+    patch_connection_table: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connection Table id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTablePatch"];
+            };
+        };
+        responses: {
+            /** @description Updated connection table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTable"];
+                };
+            };
+            /** @description Invalid connection table update */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+            /** @description Connection table not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+            /** @description Connection table was updated concurrently */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+        };
+    };
     get_connectors: {
         parameters: {
             query?: never;
@@ -1564,6 +1658,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+        };
+    };
+    get_checkpoint_stop_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Pipeline id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Point-in-time verification of checkpoint-stop for the current execution. status is verified only when the job is stopped and its stop checkpoint is canonical and fully committed where required; otherwise it is unverified. This endpoint does not stop the job or wait for completion. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckpointStopStatus"];
+                };
+            };
+            /** @description Pipeline or job not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
+                };
+            };
+            /** @description Database or checkpoint storage could not be read or validated; completion is unverified */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResp"];
                 };
             };
         };

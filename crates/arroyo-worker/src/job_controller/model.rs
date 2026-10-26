@@ -344,6 +344,7 @@ impl RunningJobModel {
             self.epoch,
             self.min_epoch,
             self.program.clone(),
+            then_stop,
         );
 
         self.checkpoint_state = Some(CheckpointingOrCommittingState::Checkpointing(state));
@@ -378,6 +379,7 @@ impl RunningJobModel {
                     start_time: metadata.start_time,
                     finish_time: metadata.finish_time,
                     needs_commit: checkpointing.needs_commit(),
+                    is_stop_checkpoint: checkpointing.is_stop_checkpoint(),
                     operators,
                     parent_checkpoint_ref: self
                         .checkpoint_parent_ref

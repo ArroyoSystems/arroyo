@@ -28,6 +28,7 @@ pub struct CheckpointState {
     pub checkpoint_id: String,
     epoch: Epoch,
     min_epoch: Epoch,
+    is_stop_checkpoint: bool,
     start_time: SystemTime,
     operators: usize,
     operators_checkpointed: usize,
@@ -153,12 +154,14 @@ impl CheckpointState {
         epoch: Epoch,
         min_epoch: Epoch,
         program: Arc<LogicalProgram>,
+        is_stop_checkpoint: bool,
     ) -> Self {
         Self {
             job_id,
             checkpoint_id,
             epoch,
             min_epoch,
+            is_stop_checkpoint,
             bytes: 0,
             start_time: SystemTime::now(),
             operators: program.tasks_per_operator().len(),
@@ -466,6 +469,10 @@ impl CheckpointState {
                 .map(|key| key.to_string())
                 .collect(),
         }
+    }
+
+    pub fn is_stop_checkpoint(&self) -> bool {
+        self.is_stop_checkpoint
     }
 
     pub fn needs_commit(&self) -> bool {

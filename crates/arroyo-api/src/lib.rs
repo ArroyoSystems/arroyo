@@ -16,6 +16,7 @@ use tower_http::validate_request::ValidateRequestHeaderLayer;
 use tracing::{error, info};
 use utoipa::OpenApi;
 
+use crate::checkpoint_stop::__path_get_checkpoint_stop_status;
 use crate::connection_profiles::{
     __path_create_connection_profile, __path_delete_connection_profile,
     __path_get_connection_profile_autocomplete, __path_get_connection_profiles,
@@ -49,6 +50,7 @@ use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_server_common::wrap_start;
 
+mod checkpoint_stop;
 mod cloud;
 mod connection_profiles;
 mod connection_tables;
@@ -258,6 +260,7 @@ impl IntoResponse for HttpError {
         patch_pipeline,
         restart_pipeline,
         get_pipeline,
+        get_checkpoint_stop_status,
         delete_pipeline,
         get_pipelines,
         get_jobs,
@@ -289,6 +292,8 @@ impl IntoResponse for HttpError {
         PreviewPost,
         PipelinePatch,
         PipelineRestart,
+        CheckpointStopResult,
+        CheckpointStopStatus,
         Pipeline,
         PipelineGraph,
         PipelineNode,

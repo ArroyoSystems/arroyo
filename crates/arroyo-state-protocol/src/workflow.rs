@@ -9,12 +9,14 @@ use crate::store::{
 };
 use crate::types::{
     CheckpointRef, CommittedMarker, CurrentGeneration, Epoch, EpochRecord, Generation,
-    GenerationManifest, ProtocolError, checkpoint_parent_checkpoint_ref,
+    GenerationManifest, PROTOCOL_VERSION, ProtocolError, checkpoint_parent_checkpoint_ref,
     validate_epoch_record_matches_checkpoint,
 };
 use arroyo_rpc::grpc::rpc::CheckpointManifest;
 use arroyo_types::{JobId, PipelineId, to_micros};
+use std::fmt::Display;
 use std::time::SystemTime;
+use tracing::debug;
 
 /// Request to claim canonical ownership of a checkpoint's epoch.
 ///
@@ -39,6 +41,173 @@ pub enum CommittedMarkerOutcome {
     Created,
     /// The marker already existed for the same checkpoint.
     AlreadyCommitted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedStopCheckpoint {
+    pub checkpoint_ref: CheckpointRef,
+    pub epoch: Epoch,
+}
+
+fn validate_metadata_field<T: PartialEq + Display + ?Sized>(
+    path: &CheckpointRef,
+    field: &'static str,
+    expected: &T,
+    actual: &T,
+) -> Result<(), ProtocolError> {
+    if expected != actual {
+        return Err(ProtocolError::MetadataMismatch {
+            path: path.clone(),
+            field,
+            expected: expected.to_string(),
+            actual: actual.to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_protocol_identity(
+    paths: &ProtocolPaths,
+    path: &CheckpointRef,
+    version: u32,
+    pipeline_id: &PipelineId,
+    job_id: &JobId,
+) -> Result<(), ProtocolError> {
+    validate_metadata_field(path, "version", &PROTOCOL_VERSION, &version)?;
+    validate_metadata_field(path, "pipeline_id", paths.pipeline_id(), pipeline_id)?;
+    validate_metadata_field(path, "job_id", paths.job_id(), job_id)
+}
+
+/// Verifies a completed stop checkpoint using read-only protocol evidence.
+///
+/// Verification requires all of the following to agree:
+/// - The current-generation record names the requested pipeline, job, and generation,
+///   and points to that generation's manifest.
+/// - The generation's latest checkpoint has the same identity/generation,
+///   lives at its epoch's canonical path, and is a stop checkpoint.
+/// - The checkpoint is ready for normal recovery: it owns its epoch record, its
+///   parent is ready, and its external commit is complete when required.
+/// - The mutable current-generation and generation-manifest records are unchanged
+///   when read again after validation.
+pub async fn verify_stop_checkpoint<S>(
+    store: &S,
+    paths: &ProtocolPaths,
+    generation: Generation,
+) -> Result<Option<CompletedStopCheckpoint>, StoreError>
+where
+    S: ProtocolStore + ?Sized,
+{
+    let current_ref = paths.current_generation();
+    let manifest_ref = paths.generation_manifest(generation);
+    let Some(current): Option<CurrentGeneration> = read_json(store, &current_ref).await? else {
+        debug!("Current-generation record is missing");
+        return Ok(None);
+    };
+    validate_protocol_identity(
+        paths,
+        &current_ref,
+        current.version,
+        &current.pipeline_id,
+        &current.job_id,
+    )?;
+    validate_metadata_field(
+        &current_ref,
+        "generation_manifest_ref",
+        &paths.generation_manifest(current.generation),
+        &current.generation_manifest_ref,
+    )?;
+    if current.generation != generation {
+        debug!(actual_generation = %current.generation, "Requested generation is no longer current");
+        return Ok(None);
+    }
+
+    let Some(manifest): Option<GenerationManifest> = read_json(store, &manifest_ref).await? else {
+        debug!("Generation manifest is missing");
+        return Ok(None);
+    };
+    validate_protocol_identity(
+        paths,
+        &manifest_ref,
+        manifest.version,
+        &manifest.pipeline_id,
+        &manifest.job_id,
+    )?;
+    validate_metadata_field(
+        &manifest_ref,
+        "generation",
+        &generation,
+        &manifest.generation,
+    )?;
+    let Some(checkpoint_ref) = manifest.latest_checkpoint_ref.as_ref() else {
+        debug!("Generation has no latest checkpoint");
+        return Ok(None);
+    };
+    let Some(checkpoint): Option<CheckpointManifest> = read_protobuf(store, checkpoint_ref).await?
+    else {
+        debug!(%checkpoint_ref, "Latest checkpoint manifest is missing");
+        return Ok(None);
+    };
+    let epoch = Epoch(checkpoint.epoch);
+    validate_metadata_field(
+        checkpoint_ref,
+        "pipeline_id",
+        paths.pipeline_id().as_str(),
+        checkpoint.pipeline_id.as_str(),
+    )?;
+    validate_metadata_field(
+        checkpoint_ref,
+        "job_id",
+        paths.job_id().as_str(),
+        checkpoint.job_id.as_str(),
+    )?;
+    validate_metadata_field(
+        checkpoint_ref,
+        "generation",
+        &*generation,
+        &checkpoint.generation,
+    )?;
+    validate_metadata_field(
+        &manifest_ref,
+        "latest_checkpoint_ref",
+        &paths.checkpoint_manifest(generation, epoch),
+        checkpoint_ref,
+    )?;
+    if !checkpoint.is_stop_checkpoint {
+        debug!(%checkpoint_ref, "Latest checkpoint is not a stop checkpoint");
+        return Ok(None);
+    }
+
+    // The latest pointer is only a candidate: require the same canonical,
+    // committed-if-needed, parent-ready state used for recovery.
+    if !matches!(
+        resolve_canonical_recovery_ref(store, paths, checkpoint_ref).await?,
+        RecoverySearch::Found(GenerationRecovery::Ready { .. })
+    ) {
+        debug!(%checkpoint_ref, "Checkpoint is not ready and canonical");
+        return Ok(None);
+    }
+    // A successful read sequence is not a reservation: reject a changed snapshot.
+    if read_json::<_, CurrentGeneration>(store, &current_ref)
+        .await?
+        .as_ref()
+        != Some(&current)
+    {
+        debug!("Current generation changed during verification");
+        return Ok(None);
+    }
+    if read_json::<_, GenerationManifest>(store, &manifest_ref)
+        .await?
+        .as_ref()
+        != Some(&manifest)
+    {
+        debug!("Generation manifest changed during verification");
+        return Ok(None);
+    }
+
+    Ok(Some(CompletedStopCheckpoint {
+        checkpoint_ref: checkpoint_ref.clone(),
+        epoch,
+    }))
 }
 
 /// Result of resolving a generation manifest candidate.

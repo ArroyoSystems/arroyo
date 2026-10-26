@@ -14,6 +14,13 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Errors returned when observed protocol objects violate protocol invariants.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
+    #[error("protocol object at {path} has invalid {field}: expected {expected}, got {actual}")]
+    MetadataMismatch {
+        path: CheckpointRef,
+        field: &'static str,
+        expected: String,
+        actual: String,
+    },
     #[error("invalid checkpoint ref `{path}`: {reason}")]
     InvalidCheckpointRef { path: String, reason: &'static str },
     #[error("invalid path component `{name}` with value `{value}`: {reason}")]

@@ -385,6 +385,7 @@ message CheckpointManifest {
   bool needs_commit = 8;
   repeated OperatorCheckpointMetadata operators = 10;
   optional string parent_checkpoint_ref = 11;
+  bool is_stop_checkpoint = 12;
 }
 
 message SubtaskCheckpointMetadata {

@@ -510,6 +510,8 @@ dependencies = [
  "arroyo-planner",
  "arroyo-rpc",
  "arroyo-server-common",
+ "arroyo-state",
+ "arroyo-state-protocol",
  "arroyo-types",
  "arroyo-udf-host",
  "arroyo-udf-python",

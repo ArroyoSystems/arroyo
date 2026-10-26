@@ -13,6 +13,7 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::ApiDoc;
+use crate::checkpoint_stop::get_checkpoint_stop_status;
 use crate::cloud::BearerAuth;
 use crate::connection_profiles::{
     create_connection_profile, delete_connection_profile, get_connection_profile_autocomplete,
@@ -111,6 +112,10 @@ fn pipeline_and_job_routes() -> Router<AppState> {
         .route("/pipelines/:id", put(put_pipeline))
         .route("/pipelines/:id", patch(patch_pipeline))
         .route("/pipelines/:id", get(get_pipeline))
+        .route(
+            "/pipelines/:id/checkpoint-stop-status",
+            get(get_checkpoint_stop_status),
+        )
         .route("/pipelines/:id/restart", post(restart_pipeline))
         .route("/pipelines/:id", delete(delete_pipeline))
         .nest("/pipelines/:id/jobs", pipeline_jobs_routes())

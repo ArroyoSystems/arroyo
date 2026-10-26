@@ -141,6 +141,7 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
         Epoch(epoch as u64),
         Epoch(0),
         ctx.program.clone(),
+        false,
     );
 
     // trigger a checkpoint, pass the messages to the CheckpointState
