@@ -247,7 +247,7 @@ where
                 };
                 // Persist the leader's explicit completion signal with the state transition.
                 // JobStopped alone also covers immediate stops and retired leaders.
-                ctx.status.checkpoint_stop_run_id = status.checkpoint_stop_complete
+                ctx.status.checkpoint_stop_generation = status.checkpoint_stop_complete
                     .then_some(ctx.status.generation as i64);
                 return Ok(Transition::next(
                     state,

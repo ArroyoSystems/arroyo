@@ -553,7 +553,7 @@ impl From<DbPipelineJob> for Job {
             checkpoint_stop_complete: val.state.as_deref() == Some("Stopped")
                 && val
                     .run_id
-                    .is_some_and(|run_id| val.checkpoint_stop_run_id == Some(run_id)),
+                    .is_some_and(|run_id| val.checkpoint_stop_generation == Some(run_id)),
             state: val.state.unwrap_or_else(|| "Created".to_string()),
             run_id: val.run_id.unwrap_or(0) as u64,
             start_time: val.start_time.map(to_micros),

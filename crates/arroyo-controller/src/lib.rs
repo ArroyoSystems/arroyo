@@ -127,7 +127,7 @@ pub struct PipelineInfo {
 pub struct JobStatus {
     id: Arc<String>,
     generation: u64,
-    checkpoint_stop_run_id: Option<i64>,
+    checkpoint_stop_generation: Option<i64>,
     state: String,
     start_time: Option<OffsetDateTime>,
     finish_time: Option<OffsetDateTime>,
@@ -156,7 +156,7 @@ impl JobStatus {
             &self.pipeline_path,
             &self.wasm_path,
             &(self.generation as i64),
-            &self.checkpoint_stop_run_id,
+            &self.checkpoint_stop_generation,
             &self.restart_nonce,
             &serde_json::to_value(&self.state_context).expect("failed to serialize"),
             &*self.id,
@@ -526,7 +526,7 @@ impl ControllerServer {
                     let status = JobStatus {
                         id: id.clone(),
                         generation: p.run_id.unwrap_or(0).max(0) as u64,
-                        checkpoint_stop_run_id: p.checkpoint_stop_run_id,
+                        checkpoint_stop_generation: p.checkpoint_stop_generation,
                         state: p.state.unwrap_or_else(|| Created {}.name().to_string()),
                         start_time: p.start_time,
                         finish_time: p.finish_time,

@@ -693,7 +693,7 @@ mod tests {
                     id TEXT PRIMARY KEY,
                     organization_id TEXT,
                     run_id INTEGER DEFAULT 0 NOT NULL,
-                    checkpoint_stop_run_id INTEGER,
+                    checkpoint_stop_generation INTEGER,
                     start_time TIMESTAMP,
                     finish_time TIMESTAMP,
                     tasks INTEGER,
