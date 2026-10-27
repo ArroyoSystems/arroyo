@@ -567,6 +567,7 @@ INSERT INTO output SELECT counter FROM impulse;
     let (pipeline_id, job_id, _) = start_and_monitor(test_id, &query, &[], 2, false)
         .await
         .unwrap();
+    assert_checkpoint_stop_complete(&pipeline_id, false).await;
 
     wait_until_next_checkpoint_is_underway(&pipeline_id, &job_id, 2).await;
 
@@ -580,6 +581,7 @@ INSERT INTO output SELECT counter FROM impulse;
     )
     .await
     .unwrap();
+    assert_checkpoint_stop_complete(&pipeline_id, true).await;
     let first_run = read_kafka_counters(&consumer).await.unwrap();
 
     patch_and_wait(
@@ -590,6 +592,8 @@ INSERT INTO output SELECT counter FROM impulse;
     )
     .await
     .unwrap();
+
+    assert_checkpoint_stop_complete(&pipeline_id, false).await;
 
     // Run long enough to replay every record between the scheduled and stopping checkpoints if
     // recovery incorrectly chose the scheduled checkpoint.
@@ -602,6 +606,7 @@ INSERT INTO output SELECT counter FROM impulse;
     )
     .await
     .unwrap();
+    assert_checkpoint_stop_complete(&pipeline_id, false).await;
 
     let second_run = read_kafka_counters(&consumer).await.unwrap();
     let first_run: HashSet<_> = first_run.into_iter().collect();
@@ -626,6 +631,16 @@ INSERT INTO output SELECT counter FROM impulse;
         duplicates.is_empty(),
         "checkpoint-stop recovery duplicated counters: {duplicates:?}"
     );
+}
+
+async fn assert_checkpoint_stop_complete(pipeline_id: &str, expected: bool) {
+    let jobs = get_client()
+        .get_pipeline_jobs()
+        .id(pipeline_id)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(jobs.data[0].checkpoint_stop_complete, Some(expected));
 }
 
 #[tokio::test]

@@ -703,6 +703,9 @@ export interface components {
             data: components["schemas"]["GlobalUdf"][];
         };
         Job: {
+            /** @description The current run is stopped after a completed checkpoint-stop, including any required
+             *     external commits. False also covers completion the controller could not confirm. */
+            checkpoint_stop_complete?: boolean;
             /** Format: int64 */
             created_at: number;
             /** @description Per-job environment variables forwarded to workers. */

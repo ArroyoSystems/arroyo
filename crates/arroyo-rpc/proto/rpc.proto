@@ -322,6 +322,7 @@ message JobStatus {
   uint64 transitioned_at = 3;
   optional uint64 last_checkpointed_at = 4;
   optional JobFailure job_failure = 5;
+  bool checkpoint_stop_complete = 6;
 }
 
 message JobStatusResp {

@@ -711,6 +711,7 @@ impl WorkerServer {
                     transitioned_at: to_micros(SystemTime::now()),
                     last_checkpointed_at: None,
                     job_failure: None,
+                    checkpoint_stop_complete: false,
                 })),
                 checkpoint_history: Arc::new(Mutex::new(CheckpointHistory::default())),
                 metrics: Arc::new(OnceLock::new()),

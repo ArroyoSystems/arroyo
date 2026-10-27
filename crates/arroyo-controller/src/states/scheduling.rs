@@ -373,6 +373,7 @@ impl State for Scheduling {
 
         // update the generation for this scheduling attempt
         ctx.status.generation += 1;
+        ctx.status.checkpoint_stop_run_id = None;
         if let Err(e) = ctx.status.update_db(&ctx.db).await {
             return Err(ctx.retryable(
                 self,

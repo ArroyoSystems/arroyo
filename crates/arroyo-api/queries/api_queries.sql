@@ -292,24 +292,24 @@ FROM job_configs
 WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY COALESCE(job_configs.updated_at, job_configs.created_at) DESC;
 
---! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+--! get_pipeline_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?, checkpoint_stop_run_id?)
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars, checkpoint_stop_run_id
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
 WHERE job_configs.organization_id = :organization_id AND pipelines.pub_id = :pub_id
 ORDER BY job_configs.created_at DESC;
 
---! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+--! get_all_jobs : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?, checkpoint_stop_run_id?)
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars, checkpoint_stop_run_id
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
 WHERE job_configs.organization_id = :organization_id AND ttl_micros IS NULL
 ORDER BY job_configs.created_at DESC;
 
---! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?)
-SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars
+--! get_pipeline_job : DbPipelineJob(start_time?, finish_time?, state?, tasks?, failure_message?, failure_domain?, run_id?, state_context?, checkpoint_stop_run_id?)
+SELECT job_configs.id, pipelines.pub_id as pipeline_id, stop, start_time, finish_time, state, tasks, failure_message, failure_domain, run_id, job_configs.created_at, state_context, scheduler_config, pipeline_config, env_vars, checkpoint_stop_run_id
 FROM job_configs
          INNER JOIN job_statuses ON job_configs.id = job_statuses.id
          INNER JOIN pipelines ON pipelines.id = job_configs.pipeline_id
