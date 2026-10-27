@@ -178,6 +178,10 @@ pub struct Job {
     pub running_desired: bool,
     pub state: String,
     pub run_id: u64,
+    /// The current run is stopped after a completed checkpoint-stop, including any required
+    /// external commits. False also covers completion the controller could not confirm.
+    #[serde(default)]
+    pub checkpoint_stop_complete: bool,
     pub start_time: Option<u64>,
     pub finish_time: Option<u64>,
     pub tasks: Option<u64>,

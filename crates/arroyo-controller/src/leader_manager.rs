@@ -136,7 +136,10 @@ impl LeaderManager {
         Ok(())
     }
 
-    pub async fn wait_for_state(&mut self, expected: rpc::JobState) -> anyhow::Result<()> {
+    pub async fn wait_for_state(
+        &mut self,
+        expected: rpc::JobState,
+    ) -> anyhow::Result<rpc::JobStatus> {
         let mut timer = tokio::time::interval(Duration::from_millis(200));
         loop {
             let status = self.poll_leader_status().await?;
@@ -145,7 +148,7 @@ impl LeaderManager {
                 .map_err(|e| anyhow!("received invalid job state from leader: {e}"))?;
 
             if state == expected {
-                return Ok(());
+                return Ok(status);
             }
 
             match state {
@@ -232,13 +235,20 @@ where
                 }
             }
             resp = ctx.leader_manager.as_mut().expect("leader manager not initialized").wait_for_state(expected_state) => {
-                if let Err(e) = resp {
-                return ctx.handle_job_failure(state, controller_job_failure(
-                    format!("failed while taking final checkpoint: {:?}", e),
-                    rpc::ErrorDomain::Internal,
-                    rpc::RetryHint::WithBackoff,
-                )).await;
-                }
+                let status = match resp {
+                    Ok(status) => status,
+                    Err(e) => {
+                        return ctx.handle_job_failure(state, controller_job_failure(
+                            format!("failed while taking final checkpoint: {:?}", e),
+                            rpc::ErrorDomain::Internal,
+                            rpc::RetryHint::WithBackoff,
+                        )).await;
+                    }
+                };
+                // Persist the leader's explicit completion signal with the state transition.
+                // JobStopped alone also covers immediate stops and retired leaders.
+                ctx.status.checkpoint_stop_generation = status.checkpoint_stop_complete
+                    .then_some(ctx.status.generation as i64);
                 return Ok(Transition::next(
                     state,
                     next,

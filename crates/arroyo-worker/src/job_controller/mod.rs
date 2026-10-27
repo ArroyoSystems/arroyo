@@ -387,6 +387,13 @@ impl JobControllerStatus {
         Ok(())
     }
 
+    pub fn stopped(&self, checkpoint_stop_complete: bool) -> anyhow::Result<()> {
+        // Publish completion before JobStopped so a poll cannot observe a stopped job
+        // without its completion result.
+        self.job_status.lock().unwrap().checkpoint_stop_complete = checkpoint_stop_complete;
+        self.transition(rpc::JobState::JobStopped)
+    }
+
     pub fn to_failing(&self, failure: JobFailure) -> anyhow::Result<()> {
         {
             let mut status = self.job_status.lock().unwrap();
@@ -398,6 +405,7 @@ impl JobControllerStatus {
     pub fn retire(&self) -> anyhow::Result<()> {
         let mut status = self.job_status.lock().unwrap();
         status.job_state = rpc::JobState::JobStopped.into();
+        status.checkpoint_stop_complete = false;
         status.transitioned_at = to_micros(SystemTime::now());
         status.updated_at = status.transitioned_at;
         Ok(())

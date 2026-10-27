@@ -469,7 +469,7 @@ impl WorkerJobController {
                             self.status.transition(rpc::JobState::JobFinished)?;
                         }
                         Ok(ControllerProgress::Stopped) => {
-                            self.status.transition(rpc::JobState::JobStopped)?;
+                            self.status.stopped(self.checkpoint_stopping)?;
                             return Ok(());
                         }
                         Ok(ControllerProgress::TaskFailed(event)) => {
