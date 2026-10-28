@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1.4
 
-ARG RUST_IMAGE=rust:1.99.1-slim-trixie
+# Keep in sync with rust-toolchain.toml; CI checks that they match
+ARG RUST_VERSION=1.99.1
 
-FROM ${RUST_IMAGE} AS builder
+FROM rust:${RUST_VERSION}-slim-trixie AS builder
 WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
@@ -87,7 +88,7 @@ EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
 CMD ["cluster"]
 
-FROM ${RUST_IMAGE} AS arroyo-full
+FROM rust:${RUST_VERSION}-slim-trixie AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config
