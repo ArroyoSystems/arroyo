@@ -361,7 +361,7 @@ impl RunningJobModel {
             CheckpointingOrCommittingState::Checkpointing(mut checkpointing) => {
                 let pipeline_id = (*self.pipeline_id).clone();
                 let generation = self.generation;
-                let operators = self.finished_operators.drain(..).collect();
+                let operators = std::mem::take(&mut self.finished_operators);
                 let metadata_span = Self::start_or_get_spans_static(
                     &mut self.checkpoint_spans,
                     JobCheckpointEventType::WritingMetadata,
