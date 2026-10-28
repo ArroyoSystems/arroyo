@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-FROM rust:1-bookworm AS builder
+FROM rust:1.99.1-trixie AS builder
 WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
@@ -12,7 +12,7 @@ RUN apt-get update && \
     cmake clang wget postgresql postgresql-client supervisor sudo bash libsasl2-dev && \
     cargo install refinery_cli
 
-# Install Python (manually, as no bookworm package for 3.12)
+# Install Python (manually, as trixie only packages 3.13)
 
 
 # Install node & pnpm
@@ -57,7 +57,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     mv target/*/arroyo /arroyo
 
 
-FROM debian:bookworm-slim as arroyo
+FROM debian:trixie-slim as arroyo
 WORKDIR /app
 
 RUN apt-get update && \
@@ -85,7 +85,7 @@ EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
 CMD ["cluster"]
 
-FROM rust:slim-bookworm AS arroyo-full
+FROM rust:1.99.1-slim-trixie AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config

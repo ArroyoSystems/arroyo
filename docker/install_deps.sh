@@ -17,7 +17,7 @@ else
   exit 1;
 fi
 
-# Install Python 3.12 (manually, as no bookworm package for 3.12)
+# Install Python 3.12 (manually, as trixie only packages 3.13)
 curl -OL https://github.com/indygreg/python-build-standalone/releases/download/20240814/cpython-3.12.5+20240814-${PY_ARCH}-unknown-linux-gnu-install_only.tar.gz 
 tar xvfz cpython*.tar.gz
 cp -r python/bin/* /usr/local/bin/
