@@ -740,17 +740,13 @@ impl GeneratorConfig {
         };
         bidder += FIRST_PERSON_ID;
         let price = Self::next_price(random);
-        let channel;
-        let url;
-        if random.random_range(0..HOT_CHANNELS_RATIO) > 0 {
+        let (channel, url) = if random.random_range(0..HOT_CHANNELS_RATIO) > 0 {
             let i = random.random_range(0..HOT_CHANNELS.len());
-            channel = HOT_CHANNELS[i].to_string();
-            url = HOT_URLS[i].to_string();
+            (HOT_CHANNELS[i].to_string(), HOT_URLS[i].to_string())
         } else {
             let pair = channel_cache.get_channel(random.random_range(0..CHANNELS_NUMBER));
-            channel = pair.0.to_string();
-            url = pair.1;
-        }
+            (pair.0.to_string(), pair.1)
+        };
         let extra =
             Self::next_extra_string(random, 32, self.configuration.avg_person_byte_size as usize);
         Bid {

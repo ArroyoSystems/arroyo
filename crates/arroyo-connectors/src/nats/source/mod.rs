@@ -196,8 +196,8 @@ impl NatsSourceFunc {
                     subject
                 }
             },
-            &ctx.task_info.operator_id.replace("operator_", ""),
-            &ctx.task_info.job_id.replace("job_", "")
+            ctx.task_info.operator_id.replace("operator_", ""),
+            ctx.task_info.job_id.replace("job_", "")
         );
 
         let consumer_config = match &self.source_type {

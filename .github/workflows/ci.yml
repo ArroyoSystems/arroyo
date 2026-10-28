@@ -3,6 +3,19 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  check-rust-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+      - name: Check Dockerfile matches rust-toolchain.toml
+        run: |
+          toolchain=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          dockerfile=$(sed -n 's/^ARG RUST_VERSION=//p' docker/Dockerfile)
+          if [ -z "$toolchain" ] || [ "$toolchain" != "$dockerfile" ]; then
+            echo "::error file=docker/Dockerfile::RUST_VERSION ($dockerfile) does not match rust-toolchain.toml ($toolchain)"
+            exit 1
+          fi
   lint-console:
     runs-on: ubuntu-latest
     steps:
@@ -31,19 +44,10 @@ jobs:
           distribution: "temurin"
           java-version: "17"
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
-          components: clippy, rustfmt
-          toolchain: 1.95
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Check Formatting
         run: cargo fmt -- --check
       - uses: actions/setup-python@v7

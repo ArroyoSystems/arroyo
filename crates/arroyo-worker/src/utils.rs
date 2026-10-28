@@ -23,7 +23,7 @@ fn write_op(d2: &mut String, registry: &Arc<Registry>, idx: usize, el: &ChainedL
         "### [{}] {} ({})",
         el.operator_id,
         operator.name(),
-        &display.name
+        display.name
     );
     for (field, value) in display.fields {
         label.push_str(&format!("\n## {field}\n\n{value}"));

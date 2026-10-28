@@ -136,7 +136,7 @@ impl ThreadedUdfInterpreter {
                             function
                                 .call1(args)
                                 .map_err(|e| {
-                                    anyhow!("failed while calling Python UDF '{}': {}", &name, e)
+                                    anyhow!("failed while calling Python UDF '{}': {}", name, e)
                                 })
                                 .map(|r| r.into())
                         }
