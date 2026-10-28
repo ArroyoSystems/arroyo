@@ -5,7 +5,7 @@ on:
     branches:
       - master
       - dev
-      - '*docker*'
+      - '**docker**'
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*' # Semver matching pattern with optional suffix
 
