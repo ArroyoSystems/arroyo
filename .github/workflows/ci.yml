@@ -45,15 +45,9 @@ jobs:
           java-version: "17"
       - name: Install Rust
         run: rustup toolchain install
-      - uses: actions/cache@v6
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Check Formatting
         run: cargo fmt -- --check
       - uses: actions/setup-python@v7
