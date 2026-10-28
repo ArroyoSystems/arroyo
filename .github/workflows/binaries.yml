@@ -49,9 +49,8 @@ jobs:
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Update rust
-        run: |
-          rustup update
+      - name: Install Rust
+        run: rustup toolchain install
       - name: Setup Python 3.12
         uses: actions/setup-python@v7
         with:
@@ -119,6 +118,8 @@ jobs:
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
+      - name: Install Rust
+        run: rustup toolchain install
       - name: Install Postgres and prepare DB
         run: |
           brew install postgresql@14 && brew services start postgresql && sleep 10

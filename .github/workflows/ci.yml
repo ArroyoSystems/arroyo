@@ -31,10 +31,7 @@ jobs:
           distribution: "temurin"
           java-version: "17"
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          components: clippy, rustfmt
-          toolchain: 1.99.1
+        run: rustup toolchain install
       - uses: actions/cache@v6
         with:
           path: |
