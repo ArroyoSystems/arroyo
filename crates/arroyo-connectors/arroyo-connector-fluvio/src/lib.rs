@@ -8,9 +8,10 @@ use fluvio::Offset;
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::fluvio::sink::FluvioSinkFunc;
-use crate::fluvio::source::FluvioSourceFunc;
-use crate::{ConnectionType, EmptyConfig};
+use crate::sink::FluvioSinkFunc;
+use crate::source::FluvioSourceFunc;
+use arroyo_connector_common::EmptyConfig;
+use arroyo_rpc::api_types::connections::ConnectionType;
 
 mod sink;
 mod source;
@@ -20,7 +21,7 @@ pub struct FluvioConnector {}
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./fluvio.svg");
 
-import_types!(schema = "src/fluvio/table.json");
+import_types!(schema = "src/table.json");
 
 impl Connector for FluvioConnector {
     type ProfileT = EmptyConfig;
