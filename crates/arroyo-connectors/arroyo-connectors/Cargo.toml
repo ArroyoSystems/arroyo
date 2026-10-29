@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -20,9 +20,11 @@ websocket = ["dep:arroyo-connector-websocket"]
 polling-http = ["dep:arroyo-connector-polling-http"]
 fluvio = ["dep:arroyo-connector-fluvio"]
 kinesis = ["dep:arroyo-connector-kinesis"]
+rabbitmq = ["dep:arroyo-connector-rabbitmq"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
 arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
 arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }
 arroyo-connector-polling-http = { path = "../arroyo-connector-polling-http", optional = true }
@@ -95,7 +97,6 @@ sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 reqwest = { workspace = true, features = ["stream"] }
 
 # RabbitMQ Stream
-rabbitmq-stream-client = "0.7"
 
 # Redis
 redis = { version = "0.28", features = [
