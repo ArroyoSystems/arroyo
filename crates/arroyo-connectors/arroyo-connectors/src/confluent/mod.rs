@@ -19,7 +19,7 @@ use typify::import_types;
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
-const TABLE_SCHEMA: &str = include_str!("../kafka/table.json");
+const TABLE_SCHEMA: &str = include_str!("../../../arroyo-connector-kafka/src/table.json");
 const ICON: &str = include_str!("./confluent.svg");
 
 import_types!(

@@ -1,0 +1,48 @@
+[package]
+name = "arroyo-connector-kafka"
+version = "0.17.0-dev"
+edition = "2024"
+
+[lints.clippy]
+to_string_trait_impl = "allow"
+
+[dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-types = { path = "../../arroyo-types" }
+arroyo-rpc = { path = "../../arroyo-rpc" }
+arroyo-formats = { path = "../../arroyo-formats" }
+arroyo-operator = { path = "../../arroyo-operator" }
+arroyo-state = { path = "../../arroyo-state" }
+arrow = { workspace = true }
+datafusion = { workspace = true }
+async-trait = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+typify = { workspace = true }
+prost = { workspace = true }
+tonic = { workspace = true }
+governor = "0.8.0"
+anyhow = { workspace = true }
+tracing = { workspace = true }
+regress = "0.10.0"
+futures = { workspace = true }
+rand = { workspace = true }
+itertools = { workspace = true }
+aws-msk-iam-sasl-signer = "1.0.0"
+rdkafka = { version = "0.39", features = [
+    "cmake-build",
+    "tracing",
+    "sasl",
+    "ssl-vendored",
+    "zstd",
+] }
+sasl2-sys = { version = "0.1.22", features = ["vendored"] }
+aws-config = { workspace = true }
+
+[dev-dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common", features = ["test-utils"] }
+
+[build-dependencies]
+glob = "0.3"

@@ -1,10 +1,6 @@
 use arroyo_operator::connector::ErasedConnector;
-use arroyo_rpc::api_types::connections::ConnectionType;
 use std::collections::HashMap;
 
-use arroyo_connector_common::send;
-#[cfg(test)]
-use arroyo_connector_common::test;
 pub use arroyo_connector_common::{EmptyConfig, header_map, render_schema};
 
 #[cfg(feature = "blackhole")]
@@ -15,7 +11,8 @@ pub mod filesystem;
 pub use arroyo_connector_fluvio as fluvio;
 #[cfg(feature = "impulse")]
 pub use arroyo_connector_impulse as impulse;
-pub mod kafka;
+#[cfg(feature = "kafka")]
+pub use arroyo_connector_kafka as kafka;
 #[cfg(feature = "kinesis")]
 pub use arroyo_connector_kinesis as kinesis;
 #[cfg(feature = "mqtt")]
@@ -55,6 +52,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(filesystem::iceberg::IcebergConnector {}),
         #[cfg(feature = "impulse")]
         Box::new(impulse::ImpulseConnector {}),
+        #[cfg(feature = "kafka")]
         Box::new(kafka::KafkaConnector {}),
         #[cfg(feature = "kinesis")]
         Box::new(kinesis::KinesisConnector {}),

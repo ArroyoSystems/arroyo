@@ -5,6 +5,7 @@ members = [
     "crates/arroyo-compiler-service",
     "crates/arroyo-connectors/arroyo-connector-common",
     "crates/arroyo-connectors/arroyo-connectors",
+    "crates/arroyo-connectors/arroyo-connector-kafka",
     "crates/arroyo-connectors/arroyo-connector-mqtt",
     "crates/arroyo-connectors/arroyo-connector-nats",
     "crates/arroyo-connectors/arroyo-connector-redis",

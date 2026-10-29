@@ -23,8 +23,8 @@ use serde::Deserialize;
 use tokio::sync::mpsc::channel;
 
 use super::{ConsistencyMode, KafkaSinkFunc};
-use crate::kafka::Context;
-use crate::test::DummyCollector;
+use crate::Context;
+use arroyo_connector_common::test::DummyCollector;
 
 pub struct KafkaTopicTester {
     topic: String,

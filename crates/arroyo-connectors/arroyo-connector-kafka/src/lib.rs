@@ -36,10 +36,11 @@ use tonic::Status;
 use tracing::{error, info, warn};
 use typify::import_types;
 
-use crate::{ConnectionType, send};
+use arroyo_connector_common::send;
+use arroyo_rpc::api_types::connections::ConnectionType;
 
-use crate::kafka::sink::KafkaSinkFunc;
-use crate::kafka::source::KafkaSourceFunc;
+use crate::sink::KafkaSinkFunc;
+use crate::source::KafkaSourceFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
@@ -51,13 +52,13 @@ const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./kafka.svg");
 
 import_types!(
-    schema = "src/kafka/profile.json",
+    schema = "src/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }
 );
 
-import_types!(schema = "src/kafka/table.json");
+import_types!(schema = "src/table.json");
 
 impl KafkaTable {
     pub fn subject(&self) -> Cow<'_, str> {
