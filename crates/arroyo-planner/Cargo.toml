@@ -43,6 +43,7 @@ itertools = { workspace = true }
 sqlparser = { workspace = true}
 
 [dev-dependencies]
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors", features = ["all"] }
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
 rstest = { version = "0.25" }
 
