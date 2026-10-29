@@ -693,6 +693,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-single-file"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-stdout"
 version = "0.17.0-dev"
 dependencies = [
@@ -720,6 +741,7 @@ dependencies = [
  "arroyo-connector-impulse",
  "arroyo-connector-nexmark",
  "arroyo-connector-preview",
+ "arroyo-connector-single-file",
  "arroyo-connector-stdout",
  "arroyo-formats",
  "arroyo-operator",
