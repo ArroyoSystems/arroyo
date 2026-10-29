@@ -10,6 +10,7 @@ to_string_trait_impl = "allow"
 default = []
 
 [dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
 arroyo-types = { path = "../../arroyo-types" }
 arroyo-storage = { path = "../../arroyo-storage" }
 arroyo-rpc = { path = "../../arroyo-rpc" }
@@ -118,6 +119,7 @@ nkeys = "0.3.0"
 murmur3 = "0.5.2"
 
 [dev-dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common", features = ["test-utils"] }
 tempfile = "3"
 
 [build-dependencies]
