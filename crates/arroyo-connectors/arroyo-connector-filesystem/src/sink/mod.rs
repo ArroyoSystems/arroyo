@@ -26,8 +26,8 @@ mod uploads;
 use self::{json::JsonLocalWriter, local::LocalFileSystemWriter, parquet::ParquetLocalWriter};
 
 use self::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::iceberg::IcebergTable;
-use crate::filesystem::{FilenameStrategy, config};
+use crate::sink::iceberg::IcebergTable;
+use crate::{FilenameStrategy, config};
 
 const MAX_CONFLICT_RETRIES: u32 = 3;
 
@@ -291,7 +291,7 @@ pub(crate) fn add_suffix_prefix(
 
 #[cfg(test)]
 mod tests {
-    use crate::filesystem::sink::split_into_parts;
+    use crate::sink::split_into_parts;
     use bytes::Bytes;
 
     #[test]

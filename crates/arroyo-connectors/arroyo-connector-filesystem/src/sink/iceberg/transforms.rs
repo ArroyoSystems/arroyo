@@ -1,7 +1,7 @@
 // Adapted from https://github.com/JanKaul/iceberg-rust/blob/495a566f762f276b30c55caa5c10d3d7cbf856f5/iceberg-rust/src/arrow/transform.rs
 // Licensed under Apache2
 
-use crate::filesystem::config::Transform;
+use crate::config::Transform;
 use arrow::array::{
     Array, ArrayRef, BinaryArray, PrimitiveArray, StringArray, as_primitive_array, downcast_array,
 };

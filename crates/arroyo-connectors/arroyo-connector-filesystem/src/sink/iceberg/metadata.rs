@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail};
 use std::collections::HashMap;
 
-use crate::filesystem::config::IcebergPartitioning;
+use crate::config::IcebergPartitioning;
 use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::DataflowResult;
 use bincode::{Decode, Encode};
@@ -576,7 +576,7 @@ mod tests {
     use parquet::basic::Compression;
     use parquet::file::properties::WriterProperties;
 
-    use crate::filesystem::config::{IcebergPartitioningField, Transform};
+    use crate::config::{IcebergPartitioningField, Transform};
     use iceberg::spec::{NestedField, PrimitiveLiteral, PrimitiveType as PT, Schema, Type as IT};
 
     fn iceberg_schema() -> Schema {

@@ -8,10 +8,10 @@ use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
     add_suffix_prefix,
 };
-use crate::filesystem::TableFormat;
-use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
-use crate::filesystem::sink::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
-use crate::filesystem::sink::two_phase_committer::CommitStrategy;
+use crate::TableFormat;
+use crate::config::{self, FilenameStrategy, NamingConfig};
+use crate::sink::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
+use crate::sink::two_phase_committer::CommitStrategy;
 use arrow::record_batch::RecordBatch;
 use arrow::row::OwnedRow;
 use arroyo_operator::context::{Collector, OperatorContext};

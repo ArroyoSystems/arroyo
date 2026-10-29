@@ -27,8 +27,8 @@ use tokio_stream::Stream;
 use tokio_stream::wrappers::LinesStream;
 use tracing::info;
 
-use crate::filesystem::config;
-use crate::filesystem::config::SourceFileCompressionFormat;
+use crate::config;
+use crate::config::SourceFileCompressionFormat;
 use arroyo_operator::SourceFinishType;
 use arroyo_operator::operator::SourceOperator;
 use arroyo_rpc::errors::DataflowError;

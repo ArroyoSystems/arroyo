@@ -1,4 +1,4 @@
-use crate::filesystem::config::{IcebergPartitioning, PartitioningConfig};
+use crate::config::{IcebergPartitioning, PartitioningConfig};
 use arrow::array::{ArrayRef, AsArray, RecordBatch, UInt32Array};
 use arrow::compute::take;
 use arrow::datatypes::{DataType, Schema};
@@ -158,8 +158,8 @@ impl Partitioner {
 
 #[cfg(test)]
 mod tests {
-    use crate::filesystem::config::PartitioningConfig;
-    use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
+    use crate::config::PartitioningConfig;
+    use crate::sink::partitioning::{Partitioner, PartitionerMode};
     use arrow::array::{
         ArrayRef, AsArray, Int32Array, RecordBatch, StringArray, TimestampNanosecondArray,
     };

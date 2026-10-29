@@ -1,4 +1,4 @@
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
 use arroyo_rpc::SerializableBytes;
 use bincode::{Decode, Encode};
 use std::fmt::Debug;

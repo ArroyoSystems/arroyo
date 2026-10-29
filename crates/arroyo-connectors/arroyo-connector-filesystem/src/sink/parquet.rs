@@ -2,11 +2,9 @@ use super::{
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
 };
-use crate::filesystem::config;
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::iceberg::schema::{
-    normalize_batch_to_schema, update_field_ids_to_iceberg,
-};
+use crate::config;
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::sink::iceberg::schema::{normalize_batch_to_schema, update_field_ids_to_iceberg};
 use anyhow::Result;
 use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
 use arrow::datatypes::SchemaRef;
@@ -386,8 +384,8 @@ pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::config::{IcebergPartitioning, IcebergPartitioningField, Transform};
-    use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
+    use crate::config::{IcebergPartitioning, IcebergPartitioningField, Transform};
+    use crate::sink::iceberg::metadata::build_datafile_from_meta;
     use arrow::array::StringArray;
     use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
     use iceberg::spec::{

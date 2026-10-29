@@ -1,5 +1,5 @@
 use super::{classify_storage_error, map_storage_error};
-use crate::filesystem::sink::{FsEventLogger, storage_error_message};
+use crate::sink::{FsEventLogger, storage_error_message};
 use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, StorageError};
 use arroyo_rpc::{connector_err, log_event};
 use arroyo_storage::StorageProvider;
@@ -306,7 +306,7 @@ pub fn create_multipart_finalize_future(
 #[cfg(test)]
 mod tests {
     use super::{map_recovery_head_error, validate_already_there};
-    use crate::filesystem::sink::FsEventLogger;
+    use crate::sink::FsEventLogger;
     use arroyo_rpc::errors::{
         DataflowError, DataflowResult, ErrorDomain, RetryHint, StorageError, TaskError,
     };

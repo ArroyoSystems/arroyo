@@ -1,4 +1,4 @@
-use crate::filesystem::sink::iceberg::transforms;
+use crate::sink::iceberg::transforms;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
 use arroyo_rpc::{

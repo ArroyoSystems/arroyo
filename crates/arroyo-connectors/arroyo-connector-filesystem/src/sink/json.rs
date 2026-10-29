@@ -3,8 +3,8 @@ use super::{
     local::{CurrentFileRecovery, LocalWriter},
     parquet::representitive_timestamp,
 };
-use crate::filesystem::config;
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::config;
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
 use arrow::record_batch::RecordBatch;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_rpc::errors::DataflowResult;
@@ -405,7 +405,7 @@ impl LocalWriter for JsonLocalWriter {
 
 #[cfg(test)]
 mod tests {
-    use crate::filesystem::TableFormat;
+    use crate::TableFormat;
 
     use super::super::BatchBufferingWriter;
     use super::*;

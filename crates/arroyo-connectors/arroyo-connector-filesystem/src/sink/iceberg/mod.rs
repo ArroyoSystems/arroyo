@@ -3,10 +3,10 @@ pub mod schema;
 mod storage;
 pub mod transforms;
 
-use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
-use crate::filesystem::sink::FinishedFile;
-use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
-use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
+use crate::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
+use crate::sink::FinishedFile;
+use crate::sink::iceberg::metadata::build_datafile_from_meta;
+use crate::sink::iceberg::schema::add_parquet_field_ids;
 use anyhow::anyhow;
 use arrow::datatypes::Schema;
 use arroyo_rpc::connector_err;
