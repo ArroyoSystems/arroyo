@@ -703,6 +703,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-nats"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-nats",
+ "async-trait",
+ "bincode",
+ "futures",
+ "glob",
+ "nkeys 0.3.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-nexmark"
 version = "0.17.0-dev"
 dependencies = [
@@ -926,6 +951,7 @@ dependencies = [
  "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
  "arroyo-connector-kinesis",
+ "arroyo-connector-nats",
  "arroyo-connector-nexmark",
  "arroyo-connector-polling-http",
  "arroyo-connector-preview",
@@ -943,7 +969,6 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "async-compression",
- "async-nats",
  "async-trait",
  "aws-config",
  "aws-msk-iam-sasl-signer",
@@ -965,7 +990,6 @@ dependencies = [
  "iceberg-storage-opendal",
  "itertools 0.14.0",
  "murmur3",
- "nkeys 0.3.2",
  "num-bigint",
  "object_store",
  "parquet",
