@@ -33,7 +33,8 @@ pub use arroyo_connector_sse as sse;
 pub use arroyo_connector_stdout as stdout;
 #[cfg(feature = "webhook")]
 pub use arroyo_connector_webhook as webhook;
-pub mod websocket;
+#[cfg(feature = "websocket")]
+pub use arroyo_connector_websocket as websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
@@ -65,6 +66,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(stdout::StdoutConnector {}),
         #[cfg(feature = "webhook")]
         Box::new(webhook::WebhookConnector {}),
+        #[cfg(feature = "websocket")]
         Box::new(websocket::WebsocketConnector {}),
     ];
 
