@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 use typify::import_types;
 
-use crate::impulse::operator::{ImpulseSourceFunc, ImpulseSourceState, ImpulseSpec};
-use crate::{ConnectionType, EmptyConfig, source_field};
+use crate::operator::{ImpulseSourceFunc, ImpulseSourceState, ImpulseSpec};
+use arroyo_connector_common::{EmptyConfig, source_field};
+use arroyo_rpc::api_types::connections::ConnectionType;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "src/impulse/table.json");
+import_types!(schema = "src/table.json");
 const ICON: &str = include_str!("./impulse.svg");
 
 pub fn impulse_schema() -> ConnectionSchema {
