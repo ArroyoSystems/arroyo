@@ -13,7 +13,7 @@ arroyo-planner = { path = "../arroyo-planner" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-operator = { path = "../arroyo-operator" }
-arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }

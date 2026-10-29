@@ -3,7 +3,7 @@ members = [
     "crates/arroyo",
     "crates/arroyo-api",
     "crates/arroyo-compiler-service",
-    "crates/arroyo-connectors",
+    "crates/arroyo-connectors/arroyo-connectors",
     "crates/arroyo-controller",
     "crates/arroyo-datastream",
     "crates/arroyo-planner",
