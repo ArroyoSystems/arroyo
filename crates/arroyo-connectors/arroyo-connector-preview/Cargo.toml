@@ -1,0 +1,21 @@
+[package]
+name = "arroyo-connector-preview"
+version = "0.17.0-dev"
+edition = "2024"
+
+[lints.clippy]
+to_string_trait_impl = "allow"
+
+[dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-types = { path = "../../arroyo-types" }
+arroyo-rpc = { path = "../../arroyo-rpc" }
+arroyo-formats = { path = "../../arroyo-formats" }
+arroyo-operator = { path = "../../arroyo-operator" }
+arroyo-state = { path = "../../arroyo-state" }
+arrow = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+anyhow = { workspace = true }
