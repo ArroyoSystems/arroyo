@@ -630,6 +630,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-fluvio"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "fluvio",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-impulse"
 version = "0.17.0-dev"
 dependencies = [
@@ -829,6 +853,7 @@ dependencies = [
  "arrow",
  "arroyo-connector-blackhole",
  "arroyo-connector-common",
+ "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
  "arroyo-connector-nexmark",
  "arroyo-connector-polling-http",

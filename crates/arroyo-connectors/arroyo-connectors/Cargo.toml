@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -18,9 +18,11 @@ sse = ["dep:arroyo-connector-sse"]
 webhook = ["dep:arroyo-connector-webhook"]
 websocket = ["dep:arroyo-connector-websocket"]
 polling-http = ["dep:arroyo-connector-polling-http"]
+fluvio = ["dep:arroyo-connector-fluvio"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }
 arroyo-connector-polling-http = { path = "../arroyo-connector-polling-http", optional = true }
 arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }
 arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
