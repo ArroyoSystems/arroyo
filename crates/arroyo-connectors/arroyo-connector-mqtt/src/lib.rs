@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::{Duration, SystemTime};
 
-use crate::mqtt::sink::MqttSinkFunc;
-use crate::mqtt::source::MqttSourceFunc;
+use crate::sink::MqttSinkFunc;
+use crate::source::MqttSourceFunc;
 use anyhow::{anyhow, bail};
 use arrow::datatypes::DataType;
 use arroyo_formats::ser::ArrowSerializer;
@@ -35,13 +35,13 @@ pub mod sink;
 pub mod source;
 
 import_types!(
-    schema = "src/mqtt/profile.json",
+    schema = "src/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }
 );
 
-import_types!(schema = "src/mqtt/table.json");
+import_types!(schema = "src/table.json");
 pub struct MqttConnector {}
 
 impl MqttTable {

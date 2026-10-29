@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
-use crate::mqtt::{MqttConfig, create_connection};
+use crate::{MqttConfig, create_connection};
 use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;

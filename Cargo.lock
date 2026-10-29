@@ -703,6 +703,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-mqtt"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "governor",
+ "parquet",
+ "rand 0.9.5",
+ "rumqttc",
+ "rustls 0.22.4",
+ "rustls-native-certs 0.8.1",
+ "rustls-pemfile 2.2.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "tracing",
+ "typify 0.0.13",
+ "url",
+]
+
+[[package]]
 name = "arroyo-connector-nats"
 version = "0.17.0-dev"
 dependencies = [
@@ -951,6 +981,7 @@ dependencies = [
  "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
  "arroyo-connector-kinesis",
+ "arroyo-connector-mqtt",
  "arroyo-connector-nats",
  "arroyo-connector-nexmark",
  "arroyo-connector-polling-http",
@@ -1000,11 +1031,7 @@ dependencies = [
  "regex",
  "regress 0.10.4",
  "reqwest 0.12.19",
- "rumqttc",
  "rust_decimal",
- "rustls 0.22.4",
- "rustls-native-certs 0.8.1",
- "rustls-pemfile 2.2.0",
  "sasl2-sys",
  "schemars 1.0.4",
  "serde",
@@ -1014,7 +1041,6 @@ dependencies = [
  "strum_macros",
  "tempfile",
  "tokio",
- "tokio-rustls 0.25.0",
  "tokio-stream",
  "tonic",
  "tracing",

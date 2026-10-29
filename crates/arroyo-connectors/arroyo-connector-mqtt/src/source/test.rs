@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 
-use crate::mqtt::{MqttConfig, Tls, create_connection};
+use crate::{MqttConfig, Tls, create_connection};
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arroyo_operator::context::{
     ArrowCollector, BatchReceiver, OperatorContext, SourceCollector, SourceContext, batch_bounded,

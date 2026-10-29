@@ -4,9 +4,9 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use super::MqttSinkFunc;
-use crate::mqtt::{MqttConfig, Tls, create_connection};
-use crate::test::DummyCollector;
+use crate::{MqttConfig, Tls, create_connection};
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+use arroyo_connector_common::test::DummyCollector;
 use arroyo_operator::context::OperatorContext;
 use arroyo_operator::operator::ArrowOperator;
 use arroyo_rpc::df::ArroyoSchema;
