@@ -11,9 +11,9 @@ use arroyo_rpc::api_types::connections::{
 };
 use tokio::sync::mpsc::Sender;
 
-use crate::EmptyConfig;
+use arroyo_connector_common::EmptyConfig;
 
-use crate::stdout::operator::StdoutSink;
+use crate::operator::StdoutSink;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::formats::{Format, JsonFormat};
