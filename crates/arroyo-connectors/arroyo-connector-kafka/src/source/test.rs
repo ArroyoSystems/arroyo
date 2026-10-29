@@ -5,7 +5,7 @@ use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
 use rand::random;
 
-use crate::kafka::SourceOffset;
+use crate::SourceOffset;
 use arrow::array::{Array, StringArray};
 use arrow::datatypes::DataType::UInt64;
 use arrow::datatypes::TimeUnit;
@@ -35,7 +35,7 @@ use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use super::KafkaSourceFunc;
-use crate::kafka::Context;
+use crate::Context;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct TestData {

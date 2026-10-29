@@ -676,6 +676,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-kafka"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "aws-config",
+ "aws-msk-iam-sasl-signer",
+ "bincode",
+ "datafusion",
+ "futures",
+ "glob",
+ "governor",
+ "itertools 0.14.0",
+ "prost 0.14.4",
+ "rand 0.9.5",
+ "rdkafka",
+ "regress 0.10.4",
+ "sasl2-sys",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-kinesis"
 version = "0.17.0-dev"
 dependencies = [
@@ -980,6 +1014,7 @@ dependencies = [
  "arroyo-connector-common",
  "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
+ "arroyo-connector-kafka",
  "arroyo-connector-kinesis",
  "arroyo-connector-mqtt",
  "arroyo-connector-nats",
@@ -1001,8 +1036,6 @@ dependencies = [
  "arroyo-types",
  "async-compression",
  "async-trait",
- "aws-config",
- "aws-msk-iam-sasl-signer",
  "bincode",
  "buoyant_kernel",
  "buoyant_kernel_derive",
@@ -1015,7 +1048,6 @@ dependencies = [
  "fluvio",
  "futures",
  "glob",
- "governor",
  "iceberg",
  "iceberg-catalog-rest",
  "iceberg-storage-opendal",
@@ -1025,14 +1057,11 @@ dependencies = [
  "object_store",
  "parquet",
  "prost 0.14.4",
- "rand 0.9.5",
- "rdkafka",
  "redis",
  "regex",
  "regress 0.10.4",
  "reqwest 0.12.19",
  "rust_decimal",
- "sasl2-sys",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -1042,7 +1071,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "tonic",
  "tracing",
  "typetag",
  "typify 0.0.13",

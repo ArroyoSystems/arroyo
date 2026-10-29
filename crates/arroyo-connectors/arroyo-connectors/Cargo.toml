@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats", "mqtt"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats", "mqtt", "kafka"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -24,9 +24,11 @@ rabbitmq = ["dep:arroyo-connector-rabbitmq"]
 redis = ["dep:arroyo-connector-redis"]
 nats = ["dep:arroyo-connector-nats"]
 mqtt = ["dep:arroyo-connector-mqtt"]
+kafka = ["dep:arroyo-connector-kafka"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-kafka = { path = "../arroyo-connector-kafka", optional = true }
 arroyo-connector-mqtt = { path = "../arroyo-connector-mqtt", optional = true }
 arroyo-connector-nats = { path = "../arroyo-connector-nats", optional = true }
 arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
@@ -62,13 +64,10 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 typify = { workspace = true }
 prost = { workspace = true }
-tonic = { workspace = true }
-governor = "0.8.0"
 anyhow = { workspace = true }
 tracing = { workspace = true }
 regress = "0.10.0"
 futures = { workspace = true }
-rand = { workspace = true }
 bytes = { workspace = true }
 url = { workspace = true }
 itertools = { workspace = true }
@@ -85,15 +84,6 @@ sha2 = "0.10"
 ##########################
 
 # Kafka
-aws-msk-iam-sasl-signer = "1.0.0"
-rdkafka = { version = "0.39", features = [
-    "cmake-build",
-    "tracing",
-    "sasl",
-    "ssl-vendored",
-    "zstd",
-] }
-sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 
 # SSE
 
@@ -116,7 +106,6 @@ redis = { version = "0.28", features = [
 fluvio = { version = "0.24", features = ["openssl"] }
 
 # Kinesis
-aws-config = { workspace = true }
 
 # Filesystem
 parquet = { workspace = true, features = ["async"] }
