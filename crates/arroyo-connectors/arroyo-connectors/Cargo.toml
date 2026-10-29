@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -21,9 +21,11 @@ polling-http = ["dep:arroyo-connector-polling-http"]
 fluvio = ["dep:arroyo-connector-fluvio"]
 kinesis = ["dep:arroyo-connector-kinesis"]
 rabbitmq = ["dep:arroyo-connector-rabbitmq"]
+redis = ["dep:arroyo-connector-redis"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
 arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
 arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
 arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }

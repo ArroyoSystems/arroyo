@@ -789,6 +789,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-redis"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "redis",
+ "regress 0.10.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-single-file"
 version = "0.17.0-dev"
 dependencies = [
@@ -908,6 +930,7 @@ dependencies = [
  "arroyo-connector-polling-http",
  "arroyo-connector-preview",
  "arroyo-connector-rabbitmq",
+ "arroyo-connector-redis",
  "arroyo-connector-single-file",
  "arroyo-connector-sse",
  "arroyo-connector-stdout",
