@@ -7,16 +7,18 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
 impulse = ["dep:arroyo-connector-impulse"]
 nexmark = ["dep:arroyo-connector-nexmark"]
 single-file = ["dep:arroyo-connector-single-file"]
+sse = ["dep:arroyo-connector-sse"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
 arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
 arroyo-connector-nexmark = { path = "../arroyo-connector-nexmark", optional = true }
 arroyo-connector-impulse = { path = "../arroyo-connector-impulse", optional = true }
@@ -76,7 +78,6 @@ rdkafka = { version = "0.39", features = [
 sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 
 # SSE
-eventsource-client = "0.13.0"
 
 # Websocket
 tokio-tungstenite = { version = "0.24", features = ["native-tls"] }

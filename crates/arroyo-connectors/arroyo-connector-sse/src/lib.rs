@@ -17,14 +17,14 @@ use arroyo_rpc::api_types::connections::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::EmptyConfig;
-use crate::sse::operator::SSESourceFunc;
+use crate::operator::SSESourceFunc;
+use arroyo_connector_common::EmptyConfig;
 
 use arroyo_operator::connector::Connector;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "src/sse/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+import_types!(schema = "src/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("./sse.svg");
 
 pub struct SSEConnector {}
