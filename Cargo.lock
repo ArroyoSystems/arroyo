@@ -752,6 +752,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-webhook"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bytes",
+ "glob",
+ "reqwest 0.12.19",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connectors"
 version = "0.17.0-dev"
 dependencies = [
@@ -766,6 +789,7 @@ dependencies = [
  "arroyo-connector-single-file",
  "arroyo-connector-sse",
  "arroyo-connector-stdout",
+ "arroyo-connector-webhook",
  "arroyo-formats",
  "arroyo-operator",
  "arroyo-rpc",

@@ -11,7 +11,7 @@ use arroyo_types::CheckpointBarrier;
 use tokio::sync::{Mutex, Semaphore};
 use tracing::warn;
 
-use crate::webhook::MAX_INFLIGHT;
+use crate::MAX_INFLIGHT;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;

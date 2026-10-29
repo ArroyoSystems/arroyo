@@ -31,7 +31,8 @@ pub use arroyo_connector_single_file as single_file;
 pub use arroyo_connector_sse as sse;
 #[cfg(feature = "stdout")]
 pub use arroyo_connector_stdout as stdout;
-pub mod webhook;
+#[cfg(feature = "webhook")]
+pub use arroyo_connector_webhook as webhook;
 pub mod websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
@@ -62,6 +63,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(sse::SSEConnector {}),
         #[cfg(feature = "stdout")]
         Box::new(stdout::StdoutConnector {}),
+        #[cfg(feature = "webhook")]
         Box::new(webhook::WebhookConnector {}),
         Box::new(websocket::WebsocketConnector {}),
     ];
