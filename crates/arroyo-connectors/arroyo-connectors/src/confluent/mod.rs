@@ -56,21 +56,19 @@ impl ConfluentConnector {
     }
 }
 
-impl From<Option<ConfluentSchemaRegistry>> for kafka::SchemaRegistry {
-    fn from(value: Option<ConfluentSchemaRegistry>) -> Self {
-        let Some(value) = value else {
-            return kafka::SchemaRegistry::None {};
-        };
+fn schema_registry_from(value: Option<ConfluentSchemaRegistry>) -> kafka::SchemaRegistry {
+    let Some(value) = value else {
+        return kafka::SchemaRegistry::None {};
+    };
 
-        let Some(endpoint) = value.endpoint else {
-            return kafka::SchemaRegistry::None {};
-        };
+    let Some(endpoint) = value.endpoint else {
+        return kafka::SchemaRegistry::None {};
+    };
 
-        kafka::SchemaRegistry::ConfluentSchemaRegistry {
-            api_key: value.api_key,
-            api_secret: value.api_secret,
-            endpoint,
-        }
+    kafka::SchemaRegistry::ConfluentSchemaRegistry {
+        api_key: value.api_key,
+        api_secret: value.api_secret,
+        endpoint,
     }
 }
 
@@ -84,7 +82,7 @@ impl From<ConfluentProfile> for KafkaConfig {
                 username: c.key,
                 password: c.secret,
             },
-            schema_registry_enum: Some(c.schema_registry.into()),
+            schema_registry_enum: Some(schema_registry_from(c.schema_registry)),
             connection_properties: HashMap::new(),
         }
     }
