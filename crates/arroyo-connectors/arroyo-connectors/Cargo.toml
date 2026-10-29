@@ -7,15 +7,17 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
 impulse = ["dep:arroyo-connector-impulse"]
 nexmark = ["dep:arroyo-connector-nexmark"]
+single-file = ["dep:arroyo-connector-single-file"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
 arroyo-connector-nexmark = { path = "../arroyo-connector-nexmark", optional = true }
 arroyo-connector-impulse = { path = "../arroyo-connector-impulse", optional = true }
 arroyo-connector-stdout = { path = "../arroyo-connector-stdout", optional = true }

@@ -9,16 +9,16 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 
-use crate::EmptyConfig;
+use arroyo_connector_common::EmptyConfig;
 
-use crate::single_file::sink::SingleFileSink;
-use crate::single_file::source::SingleFileSourceFunc;
+use crate::sink::SingleFileSink;
+use crate::source::SingleFileSourceFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "src/single_file/table.json");
+import_types!(schema = "src/table.json");
 
 mod sink;
 mod source;
