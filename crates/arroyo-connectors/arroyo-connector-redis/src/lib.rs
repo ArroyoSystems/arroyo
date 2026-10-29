@@ -1,8 +1,8 @@
 pub mod lookup;
 pub mod sink;
 
-use crate::redis::lookup::RedisLookup;
-use crate::redis::sink::{GeneralConnection, RedisSinkFunc};
+use crate::lookup::RedisLookup;
+use crate::sink::{GeneralConnection, RedisSinkFunc};
 use anyhow::{anyhow, bail};
 use arrow::datatypes::{DataType, Schema};
 use arroyo_formats::de::ArrowDeserializer;
@@ -30,13 +30,13 @@ const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./redis.svg");
 
 import_types!(
-    schema = "src/redis/profile.json",
+    schema = "src/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }
 );
 
-import_types!(schema = "src/redis/table.json");
+import_types!(schema = "src/table.json");
 
 pub(crate) enum RedisClient {
     Standard(Client),

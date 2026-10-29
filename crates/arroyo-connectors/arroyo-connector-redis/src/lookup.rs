@@ -1,5 +1,5 @@
-use crate::redis::RedisClient;
-use crate::redis::sink::GeneralConnection;
+use crate::RedisClient;
+use crate::sink::GeneralConnection;
 use arrow::array::{Array, ArrayRef, AsArray, RecordBatch};
 use arrow::datatypes::DataType;
 use arroyo_formats::de::{ArrowDeserializer, FieldValueType};

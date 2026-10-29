@@ -28,7 +28,8 @@ pub use arroyo_connector_polling_http as polling_http;
 pub use arroyo_connector_preview as preview;
 #[cfg(feature = "rabbitmq")]
 pub use arroyo_connector_rabbitmq as rabbitmq;
-pub mod redis;
+#[cfg(feature = "redis")]
+pub use arroyo_connector_redis as redis;
 #[cfg(feature = "single-file")]
 pub use arroyo_connector_single_file as single_file;
 #[cfg(feature = "sse")]
@@ -65,6 +66,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(preview::PreviewConnector {}),
         #[cfg(feature = "rabbitmq")]
         Box::new(rabbitmq::RabbitmqConnector {}),
+        #[cfg(feature = "redis")]
         Box::new(redis::RedisConnector {}),
         #[cfg(feature = "single-file")]
         Box::new(single_file::SingleFileConnector {}),

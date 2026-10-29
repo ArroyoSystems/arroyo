@@ -1,4 +1,4 @@
-use crate::redis::{ListOperation, RedisClient, Target};
+use crate::{ListOperation, RedisClient, Target};
 use arrow::array::{AsArray, RecordBatch};
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, ErrorReporter, OperatorContext};
