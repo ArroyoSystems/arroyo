@@ -1,6 +1,6 @@
 use super::migration;
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::{FileSystemDataRecovery, FileToFinish};
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::sink::{FileSystemDataRecovery, FileToFinish};
 use arroyo_rpc::SerializableBytes;
 use arroyo_rpc::errors::StateError;
 use arroyo_state::tables::MigratableState;

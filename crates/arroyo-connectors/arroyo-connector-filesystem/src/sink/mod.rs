@@ -45,11 +45,11 @@ use self::{
 };
 
 use self::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::config::NamingConfig;
-use crate::filesystem::sink::delta::load_or_create_table;
-use crate::filesystem::sink::iceberg::IcebergTable;
-use crate::filesystem::sink::partitioning::{Partitioner, PartitionerMode};
-use crate::filesystem::{FilenameStrategy, TableFormat, config};
+use crate::config::NamingConfig;
+use crate::sink::delta::load_or_create_table;
+use crate::sink::iceberg::IcebergTable;
+use crate::sink::partitioning::{Partitioner, PartitionerMode};
+use crate::{FilenameStrategy, TableFormat, config};
 use two_phase_committer::{CommitStrategy, TwoPhaseCommitter, TwoPhaseCommitterOperator};
 
 const DEFAULT_TARGET_PART_SIZE: usize = 32 * 1024 * 1024;
@@ -2019,7 +2019,7 @@ pub(crate) fn add_suffix_prefix(
 
 #[cfg(test)]
 mod tests {
-    use crate::filesystem::sink::split_into_parts;
+    use crate::sink::split_into_parts;
     use bytes::Bytes;
 
     #[test]

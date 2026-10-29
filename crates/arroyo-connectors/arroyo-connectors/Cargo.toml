@@ -3,134 +3,48 @@ name = "arroyo-connectors"
 version = "0.17.0-dev"
 edition = "2024"
 
-[lints.clippy]
-to_string_trait_impl = "allow"
-
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats", "mqtt", "kafka", "confluent"]
+default = ["blackhole", "confluent", "filesystem", "fluvio", "impulse", "kafka", "kinesis", "mqtt", "nats", "nexmark", "polling-http", "preview", "rabbitmq", "redis", "single-file", "sse", "stdout", "webhook", "websocket"]
 blackhole = ["dep:arroyo-connector-blackhole"]
-preview = ["dep:arroyo-connector-preview"]
-stdout = ["dep:arroyo-connector-stdout"]
-impulse = ["dep:arroyo-connector-impulse"]
-nexmark = ["dep:arroyo-connector-nexmark"]
-single-file = ["dep:arroyo-connector-single-file"]
-sse = ["dep:arroyo-connector-sse"]
-webhook = ["dep:arroyo-connector-webhook"]
-websocket = ["dep:arroyo-connector-websocket"]
-polling-http = ["dep:arroyo-connector-polling-http"]
+confluent = ["dep:arroyo-connector-confluent"]
+filesystem = ["dep:arroyo-connector-filesystem"]
 fluvio = ["dep:arroyo-connector-fluvio"]
+impulse = ["dep:arroyo-connector-impulse"]
+kafka = ["dep:arroyo-connector-kafka"]
 kinesis = ["dep:arroyo-connector-kinesis"]
+mqtt = ["dep:arroyo-connector-mqtt"]
+nats = ["dep:arroyo-connector-nats"]
+nexmark = ["dep:arroyo-connector-nexmark"]
+polling-http = ["dep:arroyo-connector-polling-http"]
+preview = ["dep:arroyo-connector-preview"]
 rabbitmq = ["dep:arroyo-connector-rabbitmq"]
 redis = ["dep:arroyo-connector-redis"]
-nats = ["dep:arroyo-connector-nats"]
-mqtt = ["dep:arroyo-connector-mqtt"]
-kafka = ["dep:arroyo-connector-kafka"]
-confluent = ["dep:arroyo-connector-confluent"]
+single-file = ["dep:arroyo-connector-single-file"]
+sse = ["dep:arroyo-connector-sse"]
+stdout = ["dep:arroyo-connector-stdout"]
+webhook = ["dep:arroyo-connector-webhook"]
+websocket = ["dep:arroyo-connector-websocket"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-operator = { path = "../../arroyo-operator" }
+
+arroyo-connector-blackhole = { path = "../arroyo-connector-blackhole", optional = true }
 arroyo-connector-confluent = { path = "../arroyo-connector-confluent", optional = true }
+arroyo-connector-filesystem = { path = "../arroyo-connector-filesystem", optional = true }
+arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }
+arroyo-connector-impulse = { path = "../arroyo-connector-impulse", optional = true }
 arroyo-connector-kafka = { path = "../arroyo-connector-kafka", optional = true }
+arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
 arroyo-connector-mqtt = { path = "../arroyo-connector-mqtt", optional = true }
 arroyo-connector-nats = { path = "../arroyo-connector-nats", optional = true }
-arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
-arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
-arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
-arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }
-arroyo-connector-polling-http = { path = "../arroyo-connector-polling-http", optional = true }
-arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }
-arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
-arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
-arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
 arroyo-connector-nexmark = { path = "../arroyo-connector-nexmark", optional = true }
-arroyo-connector-impulse = { path = "../arroyo-connector-impulse", optional = true }
-arroyo-connector-stdout = { path = "../arroyo-connector-stdout", optional = true }
+arroyo-connector-polling-http = { path = "../arroyo-connector-polling-http", optional = true }
 arroyo-connector-preview = { path = "../arroyo-connector-preview", optional = true }
-arroyo-connector-blackhole = { path = "../arroyo-connector-blackhole", optional = true }
-arroyo-types = { path = "../../arroyo-types" }
-arroyo-storage = { path = "../../arroyo-storage" }
-arroyo-rpc = { path = "../../arroyo-rpc" }
-arroyo-formats = { path = "../../arroyo-formats" }
-arroyo-operator = { path = "../../arroyo-operator" }
-arroyo-state = { path = "../../arroyo-state" }
-
-arrow = { workspace = true }
-datafusion = { workspace = true }
-datafusion-expr = { workspace = true }
-async-trait = { workspace = true }
-bincode = { workspace = true }
-chrono = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }
-tokio-stream = { workspace = true }
-prost = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-futures = { workspace = true }
-bytes = { workspace = true }
-url = { workspace = true }
-itertools = { workspace = true }
-regex = { workspace = true }
-uuid = { workspace = true, features = ["v7"] }
-ulid = "1.2.1"
-schemars = "1.0.4"
-strum = { workspace = true }
-strum_macros = { workspace = true }
-sha2 = "0.10"
-
-##########################
-# connector dependencies #
-##########################
-
-# Kafka
-
-# SSE
-
-# Websocket
-
-# Webhook
-reqwest = { workspace = true, features = ["stream"] }
-
-# RabbitMQ Stream
-
-# Redis
-redis = { version = "0.28", features = [
-    "default",
-    "tokio-rustls-comp",
-    "cluster-async",
-    "connection-manager",
-] }
-
-# Fluvio
-fluvio = { version = "0.24", features = ["openssl"] }
-
-# Kinesis
-
-# Filesystem
-parquet = { workspace = true, features = ["async"] }
-object_store = { workspace = true }
-deltalake = { workspace = true, features = ["s3", "gcs"] }
-delta_kernel = { workspace = true, features = ["arrow-58", "internal-api"] }
-buoyant_kernel_derive = { workspace = true }
-async-compression = { version = "0.4.3", features = ["tokio", "zstd", "gzip"] }
-flate2 = { workspace = true }
-iceberg = "0.10.1"
-iceberg-catalog-rest = "0.10.1"
-iceberg-storage-opendal = { version = "0.10.1", default-features = false, features = ["opendal-fs", "opendal-s3"] }
-typetag = "0.2"
-apache-avro = {workspace = true}
-num-bigint = "0.4.6"
-rust_decimal = "1"
-
-# MQTT
-
-# NATS
-murmur3 = "0.5.2"
-
-[dev-dependencies]
-arroyo-connector-common = { path = "../arroyo-connector-common", features = ["test-utils"] }
-tempfile = "3"
-
-[build-dependencies]
-glob = "0.3"
+arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
+arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
+arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
+arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
+arroyo-connector-stdout = { path = "../arroyo-connector-stdout", optional = true }
+arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
+arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }

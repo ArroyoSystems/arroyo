@@ -13,10 +13,10 @@ use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
     add_suffix_prefix, classify_storage_error, map_storage_error,
 };
-use crate::filesystem::TableFormat;
-use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
-use crate::filesystem::sink::two_phase_committer::CommitStrategy;
-use crate::filesystem::sink::v2::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
+use crate::TableFormat;
+use crate::config::{self, FilenameStrategy, NamingConfig};
+use crate::sink::two_phase_committer::CommitStrategy;
+use crate::sink::v2::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
 use arrow::record_batch::RecordBatch;
 use arrow::row::OwnedRow;
 use arroyo_operator::context::{Collector, OperatorContext};

@@ -1,16 +1,14 @@
 use super::checkpoint::{FileToCommit, FileToCommitType, InProgressFile, InProgressFileState};
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::map_storage_error;
-use crate::filesystem::sink::two_phase_committer::CommitStrategy;
-use crate::filesystem::sink::v2::SinkConfig;
-use crate::filesystem::sink::v2::uploads::{
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::sink::map_storage_error;
+use crate::sink::two_phase_committer::CommitStrategy;
+use crate::sink::v2::SinkConfig;
+use crate::sink::v2::uploads::{
     FsResponseData, UploadFuture, create_last_parts_upload_future,
     create_multipart_finalize_future, create_multipart_init_future, create_part_upload_future,
     create_single_file_upload_future,
 };
-use crate::filesystem::sink::{
-    BatchBufferingWriter, FsEventLogger, MultiPartWriterStats, split_into_parts,
-};
+use crate::sink::{BatchBufferingWriter, FsEventLogger, MultiPartWriterStats, split_into_parts};
 use arrow::record_batch::RecordBatch;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{SerializableBytes, connector_err};

@@ -1,21 +1,21 @@
 mod config;
 pub mod delta;
-pub(crate) mod iceberg;
+pub mod iceberg;
 pub mod sink;
 mod source;
 
 use self::sink::{
     JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
 };
-use crate::filesystem::config::*;
-use crate::filesystem::sink::json::JsonWriter;
-use crate::filesystem::sink::parquet::ParquetBatchBufferingWriter;
-use crate::filesystem::sink::partitioning::PartitionerMode;
-use crate::filesystem::sink::v2::FileSystemSinkV2;
-use crate::filesystem::source::FileSystemSourceFunc;
-use crate::{EmptyConfig, render_schema};
+use crate::config::*;
+use crate::sink::json::JsonWriter;
+use crate::sink::parquet::ParquetBatchBufferingWriter;
+use crate::sink::partitioning::PartitionerMode;
+use crate::sink::v2::FileSystemSinkV2;
+use crate::source::FileSystemSourceFunc;
 use anyhow::{Result, anyhow, bail};
 use arrow::datatypes::Schema;
+use arroyo_connector_common::{EmptyConfig, render_schema};
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;

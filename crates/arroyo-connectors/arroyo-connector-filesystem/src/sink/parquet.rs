@@ -2,11 +2,9 @@ use super::{
     BatchBufferingWriter, FsEventLogger, MultiPartWriterStats,
     local::{CurrentFileRecovery, FilePreCommit, LocalWriter},
 };
-use crate::filesystem::config;
-use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
-use crate::filesystem::sink::iceberg::schema::{
-    normalize_batch_to_schema, update_field_ids_to_iceberg,
-};
+use crate::config;
+use crate::sink::iceberg::metadata::IcebergFileMetadata;
+use crate::sink::iceberg::schema::{normalize_batch_to_schema, update_field_ids_to_iceberg};
 use anyhow::Result;
 use arrow::array::{Array, RecordBatch, TimestampNanosecondArray};
 use arrow::datatypes::SchemaRef;

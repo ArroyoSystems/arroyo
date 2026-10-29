@@ -5,7 +5,7 @@ use tracing::info;
 use super::checkpoint::{
     FileToCommit, FileToCommitType, FilesCheckpointV2, InProgressFile, InProgressFileState,
 };
-use crate::filesystem::sink::{
+use crate::sink::{
     FileCheckpointData, FileSystemDataRecovery, FileToFinish, InFlightPartCheckpoint,
     InProgressFileCheckpoint,
 };
@@ -148,7 +148,7 @@ pub fn migrate_precommit_v1_to_v2(v1: FileToFinish) -> FileToCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::sink::iceberg::metadata::{ColumnAccum, IcebergFileMetadata};
+    use crate::sink::iceberg::metadata::{ColumnAccum, IcebergFileMetadata};
     use std::collections::HashMap;
 
     fn make_iceberg_metadata() -> IcebergFileMetadata {

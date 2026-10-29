@@ -1,12 +1,12 @@
-use crate::filesystem::config::{
+use crate::config::{
     FileSystemSink, IcebergCatalog, IcebergProfile, IcebergTable, PartitioningConfig,
 };
-use crate::filesystem::sink::iceberg::schema::add_parquet_field_ids;
-use crate::filesystem::sink::iceberg::transforms;
-use crate::filesystem::sink::partitioning::PartitionerMode;
-use crate::filesystem::{TableFormat, make_sink, sink};
-use crate::render_schema;
+use crate::sink::iceberg::schema::add_parquet_field_ids;
+use crate::sink::iceberg::transforms;
+use crate::sink::partitioning::PartitionerMode;
+use crate::{TableFormat, make_sink, sink};
 use anyhow::{anyhow, bail};
+use arroyo_connector_common::render_schema;
 use arroyo_operator::connector::Connection;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;

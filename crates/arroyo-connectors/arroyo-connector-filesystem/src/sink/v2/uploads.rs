@@ -1,5 +1,5 @@
 use super::{classify_storage_error, map_storage_error};
-use crate::filesystem::sink::{FsEventLogger, storage_error_message};
+use crate::sink::{FsEventLogger, storage_error_message};
 use arroyo_rpc::connector_err;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, StorageError};
 use arroyo_storage::StorageProvider;
