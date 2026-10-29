@@ -775,6 +775,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-websocket"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connectors"
 version = "0.17.0-dev"
 dependencies = [
@@ -790,6 +812,7 @@ dependencies = [
  "arroyo-connector-sse",
  "arroyo-connector-stdout",
  "arroyo-connector-webhook",
+ "arroyo-connector-websocket",
  "arroyo-formats",
  "arroyo-operator",
  "arroyo-rpc",
@@ -848,7 +871,6 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.25.0",
  "tokio-stream",
- "tokio-tungstenite",
  "tonic",
  "tracing",
  "typetag",

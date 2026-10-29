@@ -18,9 +18,9 @@ use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request;
 use typify::import_types;
 
-use crate::{EmptyConfig, header_map};
+use arroyo_connector_common::{EmptyConfig, header_map};
 
-use crate::websocket::operator::{WebsocketSourceFunc, WebsocketSourceState};
+use crate::operator::{WebsocketSourceFunc, WebsocketSourceState};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
@@ -28,7 +28,7 @@ mod operator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "src/websocket/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+import_types!(schema = "src/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("./websocket.svg");
 
 pub struct WebsocketConnector {}

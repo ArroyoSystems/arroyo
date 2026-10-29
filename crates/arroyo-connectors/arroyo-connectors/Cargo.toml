@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -16,9 +16,11 @@ nexmark = ["dep:arroyo-connector-nexmark"]
 single-file = ["dep:arroyo-connector-single-file"]
 sse = ["dep:arroyo-connector-sse"]
 webhook = ["dep:arroyo-connector-webhook"]
+websocket = ["dep:arroyo-connector-websocket"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }
 arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
 arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
 arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
@@ -82,7 +84,6 @@ sasl2-sys = { version = "0.1.22", features = ["vendored"] }
 # SSE
 
 # Websocket
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 
 # Webhook
 reqwest = { workspace = true, features = ["stream"] }
