@@ -9,9 +9,9 @@ use arroyo_rpc::api_types::connections::{
 };
 use tokio::sync::mpsc::Sender;
 
-use crate::EmptyConfig;
+use arroyo_connector_common::EmptyConfig;
 
-use crate::preview::operator::PreviewSink;
+use crate::operator::PreviewSink;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 

@@ -19,7 +19,8 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod polling_http;
-pub mod preview;
+#[cfg(feature = "preview")]
+pub use arroyo_connector_preview as preview;
 pub mod rabbitmq;
 pub mod redis;
 pub mod single_file;
@@ -44,6 +45,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(nats::NatsConnector {}),
         Box::new(nexmark::NexmarkConnector {}),
         Box::new(polling_http::PollingHTTPConnector {}),
+        #[cfg(feature = "preview")]
         Box::new(preview::PreviewConnector {}),
         Box::new(rabbitmq::RabbitmqConnector {}),
         Box::new(redis::RedisConnector {}),

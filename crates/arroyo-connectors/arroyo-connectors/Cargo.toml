@@ -7,11 +7,13 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole"]
+default = ["blackhole", "preview"]
 blackhole = ["dep:arroyo-connector-blackhole"]
+preview = ["dep:arroyo-connector-preview"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-preview = { path = "../arroyo-connector-preview", optional = true }
 arroyo-connector-blackhole = { path = "../arroyo-connector-blackhole", optional = true }
 arroyo-types = { path = "../../arroyo-types" }
 arroyo-storage = { path = "../../arroyo-storage" }

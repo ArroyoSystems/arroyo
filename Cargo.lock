@@ -630,6 +630,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-preview"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "arroyo-connectors"
 version = "0.17.0-dev"
 dependencies = [
@@ -638,6 +656,7 @@ dependencies = [
  "arrow",
  "arroyo-connector-blackhole",
  "arroyo-connector-common",
+ "arroyo-connector-preview",
  "arroyo-formats",
  "arroyo-operator",
  "arroyo-rpc",
