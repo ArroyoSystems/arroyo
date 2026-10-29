@@ -5,6 +5,7 @@ members = [
     "crates/arroyo-compiler-service",
     "crates/arroyo-connectors/arroyo-connector-common",
     "crates/arroyo-connectors/arroyo-connectors",
+    "crates/arroyo-connectors/arroyo-connector-blackhole",
     "crates/arroyo-controller",
     "crates/arroyo-datastream",
     "crates/arroyo-planner",

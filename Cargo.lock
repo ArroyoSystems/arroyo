@@ -598,6 +598,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-blackhole"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "arroyo-connector-common"
 version = "0.17.0-dev"
 dependencies = [
@@ -622,6 +636,7 @@ dependencies = [
  "anyhow",
  "apache-avro 0.18.0",
  "arrow",
+ "arroyo-connector-blackhole",
  "arroyo-connector-common",
  "arroyo-formats",
  "arroyo-operator",

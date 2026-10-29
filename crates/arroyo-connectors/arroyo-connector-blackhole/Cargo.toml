@@ -1,0 +1,17 @@
+[package]
+name = "arroyo-connector-blackhole"
+version = "0.17.0-dev"
+edition = "2024"
+
+[lints.clippy]
+to_string_trait_impl = "allow"
+
+[dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-rpc = { path = "../../arroyo-rpc" }
+arroyo-operator = { path = "../../arroyo-operator" }
+arrow = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
