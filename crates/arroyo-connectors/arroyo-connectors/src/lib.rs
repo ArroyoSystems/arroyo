@@ -19,7 +19,8 @@ pub mod kafka;
 #[cfg(feature = "kinesis")]
 pub use arroyo_connector_kinesis as kinesis;
 pub mod mqtt;
-pub mod nats;
+#[cfg(feature = "nats")]
+pub use arroyo_connector_nats as nats;
 #[cfg(feature = "nexmark")]
 pub use arroyo_connector_nexmark as nexmark;
 #[cfg(feature = "polling-http")]
@@ -57,6 +58,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         #[cfg(feature = "kinesis")]
         Box::new(kinesis::KinesisConnector {}),
         Box::new(mqtt::MqttConnector {}),
+        #[cfg(feature = "nats")]
         Box::new(nats::NatsConnector {}),
         #[cfg(feature = "nexmark")]
         Box::new(nexmark::NexmarkConnector {}),

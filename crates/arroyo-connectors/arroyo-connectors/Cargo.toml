@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -22,9 +22,11 @@ fluvio = ["dep:arroyo-connector-fluvio"]
 kinesis = ["dep:arroyo-connector-kinesis"]
 rabbitmq = ["dep:arroyo-connector-rabbitmq"]
 redis = ["dep:arroyo-connector-redis"]
+nats = ["dep:arroyo-connector-nats"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-nats = { path = "../arroyo-connector-nats", optional = true }
 arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
 arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
 arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
@@ -138,8 +140,6 @@ tokio-rustls = "0.25"
 rustls = "0.22"
 
 # NATS
-async-nats = "0.38.0"
-nkeys = "0.3.0"
 murmur3 = "0.5.2"
 
 [dev-dependencies]

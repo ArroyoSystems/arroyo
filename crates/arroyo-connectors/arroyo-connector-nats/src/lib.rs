@@ -1,5 +1,5 @@
-use crate::nats::sink::NatsSinkFunc;
-use crate::nats::source::NatsSourceFunc;
+use crate::sink::NatsSinkFunc;
+use crate::source::NatsSourceFunc;
 use anyhow::anyhow;
 use anyhow::bail;
 use arroyo_formats::ser::ArrowSerializer;
@@ -26,13 +26,13 @@ const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./nats.svg");
 
 import_types!(
-    schema = "src/nats/profile.json",
+    schema = "src/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }
 );
 
-import_types!(schema = "src/nats/table.json");
+import_types!(schema = "src/table.json");
 
 #[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
 pub struct NatsState {
