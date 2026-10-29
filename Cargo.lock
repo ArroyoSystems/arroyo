@@ -768,6 +768,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-rabbitmq"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "async-trait",
+ "bincode",
+ "glob",
+ "rabbitmq-stream-client",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-single-file"
 version = "0.17.0-dev"
 dependencies = [
@@ -886,6 +907,7 @@ dependencies = [
  "arroyo-connector-nexmark",
  "arroyo-connector-polling-http",
  "arroyo-connector-preview",
+ "arroyo-connector-rabbitmq",
  "arroyo-connector-single-file",
  "arroyo-connector-sse",
  "arroyo-connector-stdout",
@@ -925,7 +947,6 @@ dependencies = [
  "object_store",
  "parquet",
  "prost 0.14.4",
- "rabbitmq-stream-client",
  "rand 0.9.5",
  "rdkafka",
  "redis",

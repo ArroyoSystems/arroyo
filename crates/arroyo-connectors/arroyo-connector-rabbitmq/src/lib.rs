@@ -1,8 +1,8 @@
-use crate::ConnectionType;
-use crate::rabbitmq::source::RabbitmqStreamSourceFunc;
+use crate::source::RabbitmqStreamSourceFunc;
 use anyhow::{anyhow, bail};
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
+use arroyo_rpc::api_types::connections::ConnectionType;
 use arroyo_rpc::api_types::connections::{ConnectionProfile, ConnectionSchema};
 use arroyo_rpc::{ConnectorOptions, OperatorConfig, api_types::connections::TestSourceMessage};
 use rabbitmq_stream_client::types::OffsetSpecification;
@@ -18,8 +18,8 @@ const CONFIG_SCHEMA: &str = include_str!("./profile.json");
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./rabbitmq.svg");
 
-import_types!(schema = "src/rabbitmq/profile.json");
-import_types!(schema = "src/rabbitmq/table.json");
+import_types!(schema = "src/profile.json");
+import_types!(schema = "src/table.json");
 
 impl Connector for RabbitmqConnector {
     type ProfileT = RabbitmqStreamConfig;
