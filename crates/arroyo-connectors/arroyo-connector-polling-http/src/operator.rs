@@ -13,7 +13,7 @@ use std::time::SystemTime;
 use tokio::select;
 use tokio::time::MissedTickBehavior;
 
-use crate::polling_http::EmitBehavior;
+use crate::EmitBehavior;
 use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::SourceOperator;

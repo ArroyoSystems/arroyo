@@ -675,6 +675,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-polling-http"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "bytes",
+ "futures",
+ "glob",
+ "reqwest 0.12.19",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+ "url",
+]
+
+[[package]]
 name = "arroyo-connector-preview"
 version = "0.17.0-dev"
 dependencies = [
@@ -807,6 +831,7 @@ dependencies = [
  "arroyo-connector-common",
  "arroyo-connector-impulse",
  "arroyo-connector-nexmark",
+ "arroyo-connector-polling-http",
  "arroyo-connector-preview",
  "arroyo-connector-single-file",
  "arroyo-connector-sse",
