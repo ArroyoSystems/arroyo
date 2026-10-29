@@ -1,4 +1,4 @@
-use crate::sse::SseTable;
+use crate::SseTable;
 use arroyo_operator::SourceFinishType;
 use arroyo_operator::context::{SourceCollector, SourceContext};
 use arroyo_operator::operator::{ConstructedOperator, SourceOperator};

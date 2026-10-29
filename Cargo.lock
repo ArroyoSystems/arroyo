@@ -714,6 +714,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-sse"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "eventsource-client",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-stdout"
 version = "0.17.0-dev"
 dependencies = [
@@ -742,6 +764,7 @@ dependencies = [
  "arroyo-connector-nexmark",
  "arroyo-connector-preview",
  "arroyo-connector-single-file",
+ "arroyo-connector-sse",
  "arroyo-connector-stdout",
  "arroyo-formats",
  "arroyo-operator",
@@ -763,7 +786,6 @@ dependencies = [
  "datafusion",
  "datafusion-expr",
  "deltalake",
- "eventsource-client",
  "flate2",
  "fluvio",
  "futures",

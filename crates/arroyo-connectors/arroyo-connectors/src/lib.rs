@@ -27,7 +27,8 @@ pub mod rabbitmq;
 pub mod redis;
 #[cfg(feature = "single-file")]
 pub use arroyo_connector_single_file as single_file;
-pub mod sse;
+#[cfg(feature = "sse")]
+pub use arroyo_connector_sse as sse;
 #[cfg(feature = "stdout")]
 pub use arroyo_connector_stdout as stdout;
 pub mod webhook;
@@ -57,6 +58,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(redis::RedisConnector {}),
         #[cfg(feature = "single-file")]
         Box::new(single_file::SingleFileConnector {}),
+        #[cfg(feature = "sse")]
         Box::new(sse::SSEConnector {}),
         #[cfg(feature = "stdout")]
         Box::new(stdout::StdoutConnector {}),
