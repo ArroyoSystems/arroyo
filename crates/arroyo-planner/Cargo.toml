@@ -8,7 +8,7 @@ edition = "2024"
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }

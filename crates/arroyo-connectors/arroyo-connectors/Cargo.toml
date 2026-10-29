@@ -10,12 +10,12 @@ to_string_trait_impl = "allow"
 default = []
 
 [dependencies]
-arroyo-types = { path = "../arroyo-types" }
-arroyo-storage = { path = "../arroyo-storage" }
-arroyo-rpc = { path = "../arroyo-rpc" }
-arroyo-formats = { path = "../arroyo-formats" }
-arroyo-operator = { path = "../arroyo-operator" }
-arroyo-state = { path = "../arroyo-state" }
+arroyo-types = { path = "../../arroyo-types" }
+arroyo-storage = { path = "../../arroyo-storage" }
+arroyo-rpc = { path = "../../arroyo-rpc" }
+arroyo-formats = { path = "../../arroyo-formats" }
+arroyo-operator = { path = "../../arroyo-operator" }
+arroyo-state = { path = "../../arroyo-state" }
 
 arrow = { workspace = true }
 datafusion = { workspace = true }
