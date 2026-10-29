@@ -498,6 +498,7 @@ dependencies = [
  "anyhow",
  "arroyo-api",
  "arroyo-compiler-service",
+ "arroyo-connectors",
  "arroyo-controller",
  "arroyo-node",
  "arroyo-openapi",
@@ -1399,6 +1400,7 @@ version = "0.17.0-dev"
 dependencies = [
  "anyhow",
  "arrow",
+ "arroyo-connectors",
  "arroyo-datastream",
  "arroyo-planner",
  "arroyo-rpc",
