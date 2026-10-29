@@ -19,15 +19,15 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Semaphore};
 use typify::import_types;
 
-use crate::{EmptyConfig, construct_http_client};
+use arroyo_connector_common::{EmptyConfig, construct_http_client};
 
-use crate::webhook::operator::WebhookSinkFunc;
+use crate::operator::WebhookSinkFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 
-import_types!(schema = "src/webhook/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
+import_types!(schema = "src/table.json", convert = { {type = "string", format = "var-str"} = VarStr });
 const ICON: &str = include_str!("./webhook.svg");
 
 const MAX_INFLIGHT: u32 = 50;
