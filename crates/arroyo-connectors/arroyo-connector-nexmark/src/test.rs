@@ -1,4 +1,4 @@
-use crate::nexmark::operator::{GeneratorConfig, NexmarkConfig, NexmarkGenerator};
+use crate::operator::{GeneratorConfig, NexmarkConfig, NexmarkGenerator};
 use rand::{SeedableRng, rngs::SmallRng};
 use std::{borrow::BorrowMut, time::SystemTime};
 

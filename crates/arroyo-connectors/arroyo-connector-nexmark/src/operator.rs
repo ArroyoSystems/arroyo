@@ -1,4 +1,4 @@
-use crate::nexmark::{NexmarkTable, auction_fields, bid_fields, person_fields};
+use crate::{NexmarkTable, auction_fields, bid_fields, person_fields};
 use arrow::array::{
     Int64Builder, RecordBatch, StringBuilder, StructBuilder, TimestampNanosecondBuilder,
 };

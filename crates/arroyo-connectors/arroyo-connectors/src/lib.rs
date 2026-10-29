@@ -18,7 +18,8 @@ pub mod kafka;
 pub mod kinesis;
 pub mod mqtt;
 pub mod nats;
-pub mod nexmark;
+#[cfg(feature = "nexmark")]
+pub use arroyo_connector_nexmark as nexmark;
 pub mod polling_http;
 #[cfg(feature = "preview")]
 pub use arroyo_connector_preview as preview;
@@ -46,6 +47,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(kinesis::KinesisConnector {}),
         Box::new(mqtt::MqttConnector {}),
         Box::new(nats::NatsConnector {}),
+        #[cfg(feature = "nexmark")]
         Box::new(nexmark::NexmarkConnector {}),
         Box::new(polling_http::PollingHTTPConnector {}),
         #[cfg(feature = "preview")]
