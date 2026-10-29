@@ -7,7 +7,8 @@ use arroyo_connector_common::test;
 pub use arroyo_connector_common::{EmptyConfig, header_map, render_schema};
 use arroyo_connector_common::{construct_http_client, send, source_field};
 
-pub mod blackhole;
+#[cfg(feature = "blackhole")]
+pub use arroyo_connector_blackhole as blackhole;
 pub mod confluent;
 pub mod filesystem;
 pub mod fluvio;
@@ -29,6 +30,7 @@ pub mod websocket;
 
 pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
+        #[cfg(feature = "blackhole")]
         Box::new(blackhole::BlackholeConnector {}),
         Box::new(confluent::ConfluentConnector {}),
         Box::new(filesystem::delta::DeltaLakeConnector {}),

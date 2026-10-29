@@ -1,4 +1,4 @@
-use crate::blackhole::operator::BlackholeSinkFunc;
+use crate::operator::BlackholeSinkFunc;
 use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector};
 use arroyo_operator::operator::ConstructedOperator;
@@ -7,7 +7,7 @@ use arroyo_rpc::api_types::connections::{
 };
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 
-use crate::EmptyConfig;
+use arroyo_connector_common::EmptyConfig;
 
 mod operator;
 
