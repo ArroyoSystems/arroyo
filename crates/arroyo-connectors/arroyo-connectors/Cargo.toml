@@ -4,7 +4,7 @@ version = "0.17.0-dev"
 edition = "2024"
 
 [features]
-default = ["filesystem", "impulse", "kafka", "stdout"]
+default = ["filesystem", "impulse", "kafka", "preview", "stdout"]
 all = ["blackhole", "confluent", "filesystem", "fluvio", "impulse", "kafka", "kinesis", "mqtt", "nats", "nexmark", "polling-http", "preview", "rabbitmq", "redis", "single-file", "sse", "stdout", "webhook", "websocket"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 confluent = ["dep:arroyo-connector-confluent"]
