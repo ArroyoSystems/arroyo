@@ -7,7 +7,7 @@ edition = "2024"
 to_string_trait_impl = "allow"
 
 [features]
-default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats"]
+default = ["blackhole", "preview", "stdout", "impulse", "nexmark", "single-file", "sse", "webhook", "websocket", "polling-http", "fluvio", "kinesis", "rabbitmq", "redis", "nats", "mqtt"]
 blackhole = ["dep:arroyo-connector-blackhole"]
 preview = ["dep:arroyo-connector-preview"]
 stdout = ["dep:arroyo-connector-stdout"]
@@ -23,9 +23,11 @@ kinesis = ["dep:arroyo-connector-kinesis"]
 rabbitmq = ["dep:arroyo-connector-rabbitmq"]
 redis = ["dep:arroyo-connector-redis"]
 nats = ["dep:arroyo-connector-nats"]
+mqtt = ["dep:arroyo-connector-mqtt"]
 
 [dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-mqtt = { path = "../arroyo-connector-mqtt", optional = true }
 arroyo-connector-nats = { path = "../arroyo-connector-nats", optional = true }
 arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
 arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
@@ -133,11 +135,6 @@ num-bigint = "0.4.6"
 rust_decimal = "1"
 
 # MQTT
-rumqttc = { version = "0.24.0", features = ["url"] }
-rustls-native-certs = "0.8"
-rustls-pemfile = "2"
-tokio-rustls = "0.25"
-rustls = "0.22"
 
 # NATS
 murmur3 = "0.5.2"

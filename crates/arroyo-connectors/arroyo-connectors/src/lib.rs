@@ -18,7 +18,8 @@ pub use arroyo_connector_impulse as impulse;
 pub mod kafka;
 #[cfg(feature = "kinesis")]
 pub use arroyo_connector_kinesis as kinesis;
-pub mod mqtt;
+#[cfg(feature = "mqtt")]
+pub use arroyo_connector_mqtt as mqtt;
 #[cfg(feature = "nats")]
 pub use arroyo_connector_nats as nats;
 #[cfg(feature = "nexmark")]
@@ -57,6 +58,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(kafka::KafkaConnector {}),
         #[cfg(feature = "kinesis")]
         Box::new(kinesis::KinesisConnector {}),
+        #[cfg(feature = "mqtt")]
         Box::new(mqtt::MqttConnector {}),
         #[cfg(feature = "nats")]
         Box::new(nats::NatsConnector {}),

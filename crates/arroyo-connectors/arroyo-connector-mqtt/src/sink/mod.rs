@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use crate::mqtt::MqttConfig;
+use crate::MqttConfig;
 use arroyo_formats::ser::ArrowSerializer;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
