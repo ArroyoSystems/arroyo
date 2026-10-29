@@ -2,10 +2,10 @@ use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
 use std::collections::HashMap;
 
+use arroyo_connector_common::send;
 #[cfg(test)]
 use arroyo_connector_common::test;
 pub use arroyo_connector_common::{EmptyConfig, header_map, render_schema};
-use arroyo_connector_common::{construct_http_client, send};
 
 #[cfg(feature = "blackhole")]
 pub use arroyo_connector_blackhole as blackhole;
@@ -20,7 +20,8 @@ pub mod mqtt;
 pub mod nats;
 #[cfg(feature = "nexmark")]
 pub use arroyo_connector_nexmark as nexmark;
-pub mod polling_http;
+#[cfg(feature = "polling-http")]
+pub use arroyo_connector_polling_http as polling_http;
 #[cfg(feature = "preview")]
 pub use arroyo_connector_preview as preview;
 pub mod rabbitmq;
@@ -53,6 +54,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
         Box::new(nats::NatsConnector {}),
         #[cfg(feature = "nexmark")]
         Box::new(nexmark::NexmarkConnector {}),
+        #[cfg(feature = "polling-http")]
         Box::new(polling_http::PollingHTTPConnector {}),
         #[cfg(feature = "preview")]
         Box::new(preview::PreviewConnector {}),

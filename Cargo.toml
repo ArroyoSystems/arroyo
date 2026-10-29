@@ -5,6 +5,7 @@ members = [
     "crates/arroyo-compiler-service",
     "crates/arroyo-connectors/arroyo-connector-common",
     "crates/arroyo-connectors/arroyo-connectors",
+    "crates/arroyo-connectors/arroyo-connector-polling-http",
     "crates/arroyo-connectors/arroyo-connector-websocket",
     "crates/arroyo-connectors/arroyo-connector-webhook",
     "crates/arroyo-connectors/arroyo-connector-sse",

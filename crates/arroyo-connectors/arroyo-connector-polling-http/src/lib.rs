@@ -16,9 +16,9 @@ use arroyo_rpc::api_types::connections::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{EmptyConfig, construct_http_client};
+use arroyo_connector_common::{EmptyConfig, construct_http_client};
 
-use crate::polling_http::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
+use crate::operator::{PollingHttpSourceFunc, PollingHttpSourceState};
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
@@ -26,7 +26,7 @@ const TABLE_SCHEMA: &str = include_str!("./table.json");
 const DEFAULT_POLLING_INTERVAL: Duration = Duration::from_secs(1);
 
 import_types!(
-    schema = "src/polling_http/table.json",
+    schema = "src/table.json",
     convert = { {type = "string", format = "var-str"} = VarStr }
 );
 const ICON: &str = include_str!("./http.svg");
