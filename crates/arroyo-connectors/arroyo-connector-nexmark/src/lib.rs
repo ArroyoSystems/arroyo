@@ -13,13 +13,13 @@ use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use serde::{Deserialize, Serialize};
 use typify::import_types;
 
-use crate::EmptyConfig;
-use crate::nexmark::operator::NexmarkSourceFunc;
+use crate::operator::NexmarkSourceFunc;
+use arroyo_connector_common::EmptyConfig;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./nexmark.svg");
 
-import_types!(schema = "src/nexmark/table.json");
+import_types!(schema = "src/table.json");
 
 pub(crate) fn person_fields() -> Vec<Field> {
     use arrow::datatypes::DataType::*;
