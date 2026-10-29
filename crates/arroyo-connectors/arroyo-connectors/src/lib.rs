@@ -5,7 +5,8 @@ pub use arroyo_connector_common::{EmptyConfig, header_map, render_schema};
 
 #[cfg(feature = "blackhole")]
 pub use arroyo_connector_blackhole as blackhole;
-pub mod confluent;
+#[cfg(feature = "confluent")]
+pub use arroyo_connector_confluent as confluent;
 pub mod filesystem;
 #[cfg(feature = "fluvio")]
 pub use arroyo_connector_fluvio as fluvio;
@@ -44,6 +45,7 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     let connectors: Vec<Box<dyn ErasedConnector>> = vec![
         #[cfg(feature = "blackhole")]
         Box::new(blackhole::BlackholeConnector {}),
+        #[cfg(feature = "confluent")]
         Box::new(confluent::ConfluentConnector {}),
         Box::new(filesystem::delta::DeltaLakeConnector {}),
         Box::new(filesystem::FileSystemConnector {}),
