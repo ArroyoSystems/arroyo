@@ -1,8 +1,8 @@
-use crate::kafka;
-use crate::kafka::{
+use anyhow::anyhow;
+use arroyo_connector_kafka as kafka;
+use arroyo_connector_kafka::{
     KafkaConfig, KafkaConfigAuthentication, KafkaConnector, KafkaTable, KafkaTester, TableType,
 };
-use anyhow::anyhow;
 use arroyo_operator::connector::{Connection, Connector, MetadataDef};
 use arroyo_operator::operator::ConstructedOperator;
 use arroyo_rpc::api_types::connections::{
@@ -19,11 +19,11 @@ use typify::import_types;
 const CLIENT_ID: &str = "cwc|0014U00003Df8ZvQAJ";
 
 const CONFIG_SCHEMA: &str = include_str!("./profile.json");
-const TABLE_SCHEMA: &str = include_str!("../../../arroyo-connector-kafka/src/table.json");
+const TABLE_SCHEMA: &str = include_str!("../../arroyo-connector-kafka/src/table.json");
 const ICON: &str = include_str!("./confluent.svg");
 
 import_types!(
-    schema = "src/confluent/profile.json",
+    schema = "src/profile.json",
     convert = {
         {type = "string", format = "var-str"} = VarStr
     }

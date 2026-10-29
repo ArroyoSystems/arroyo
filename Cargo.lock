@@ -630,6 +630,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-confluent"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-connector-kafka",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "glob",
+ "regress 0.10.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "typify 0.0.13",
+]
+
+[[package]]
 name = "arroyo-connector-fluvio"
 version = "0.17.0-dev"
 dependencies = [
@@ -1012,6 +1029,7 @@ dependencies = [
  "arrow",
  "arroyo-connector-blackhole",
  "arroyo-connector-common",
+ "arroyo-connector-confluent",
  "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
  "arroyo-connector-kafka",
@@ -1059,7 +1077,6 @@ dependencies = [
  "prost 0.14.4",
  "redis",
  "regex",
- "regress 0.10.4",
  "reqwest 0.12.19",
  "rust_decimal",
  "schemars 1.0.4",
@@ -1073,7 +1090,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "typetag",
- "typify 0.0.13",
  "ulid",
  "url",
  "uuid",
