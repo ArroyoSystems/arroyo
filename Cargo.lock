@@ -676,6 +676,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "arroyo-connector-kinesis"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-kinesis",
+ "bincode",
+ "futures",
+ "glob",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+ "uuid",
+]
+
+[[package]]
 name = "arroyo-connector-nexmark"
 version = "0.17.0-dev"
 dependencies = [
@@ -855,6 +882,7 @@ dependencies = [
  "arroyo-connector-common",
  "arroyo-connector-fluvio",
  "arroyo-connector-impulse",
+ "arroyo-connector-kinesis",
  "arroyo-connector-nexmark",
  "arroyo-connector-polling-http",
  "arroyo-connector-preview",
@@ -874,7 +902,6 @@ dependencies = [
  "async-trait",
  "aws-config",
  "aws-msk-iam-sasl-signer",
- "aws-sdk-kinesis",
  "bincode",
  "buoyant_kernel",
  "buoyant_kernel_derive",
