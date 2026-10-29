@@ -8,17 +8,18 @@ use arroyo_rpc::api_types::connections::{ConnectionProfile, TestSourceMessage};
 use arroyo_rpc::{ConnectorOptions, OperatorConfig, api_types};
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectionSchema, ConnectionType, EmptyConfig};
+use arroyo_connector_common::EmptyConfig;
+use arroyo_rpc::api_types::connections::{ConnectionSchema, ConnectionType};
 
-use crate::kinesis::sink::{FlushConfig, KinesisSinkFunc};
-use crate::kinesis::source::KinesisSourceFunc;
+use crate::sink::{FlushConfig, KinesisSinkFunc};
+use crate::source::KinesisSourceFunc;
 use arroyo_operator::connector::Connector;
 use arroyo_operator::operator::ConstructedOperator;
 
 const TABLE_SCHEMA: &str = include_str!("./table.json");
 const ICON: &str = include_str!("./kinesis.svg");
 
-import_types!(schema = "src/kinesis/table.json");
+import_types!(schema = "src/table.json");
 
 mod sink;
 mod source;
