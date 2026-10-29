@@ -14,6 +14,8 @@ arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors" }
+arroyo-connector-confluent = { path = "../arroyo-connectors/arroyo-connector-confluent" }
+arroyo-connector-kafka = { path = "../arroyo-connectors/arroyo-connector-kafka" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
