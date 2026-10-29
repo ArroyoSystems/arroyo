@@ -13,7 +13,9 @@ arroyo-planner = { path = "../arroyo-planner" }
 arroyo-rpc = { path = "../arroyo-rpc" }
 arroyo-server-common = { path = "../arroyo-server-common" }
 arroyo-operator = { path = "../arroyo-operator" }
-arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors" }
+arroyo-connector-confluent = { path = "../arroyo-connectors/arroyo-connector-confluent" }
+arroyo-connector-kafka = { path = "../arroyo-connectors/arroyo-connector-kafka" }
 arroyo-datastream = { path = "../arroyo-datastream" }
 arroyo-formats = { path = "../arroyo-formats" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
@@ -56,7 +58,7 @@ rusqlite = { workspace = true, features = ["bundled", "serde_json", "time"] }
 
 futures = { workspace = true }
 futures-util = "0.3.28"
-time = "0.3"
+time = { version = "0.3", features = ["serde"] }
 cornucopia_async = { workspace = true, features = ["with-serde_json-1"]}
 apache-avro = { workspace = true }
 toml = { workspace = true }

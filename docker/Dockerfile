@@ -8,7 +8,7 @@ WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
 ARG PROFILE=release
-ARG FEATURES=python
+ARG FEATURES=python,all-connectors
 
 RUN apt-get update && \
     apt-get -y install ca-certificates curl libcurl4-openssl-dev pkg-config unzip build-essential libssl-dev openssl \

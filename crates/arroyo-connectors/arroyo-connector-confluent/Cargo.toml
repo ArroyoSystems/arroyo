@@ -1,0 +1,22 @@
+[package]
+name = "arroyo-connector-confluent"
+version = "0.17.0-dev"
+edition = "2024"
+
+[lints.clippy]
+to_string_trait_impl = "allow"
+
+[dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-connector-kafka = { path = "../arroyo-connector-kafka" }
+arroyo-rpc = { path = "../../arroyo-rpc" }
+arroyo-operator = { path = "../../arroyo-operator" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+typify = { workspace = true }
+anyhow = { workspace = true }
+regress = "0.10.0"
+
+[build-dependencies]
+glob = "0.3"
