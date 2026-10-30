@@ -104,6 +104,7 @@ role:
 
 
 podAnnotations: {}
+podLabels: {}
 
 podSecurityContext: {}
   # fsGroup: 2000
@@ -131,4 +132,4 @@ volumeMounts: []
 
 existingConfigMap: ""
 
-env: []  
+env: []
