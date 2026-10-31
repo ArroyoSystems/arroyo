@@ -178,6 +178,56 @@ async fn test_kafka_checkpoint_flushes() {
     }
 }
 
+// Regression test: without this behavior, `handle_commit` would silently
+// return `Ok(())` when `producer_to_complete` is `None` (the state after a
+// crash-restart mid two-phase-commit), telling the checkpoint coordinator the
+// commit succeeded when its actual outcome on the broker is unknown. That is
+// an exactly-once violation. This test asserts the error path is taken instead.
+// It does NOT require a live Kafka broker: the `None` branch returns before
+// any producer call.
+#[tokio::test]
+async fn test_handle_commit_returns_error_when_producer_state_missing() {
+    let mut kafka = KafkaSinkFunc {
+        topic: "unused-in-this-test".to_string(),
+        bootstrap_servers: "unused".to_string(),
+        producer: None,
+        consistency_mode: ConsistencyMode::ExactlyOnce {
+            next_transaction_index: 5,
+            producer_to_complete: None,
+        },
+        timestamp_field: None,
+        timestamp_col: None,
+        key_field: None,
+        write_futures: vec![],
+        client_config: HashMap::new(),
+        context: Context::new(None),
+        serializer: ArrowSerializer::new(Format::Json(JsonFormat::default())),
+        key_col: None,
+    };
+
+    let (command_tx, _rx) = channel(128);
+    let task_info = Arc::new(get_test_task_info());
+
+    let mut ctx = OperatorContext::new(
+        task_info,
+        None,
+        command_tx,
+        1,
+        vec![Arc::new(ArroyoSchema::new_unkeyed(schema(), 0))],
+        None,
+        HashMap::new(),
+    )
+    .await;
+
+    let result = kafka.handle_commit(42, &HashMap::new(), &mut ctx).await;
+
+    assert!(
+        result.is_err(),
+        "handle_commit must return Err when producer_to_complete is None; \
+         silently returning Ok would break the exactly-once contract"
+    );
+}
+
 #[tokio::test]
 async fn test_kafka() {
     let mut kafka_topic_tester = KafkaTopicTester {
