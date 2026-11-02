@@ -5,6 +5,7 @@ use arroyo_connectors::{
     EmptyConfig,
     nexmark::{NexmarkConnector, NexmarkTable},
 };
+use arroyo_datastream::logical::LogicalEdgeType;
 use arroyo_operator::connector::Connector;
 use arroyo_udf_host::parse::NullableType;
 use test_log::test;
@@ -57,4 +58,84 @@ async fn test_udf() {
     parse_and_get_program(sql, schema_provider, SqlConfig::default())
         .await
         .unwrap();
+}
+
+/// Returns the names of the fields each shuffle edge in the planned program routes on
+async fn shuffle_routing_keys(sql: &str) -> Vec<Vec<String>> {
+    let program = parse_and_get_program(sql, get_test_schema_provider(), SqlConfig::default())
+        .await
+        .unwrap()
+        .program;
+
+    program
+        .graph
+        .edge_weights()
+        .filter(|e| e.edge_type == LogicalEdgeType::Shuffle)
+        .map(|e| {
+            let fields = e.schema.schema.fields();
+            e.schema
+                .routing_keys()
+                .into_iter()
+                .flatten()
+                .map(|i| fields[*i].name().clone())
+                .collect()
+        })
+        .collect()
+}
+
+#[test(tokio::test)]
+async fn test_iceberg_partition_shuffle_routes_on_partition_keys() {
+    let sql = r#"
+    create table impulse with (connector = 'impulse', event_rate = 100);
+
+    create table sink (
+        id TEXT,
+        ts TIMESTAMP(6) NOT NULL,
+        pg BIGINT,
+        cluster TEXT
+    ) with (
+        connector = 'iceberg',
+        'catalog.type' = 'rest',
+        'catalog.rest.url' = 'http://localhost:8118/catalog',
+        type = 'sink',
+        table_name = 'events',
+        format = 'parquet',
+        'shuffle_by_partition.enabled' = true
+    ) PARTITIONED BY (day(ts), bucket(pg, 32), identity(cluster));
+
+    insert into sink
+    select cast(counter as TEXT) as id, row_time() as ts, counter as pg,
+        cast(subtask_index as TEXT) as cluster
+    from impulse;
+    "#;
+
+    assert_eq!(
+        shuffle_routing_keys(sql).await,
+        vec![vec!["__key_0", "__key_1", "__key_2"]]
+    );
+}
+
+#[test(tokio::test)]
+async fn test_filesystem_partition_shuffle_routes_on_partition_key() {
+    let sql = r#"
+    create table impulse with (connector = 'impulse', event_rate = 100);
+
+    create table sink (
+        id TEXT,
+        cluster TEXT
+    ) with (
+        connector = 'filesystem',
+        path = 's3://my-bucket/events',
+        type = 'sink',
+        format = 'parquet',
+        'partitioning.fields' = [cluster],
+        'shuffle_by_partition.enabled' = true
+    );
+
+    insert into sink
+    select cast(counter as TEXT) as id, cast(subtask_index as TEXT) as cluster
+    from impulse;
+    "#;
+
+    assert_eq!(shuffle_routing_keys(sql).await, vec![vec!["__key_0"]]);
 }

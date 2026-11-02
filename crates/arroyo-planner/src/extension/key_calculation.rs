@@ -201,7 +201,7 @@ impl ArroyoExtension for KeyCalculationExtension {
 
                 ArroyoSchema::from_schema_keys(
                     Arc::new(Schema::new(fields)),
-                    (1..=exprs.len()).collect_vec(),
+                    (0..exprs.len()).collect_vec(),
                 )
                 .unwrap()
             }
