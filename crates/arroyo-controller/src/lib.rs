@@ -141,8 +141,16 @@ pub struct JobStatus {
     state_context: StateContext,
 }
 
+/// A missing row means reconciliation must stop: the job may have been replaced or deleted.
+#[derive(Debug, PartialEq, Eq)]
+#[must_use]
+pub enum JobStatusUpdate {
+    Updated,
+    Missing,
+}
+
 impl JobStatus {
-    pub async fn update_db(&self, database: &DatabaseSource) -> Result<(), String> {
+    pub async fn update_db(&self, database: &DatabaseSource) -> Result<JobStatusUpdate, String> {
         let c = database.client().await.map_err(|e| format!("{e:?}"))?;
         let res = queries::controller_queries::execute_update_job_status(
             &c,
@@ -165,9 +173,10 @@ impl JobStatus {
         .map_err(|e| format!("{e:?}"))?;
 
         if res == 0 {
-            Err("Job status does not exist".to_string())
+            info!(job_id = %self.id, "Job status no longer exists; abandoning reconciliation");
+            Ok(JobStatusUpdate::Missing)
         } else {
-            Ok(())
+            Ok(JobStatusUpdate::Updated)
         }
     }
 }
