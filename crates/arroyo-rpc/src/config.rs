@@ -342,7 +342,7 @@ pub enum ApiAuthMode {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct GrpcConfig {
-    /// Maximum received gRPC message size, specified as a string such as "128mb".
+    /// Maximum received gRPC message size, specified as a string such as "32mb".
     /// Each process enforces its own limit on requests and responses it receives.
     #[serde(
         deserialize_with = "deserialize_grpc_max_message_size",
