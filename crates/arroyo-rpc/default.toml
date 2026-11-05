@@ -3,7 +3,7 @@ default-checkpoint-interval = "10s"
 job-controller = "controller"
 
 [grpc]
-max-message-size = "16mb"
+max-message-size = "32mb"
 
 [pipeline]
 source-batch-size = 512
