@@ -30,7 +30,8 @@ use super::{Context, SourceOffset, StreamConsumer};
 mod test;
 
 pub struct KafkaSourceFunc {
-    pub topic: String,
+    pub topic: Option<String>,
+    pub topic_pattern: Option<String>,
     pub bootstrap_servers: String,
     pub group_id: Option<String>,
     pub group_id_prefix: Option<String>,
@@ -45,13 +46,31 @@ pub struct KafkaSourceFunc {
     pub metadata_fields: Vec<MetadataField>,
 }
 
-#[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Encode, Decode, PartialEq, PartialOrd)]
 pub struct KafkaState {
+    topic: String,
     partition: i32,
     offset: i64,
 }
 
+/// Key for storing Kafka state: (topic, partition)
+#[derive(Clone, Debug, Encode, Decode, PartialEq, Eq, Hash)]
+pub struct KafkaStateKey {
+    topic: String,
+    partition: i32,
+}
+
 impl KafkaSourceFunc {
+    /// Returns the topic name for display purposes (either the exact topic or the pattern)
+    fn topic_display(&self) -> String {
+        self.topic.clone().unwrap_or_else(|| {
+            self.topic_pattern
+                .clone()
+                .map(|p| format!("pattern:{}", p))
+                .unwrap_or_else(|| "unknown".to_string())
+        })
+    }
+
     async fn get_consumer(&mut self, ctx: &mut SourceContext) -> anyhow::Result<StreamConsumer> {
         info!("Creating kafka consumer for {}", self.bootstrap_servers);
         let mut client_config = ClientConfig::new();
@@ -86,7 +105,7 @@ impl KafkaSourceFunc {
             .set("bootstrap.servers", &self.bootstrap_servers)
             .set("enable.partition.eof", "false")
             .set("enable.auto.commit", "false")
-            .set("group.id", group_id)
+            .set("group.id", &group_id)
             .create_with_context(self.context.clone())?;
 
         // NOTE: this is required to trigger an oauth token refresh (when using
@@ -95,9 +114,40 @@ impl KafkaSourceFunc {
             bail!("unexpected recv before assignments");
         }
 
+        // Handle topic pattern subscription (uses Kafka's group coordination)
+        if let Some(pattern) = &self.topic_pattern {
+            info!(
+                "Subscribing to topic pattern '{}' with group_id '{}'",
+                pattern, group_id
+            );
+
+            // rdkafka expects patterns to start with '^' for regex matching
+            let pattern_str = if pattern.starts_with('^') {
+                pattern.clone()
+            } else {
+                format!("^{}", pattern)
+            };
+
+            consumer
+                .subscribe(&[&pattern_str])
+                .context("Failed to subscribe to topic pattern")?;
+
+            info!(
+                "Successfully subscribed to pattern '{}' - Kafka will handle partition assignment",
+                pattern_str
+            );
+
+            return Ok(consumer);
+        }
+
+        // Handle single topic (existing behavior with manual partition assignment)
+        let topic = self.topic.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Either 'topic' or 'topic_pattern' must be specified")
+        })?;
+
         let state: Vec<_> = ctx
             .table_manager
-            .get_global_keyed_state::<i32, KafkaState>("k")
+            .get_global_keyed_state::<KafkaStateKey, KafkaState>("k")
             .await?
             .get_all()
             .values()
@@ -106,10 +156,13 @@ impl KafkaSourceFunc {
         // did we restore any partitions?
         let has_state = !state.is_empty();
 
-        let state: HashMap<i32, KafkaState> = state.iter().map(|s| (s.partition, **s)).collect();
-        let metadata = consumer.fetch_metadata(Some(&self.topic), Duration::from_secs(30))?;
+        let state: HashMap<(String, i32), KafkaState> = state
+            .iter()
+            .map(|s| ((s.topic.clone(), s.partition), (*s).clone()))
+            .collect();
+        let metadata = consumer.fetch_metadata(Some(topic), Duration::from_secs(30))?;
 
-        info!("Fetched metadata for topic {}", self.topic);
+        info!("Fetched metadata for topic {}", topic);
 
         let our_partitions: HashMap<_, _> = {
             let partitions = metadata.topics()[0].partitions();
@@ -121,7 +174,7 @@ impl KafkaSourceFunc {
                 })
                 .map(|(_, p)| {
                     let offset = state
-                        .get(&p.id())
+                        .get(&(topic.clone(), p.id()))
                         .map(|s| Offset::Offset(s.offset))
                         .unwrap_or_else(|| {
                             if has_state {
@@ -133,14 +186,14 @@ impl KafkaSourceFunc {
                             }
                         });
 
-                    ((self.topic.clone(), p.id()), offset)
+                    ((topic.clone(), p.id()), offset)
                 })
                 .collect()
         };
 
         info!(
             "partition map for {}-{}: {:?}",
-            self.topic, ctx.task_info.task_index, our_partitions
+            topic, ctx.task_info.task_index, our_partitions
         );
 
         let topic_partitions = TopicPartitionList::from_topic_map(&our_partitions)?;
@@ -161,9 +214,12 @@ impl KafkaSourceFunc {
             .context("creating kafka consumer")?;
 
         let rate_limiter = GovernorRateLimiter::direct(Quota::per_second(self.messages_per_second));
-        let mut offsets = HashMap::new();
+        // Track offsets by (topic, partition) to support multi-topic subscriptions
+        let mut offsets: HashMap<(String, i32), i64> = HashMap::new();
 
-        if consumer.assignment().unwrap().count() == 0 {
+        // For pattern subscriptions, we skip the initial assignment check since
+        // Kafka handles partition assignment dynamically via the consumer group protocol
+        if self.topic_pattern.is_none() && consumer.assignment().unwrap().count() == 0 {
             warn!(
                 "Kafka Consumer {}-{} is subscribed to no partitions, as there are more subtasks than partitions... setting idle",
                 ctx.task_info.operator_id, ctx.task_info.task_index
@@ -227,7 +283,8 @@ impl KafkaSourceFunc {
                                     collector.flush_buffer().await?;
                                 }
 
-                                offsets.insert(msg.partition(), msg.offset());
+                                // Store offset with (topic, partition) key for multi-topic support
+                                offsets.insert((topic.to_string(), msg.partition()), msg.offset());
                                 rate_limiter.until_ready().await;
                             }
                         },
@@ -247,13 +304,20 @@ impl KafkaSourceFunc {
                             debug!("starting checkpointing {}", ctx.task_info.task_index);
                             let mut topic_partitions = TopicPartitionList::new();
                             let s = ctx.table_manager.get_global_keyed_state("k").await?;
-                            for (partition, offset) in &offsets {
-                                s.insert(*partition, KafkaState {
-                                    partition: *partition,
-                                    offset: *offset + 1,
-                                }).await;
+                            for ((topic, partition), offset) in &offsets {
+                                s.insert(
+                                    KafkaStateKey {
+                                        topic: topic.clone(),
+                                        partition: *partition,
+                                    },
+                                    KafkaState {
+                                        topic: topic.clone(),
+                                        partition: *partition,
+                                        offset: *offset + 1,
+                                    }
+                                ).await;
                                 topic_partitions.add_partition_offset(
-                                    &self.topic, *partition, Offset::Offset(*offset)).unwrap();
+                                    topic, *partition, Offset::Offset(*offset)).unwrap();
                             }
 
                             if let Err(e) = consumer.commit(&topic_partitions, CommitMode::Async) {
@@ -305,7 +369,7 @@ impl SourceOperator for KafkaSourceFunc {
     }
 
     fn name(&self) -> String {
-        format!("kafka-{}", self.topic)
+        format!("kafka-{}", self.topic_display())
     }
 
     fn tables(&self) -> HashMap<String, TableConfig> {
