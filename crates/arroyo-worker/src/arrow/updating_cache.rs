@@ -126,13 +126,13 @@ impl<T: Send + Sync> UpdatingCache<T> {
 
     fn push_back(&mut self, updated: Instant, key: Key) -> CacheNodePtr {
         unsafe {
-            let node = Box::into_non_null(Box::new(CacheNode {
+            let node = NonNull::from(Box::leak(Box::new(CacheNode {
                 updated,
                 key,
                 // push to the back
                 prev: CacheNodePtr(None),
                 next: CacheNodePtr(None),
-            }));
+            })));
 
             let wrapped_node = CacheNodePtr(Some(node));
 
