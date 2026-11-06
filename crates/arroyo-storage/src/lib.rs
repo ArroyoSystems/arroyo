@@ -6,7 +6,7 @@ use futures::{Stream, StreamExt};
 use object_store::aws::AmazonS3ConfigKey;
 use object_store::azure::MicrosoftAzureBuilder;
 use object_store::buffered::BufWriter;
-use object_store::gcp::GoogleCloudStorageBuilder;
+use object_store::gcp::{GoogleCloudStorageBuilder, GoogleCloudStorageConfigKey};
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
 use object_store::{Error, ObjectMeta, ObjectStoreExt};
@@ -659,7 +659,12 @@ impl StorageProvider {
             ..Default::default()
         };
 
-        builder = builder.with_retry(retry_config);
+        builder = builder.with_retry(retry_config).with_config(
+            GoogleCloudStorageConfigKey::Client(
+                object_store::ClientConfigKey::ReqwestAutomaticDecompression,
+            ),
+            "false",
+        );
 
         if let Ok(service_account_key) = std::env::var("GOOGLE_SERVICE_ACCOUNT_KEY") {
             debug!("Constructing GCS builder with service account key");
