@@ -15,9 +15,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use utoipa::ToSchema;
 
-use arroyo_connectors::confluent::ConfluentProfile;
+use arroyo_connector_confluent::ConfluentProfile;
+use arroyo_connector_kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::connector_for_type;
-use arroyo_connectors::kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
 use arroyo_rpc::api_types::connections::{

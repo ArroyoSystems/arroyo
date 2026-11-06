@@ -498,6 +498,7 @@ dependencies = [
  "anyhow",
  "arroyo-api",
  "arroyo-compiler-service",
+ "arroyo-connectors",
  "arroyo-controller",
  "arroyo-node",
  "arroyo-openapi",
@@ -537,6 +538,8 @@ dependencies = [
  "apache-avro 0.18.0",
  "arrow",
  "arrow-schema",
+ "arroyo-connector-confluent",
+ "arroyo-connector-kafka",
  "arroyo-connectors",
  "arroyo-datastream",
  "arroyo-formats",
@@ -598,12 +601,62 @@ dependencies = [
 ]
 
 [[package]]
-name = "arroyo-connectors"
+name = "arroyo-connector-blackhole"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arroyo-connector-common"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-types",
+ "async-trait",
+ "reqwest 0.12.19",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "arroyo-connector-confluent"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-connector-kafka",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "glob",
+ "regress 0.10.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-filesystem"
 version = "0.17.0-dev"
 dependencies = [
  "anyhow",
  "apache-avro 0.18.0",
  "arrow",
+ "arroyo-connector-common",
  "arroyo-formats",
  "arroyo-operator",
  "arroyo-rpc",
@@ -611,11 +664,7 @@ dependencies = [
  "arroyo-storage",
  "arroyo-types",
  "async-compression",
- "async-nats",
  "async-trait",
- "aws-config",
- "aws-msk-iam-sasl-signer",
- "aws-sdk-kinesis",
  "bincode",
  "buoyant_kernel",
  "buoyant_kernel_derive",
@@ -624,35 +673,20 @@ dependencies = [
  "datafusion",
  "datafusion-expr",
  "deltalake",
- "eventsource-client",
  "flate2",
- "fluvio",
  "futures",
- "glob",
- "governor",
  "iceberg",
  "iceberg-catalog-rest",
  "iceberg-storage-opendal",
  "itertools 0.14.0",
  "murmur3",
- "nkeys 0.3.2",
  "num-bigint",
  "object_store",
  "parquet",
  "prost 0.14.4",
- "rabbitmq-stream-client",
- "rand 0.9.5",
- "rdkafka",
- "redis",
  "regex",
- "regress 0.10.4",
  "reqwest 0.12.19",
- "rumqttc",
  "rust_decimal",
- "rustls 0.22.4",
- "rustls-native-certs 0.8.1",
- "rustls-pemfile 2.2.0",
- "sasl2-sys",
  "schemars 1.0.4",
  "serde",
  "serde_json",
@@ -661,16 +695,413 @@ dependencies = [
  "strum_macros",
  "tempfile",
  "tokio",
- "tokio-rustls 0.25.0",
  "tokio-stream",
- "tokio-tungstenite",
- "tonic",
  "tracing",
  "typetag",
- "typify 0.0.13",
  "ulid",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "arroyo-connector-fluvio"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "fluvio",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-impulse"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "datafusion",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-kafka"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "aws-config",
+ "aws-msk-iam-sasl-signer",
+ "bincode",
+ "datafusion",
+ "futures",
+ "glob",
+ "governor",
+ "itertools 0.14.0",
+ "prost 0.14.4",
+ "rand 0.9.5",
+ "rdkafka",
+ "regress 0.10.4",
+ "sasl2-sys",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tonic",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-kinesis"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-kinesis",
+ "bincode",
+ "futures",
+ "glob",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+ "uuid",
+]
+
+[[package]]
+name = "arroyo-connector-mqtt"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "governor",
+ "parquet",
+ "rand 0.9.5",
+ "rumqttc",
+ "rustls 0.22.4",
+ "rustls-native-certs 0.8.1",
+ "rustls-pemfile 2.2.0",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "tracing",
+ "typify 0.0.13",
+ "url",
+]
+
+[[package]]
+name = "arroyo-connector-nats"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-nats",
+ "async-trait",
+ "bincode",
+ "futures",
+ "glob",
+ "nkeys 0.3.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-nexmark"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "glob",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-polling-http"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "bytes",
+ "futures",
+ "glob",
+ "reqwest 0.12.19",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+ "url",
+]
+
+[[package]]
+name = "arroyo-connector-preview"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "serde_json",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
+name = "arroyo-connector-rabbitmq"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "async-trait",
+ "bincode",
+ "glob",
+ "rabbitmq-stream-client",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-redis"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "redis",
+ "regress 0.10.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-single-file"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-sse"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "eventsource-client",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-stdout"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-types",
+ "async-trait",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "arroyo-connector-webhook"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arrow",
+ "arroyo-connector-common",
+ "arroyo-formats",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bytes",
+ "glob",
+ "reqwest 0.12.19",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connector-websocket"
+version = "0.17.0-dev"
+dependencies = [
+ "anyhow",
+ "arroyo-connector-common",
+ "arroyo-operator",
+ "arroyo-rpc",
+ "arroyo-state",
+ "arroyo-types",
+ "async-trait",
+ "bincode",
+ "futures",
+ "glob",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "typify 0.0.13",
+]
+
+[[package]]
+name = "arroyo-connectors"
+version = "0.17.0-dev"
+dependencies = [
+ "arroyo-connector-blackhole",
+ "arroyo-connector-common",
+ "arroyo-connector-confluent",
+ "arroyo-connector-filesystem",
+ "arroyo-connector-fluvio",
+ "arroyo-connector-impulse",
+ "arroyo-connector-kafka",
+ "arroyo-connector-kinesis",
+ "arroyo-connector-mqtt",
+ "arroyo-connector-nats",
+ "arroyo-connector-nexmark",
+ "arroyo-connector-polling-http",
+ "arroyo-connector-preview",
+ "arroyo-connector-rabbitmq",
+ "arroyo-connector-redis",
+ "arroyo-connector-single-file",
+ "arroyo-connector-sse",
+ "arroyo-connector-stdout",
+ "arroyo-connector-webhook",
+ "arroyo-connector-websocket",
+ "arroyo-operator",
 ]
 
 [[package]]
@@ -969,6 +1400,7 @@ version = "0.17.0-dev"
 dependencies = [
  "anyhow",
  "arrow",
+ "arroyo-connectors",
  "arroyo-datastream",
  "arroyo-planner",
  "arroyo-rpc",

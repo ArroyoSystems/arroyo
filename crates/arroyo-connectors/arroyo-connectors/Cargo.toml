@@ -1,0 +1,51 @@
+[package]
+name = "arroyo-connectors"
+version = "0.17.0-dev"
+edition = "2024"
+
+[features]
+default = ["filesystem", "impulse", "kafka", "preview", "stdout"]
+all = ["blackhole", "confluent", "filesystem", "fluvio", "impulse", "kafka", "kinesis", "mqtt", "nats", "nexmark", "polling-http", "preview", "rabbitmq", "redis", "single-file", "sse", "stdout", "webhook", "websocket"]
+blackhole = ["dep:arroyo-connector-blackhole"]
+confluent = ["dep:arroyo-connector-confluent"]
+filesystem = ["dep:arroyo-connector-filesystem"]
+fluvio = ["dep:arroyo-connector-fluvio"]
+impulse = ["dep:arroyo-connector-impulse"]
+kafka = ["dep:arroyo-connector-kafka"]
+kinesis = ["dep:arroyo-connector-kinesis"]
+mqtt = ["dep:arroyo-connector-mqtt"]
+nats = ["dep:arroyo-connector-nats"]
+nexmark = ["dep:arroyo-connector-nexmark"]
+polling-http = ["dep:arroyo-connector-polling-http"]
+preview = ["dep:arroyo-connector-preview"]
+rabbitmq = ["dep:arroyo-connector-rabbitmq"]
+redis = ["dep:arroyo-connector-redis"]
+single-file = ["dep:arroyo-connector-single-file"]
+sse = ["dep:arroyo-connector-sse"]
+stdout = ["dep:arroyo-connector-stdout"]
+webhook = ["dep:arroyo-connector-webhook"]
+websocket = ["dep:arroyo-connector-websocket"]
+
+[dependencies]
+arroyo-connector-common = { path = "../arroyo-connector-common" }
+arroyo-operator = { path = "../../arroyo-operator" }
+
+arroyo-connector-blackhole = { path = "../arroyo-connector-blackhole", optional = true }
+arroyo-connector-confluent = { path = "../arroyo-connector-confluent", optional = true }
+arroyo-connector-filesystem = { path = "../arroyo-connector-filesystem", optional = true }
+arroyo-connector-fluvio = { path = "../arroyo-connector-fluvio", optional = true }
+arroyo-connector-impulse = { path = "../arroyo-connector-impulse", optional = true }
+arroyo-connector-kafka = { path = "../arroyo-connector-kafka", optional = true }
+arroyo-connector-kinesis = { path = "../arroyo-connector-kinesis", optional = true }
+arroyo-connector-mqtt = { path = "../arroyo-connector-mqtt", optional = true }
+arroyo-connector-nats = { path = "../arroyo-connector-nats", optional = true }
+arroyo-connector-nexmark = { path = "../arroyo-connector-nexmark", optional = true }
+arroyo-connector-polling-http = { path = "../arroyo-connector-polling-http", optional = true }
+arroyo-connector-preview = { path = "../arroyo-connector-preview", optional = true }
+arroyo-connector-rabbitmq = { path = "../arroyo-connector-rabbitmq", optional = true }
+arroyo-connector-redis = { path = "../arroyo-connector-redis", optional = true }
+arroyo-connector-single-file = { path = "../arroyo-connector-single-file", optional = true }
+arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
+arroyo-connector-stdout = { path = "../arroyo-connector-stdout", optional = true }
+arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
+arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }
