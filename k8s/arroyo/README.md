@@ -71,7 +71,11 @@ The most important options are:
 
 - `postgresql.deploy`: Whether to deploy a new Postgres instance. If set to `false`, the chart will expect a Postgres
   instance to be available with the connection settings determined by `postgresql.externalDatabase` configurations
-  (by default: postgres://arroyo:arroyo@localhost:5432/arroyo).
+  (by default: postgres://arroyo:arroyo@localhost:5432/arroyo). To avoid putting the password in the ConfigMap, set
+  `postgresql.externalDatabase.existingSecret` (and optionally `existingSecretPasswordKey`) to read it from a secret.
+- `controller.service.type`: The type of the controller/API service (`ClusterIP` by default). Set to `LoadBalancer`
+  or `NodePort` to expose it outside the cluster, with `controller.service.annotations` for cloud-specific settings.
+- `ingress.enabled` / `gateway.httpRoute.enabled`: Expose the UI and API through an Ingress or a Gateway API HTTPRoute.
 - `prometheus.deploy`: Whether to deploy a new Prometheus instance. If set to `false`, the chart will expect a
   Prometheus instance to be availble at the URL determined by `prometheus.endpoint` (by default: http://localhost:9090).
   Prometheus is not required for operation of the system, but is needed for the Arroyo UI metrics to function. By

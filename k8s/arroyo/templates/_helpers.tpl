@@ -24,25 +24,6 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
-Prometheus endpoint
-*/}}
-{{- define "arroyo.prometheusEndpoint" -}}
-{{- if .Values.prometheus.endpoint }}
-{{- .Values.prometheus.endpoint }}
-{{- else if .Values.prometheus.deploy -}}
-http://{{- template "prometheus.fullname" . }}-prometheus-server.{{- default .Release.Namespace }}.svc.{{ .Values.clusterDomain }}
-{{- end }}
-{{- end }}
-
-{{/*
-{{- end }}
-{{- end }}
-
-{{/*
-
-{{/*
-
-{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "arroyo.chart" -}}
@@ -91,10 +72,30 @@ Create the name of the role to use
 {{- end }}
 {{- end }}
 
+{{/*
+Env var with the postgres password, from the in-cluster postgres secret
+or from postgresql.externalDatabase.existingSecret
+*/}}
+{{- define "arroyo.databasePasswordEnv" -}}
+{{- if .Values.postgresql.deploy }}
+- name: ARROYO__DATABASE__POSTGRES__PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "arroyo.fullname" . }}-postgresql
+      key: password
+{{- else if .Values.postgresql.externalDatabase.existingSecret }}
+- name: ARROYO__DATABASE__POSTGRES__PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.postgresql.externalDatabase.existingSecret }}
+      key: {{ .Values.postgresql.externalDatabase.existingSecretPasswordKey | default "password" }}
+{{- end }}
+{{- end }}
+
 {{- define "tplvalues.render" -}}
-    {{- if typeIs "string" .value }}
-        {{- tpl .value .context }}
-    {{- else }}
-        {{- tpl (.value | toYaml) .context }}
-    {{- end }}
+{{- if typeIs "string" .value }}
+{{- tpl .value .context }}
+{{- else }}
+{{- tpl (.value | toYaml) .context }}
+{{- end }}
 {{- end -}}
