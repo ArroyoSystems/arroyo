@@ -1046,6 +1046,19 @@ impl ExecutionPlan for ToDebeziumExec {
     }
 }
 
+/// The changes to one row id within a batch. Equal rows without a primary key share an id, so it keeps their net count:
+/// creates less retracts.
+#[derive(Clone, Copy)]
+struct IdChanges {
+    first_idx: usize,
+    last_idx: usize,
+    first_is_create: bool,
+    last_is_create: bool,
+    net: i64,
+    /// the latest
+    timestamp: i64,
+}
+
 struct ToDebeziumStream {
     input: SendableRecordBatchStream,
     schema: SchemaRef,
@@ -1074,34 +1087,43 @@ impl ToDebeziumStream {
 
             let id = metadata.column(1).as_fixed_size_binary();
 
-            // (first idx, last idx, first is create, last is create, latest time)
-            let mut id_map: HashMap<&[u8], (usize, usize, bool, bool, i64)> = HashMap::new();
+            let mut id_map: HashMap<&[u8], IdChanges> = HashMap::new();
             let mut order = vec![];
             for i in 0..batch.num_rows() {
                 let row_id = id.value(i);
                 let is_create = !is_retract.value(i);
+                let change = if is_create { 1 } else { -1 };
                 let timestamp = timestamps.value(i);
 
                 id_map
                     .entry(row_id)
                     .and_modify(|e| {
-                        e.1 = i;
-                        e.3 = is_create;
-                        e.4 = e.4.max(timestamp);
+                        e.last_idx = i;
+                        e.last_is_create = is_create;
+                        e.net += change;
+                        e.timestamp = e.timestamp.max(timestamp);
                     })
                     .or_insert_with(|| {
                         order.push(row_id);
-                        (i, i, is_create, is_create, timestamp)
+                        IdChanges {
+                            first_idx: i,
+                            last_idx: i,
+                            first_is_create: is_create,
+                            last_is_create: is_create,
+                            net: change,
+                            timestamp,
+                        }
                     });
             }
 
             // scenarios:
-            // 1. Create -- value index is last
-            //    -- create, (retract, create)*
-            // 2. Delete -- value index is first
-            //    -- (retract,create)*,retract
+            // 1. Create -- value index is last, once per net create
+            //    -- create, (retract, create)*, or more creates than retracts
+            // 2. Delete -- value index is first, once per net retract
+            //    -- (retract,create)*,retract, or more retracts than creates
             // 3. Update -- value index is last
             //    -- (retract,create)*
+            // 4. No-op -- otherwise
 
             let mut before = Vec::with_capacity(id_map.len());
             let mut after = Vec::with_capacity(id_map.len());
@@ -1109,34 +1131,35 @@ impl ToDebeziumStream {
             let mut ts = TimestampNanosecondBuilder::with_capacity(id_map.len());
 
             for row_id in order {
-                let (first_idx, last_idx, first_is_create, last_is_create, timestamp) =
-                    id_map.get(row_id).unwrap();
+                let IdChanges {
+                    first_idx,
+                    last_idx,
+                    first_is_create,
+                    last_is_create,
+                    net,
+                    timestamp,
+                } = id_map[row_id];
 
-                if *first_is_create && *last_is_create {
-                    // create case
-                    // sequence: create, (retract, create)*
-                    before.push(None);
-                    after.push(Some(*last_idx));
-                    op.push("c");
-                } else if !(*first_is_create) && !(*last_is_create) {
-                    // delete case
-                    // sequence: (retract,create)*, retract
-                    before.push(Some(*first_idx));
-                    after.push(None);
-                    op.push("d");
-                } else if !(*first_is_create) && *last_is_create {
-                    // update case
-                    // sequence: (retract,create)*
-                    before.push(Some(*first_idx));
-                    after.push(Some(*last_idx));
+                if net > 0 {
+                    for _ in 0..net {
+                        before.push(None);
+                        after.push(Some(last_idx));
+                        op.push("c");
+                        ts.append_value(timestamp);
+                    }
+                } else if net < 0 {
+                    for _ in 0..-net {
+                        before.push(Some(first_idx));
+                        after.push(None);
+                        op.push("d");
+                        ts.append_value(timestamp);
+                    }
+                } else if !first_is_create && last_is_create {
+                    before.push(Some(first_idx));
+                    after.push(Some(last_idx));
                     op.push("u");
-                } else {
-                    // no-op case
-                    // sequence: (create,retract)*
-                    continue;
+                    ts.append_value(timestamp);
                 }
-
-                ts.append_value(*timestamp);
             }
 
             let before_array = Self::create_output_array(&value_struct, &before)?;
@@ -1213,5 +1236,99 @@ impl Stream for ToDebeziumStream {
 impl RecordBatchStream for ToDebeziumStream {
     fn schema(&self) -> SchemaRef {
         self.schema.clone()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use arrow_array::{Int64Array, TimestampNanosecondArray};
+    use arrow_schema::{Field, Fields};
+    use datafusion::physical_plan::common::collect;
+
+    fn fields() -> Fields {
+        Fields::from(vec![
+            Field::new("product", DataType::Utf8, true),
+            Field::new("quantity", DataType::Int64, true),
+        ])
+    }
+
+    /// A Debezium batch of rows without a primary key: (op, product, quantity).
+    fn debezium(rows: &[(&str, &str, i64)]) -> RecordBatch {
+        let values = StructArray::new(
+            fields(),
+            vec![
+                Arc::new(StringArray::from_iter_values(rows.iter().map(|r| r.1))),
+                Arc::new(Int64Array::from_iter_values(rows.iter().map(|r| r.2))),
+            ],
+            None,
+        );
+        let side = |present: &dyn Fn(&str) -> bool| {
+            StructArray::new(
+                fields(),
+                values.columns().to_vec(),
+                Some(NullBuffer::from(
+                    rows.iter().map(|r| present(r.0)).collect::<Vec<_>>(),
+                )),
+            )
+        };
+        let struct_type = DataType::Struct(fields());
+        let schema = Schema::new(vec![
+            Field::new("before", struct_type.clone(), true),
+            Field::new("after", struct_type, true),
+            Field::new("op", DataType::Utf8, false),
+            Field::new(
+                TIMESTAMP_FIELD,
+                DataType::Timestamp(TimeUnit::Nanosecond, None),
+                false,
+            ),
+        ]);
+        RecordBatch::try_new(
+            Arc::new(schema),
+            vec![
+                Arc::new(side(&|op| op == "d")),
+                Arc::new(side(&|op| op == "c")),
+                Arc::new(StringArray::from_iter_values(rows.iter().map(|r| r.0))),
+                Arc::new(TimestampNanosecondArray::from(vec![0; rows.len()])),
+            ],
+        )
+        .unwrap()
+    }
+
+    /// Unrolls each batch without a primary key, then turns it back into Debezium, as a pass-through to a Debezium
+    /// sink does; the ops of each output batch.
+    async fn pass_through(batches: Vec<RecordBatch>) -> Vec<Vec<String>> {
+        let schema = batches[0].schema();
+        let source = MemorySourceConfig::try_new_exec(&[batches], schema, None).unwrap();
+        let unrolled = Arc::new(DebeziumUnrollingExec::try_new(source, vec![]).unwrap());
+        let plan = ToDebeziumExec::try_new(unrolled).unwrap();
+        let output = collect(plan.execute(0, Arc::new(TaskContext::default())).unwrap())
+            .await
+            .unwrap();
+        output
+            .iter()
+            .map(|b| {
+                b.column_by_name("op")
+                    .unwrap()
+                    .as_string::<i32>()
+                    .iter()
+                    .map(|op| op.unwrap().to_string())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn test_debezium_keeps_equal_rows_without_primary_key() {
+        let ops = pass_through(vec![
+            // a snapshot of two equal rows and another
+            debezium(&[("c", "Mouse", 1), ("c", "Mouse", 1), ("c", "Keyboard", 2)]),
+            // one of the equal rows is deleted
+            debezium(&[("d", "Mouse", 1)]),
+            // two more are created and one deleted
+            debezium(&[("c", "Mouse", 1), ("c", "Mouse", 1), ("d", "Mouse", 1)]),
+        ])
+        .await;
+        assert_eq!(ops, [vec!["c", "c", "c"], vec!["d"], vec!["c"]]);
     }
 }
