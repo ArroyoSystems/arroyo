@@ -812,9 +812,6 @@ impl DebeziumUnrollingStream {
         schema: SchemaRef,
         primary_keys: Vec<usize>,
     ) -> Result<Self> {
-        if primary_keys.is_empty() {
-            return plan_err!("there must be at least one primary key for a Debezium source");
-        }
         let input_schema = input.schema();
         let before_index = input_schema.index_of("before")?;
         let after_index = input_schema.index_of("after")?;
@@ -887,11 +884,19 @@ impl DebeziumUnrollingStream {
 
         let mut columns = unrolled_array.as_struct().columns().to_vec();
 
-        let hash = MultiHashFunction::default().invoke(
-            &self
-                .primary_keys
+        // without a primary key, a row is identified by all of its fields
+        let id_columns: Vec<_> = if self.primary_keys.is_empty() {
+            columns.clone()
+        } else {
+            self.primary_keys
                 .iter()
-                .map(|i| ColumnarValue::Array(columns[*i].clone()))
+                .map(|i| columns[*i].clone())
+                .collect()
+        };
+        let hash = MultiHashFunction::default().invoke(
+            &id_columns
+                .into_iter()
+                .map(ColumnarValue::Array)
                 .collect::<Vec<_>>(),
         )?;
 
