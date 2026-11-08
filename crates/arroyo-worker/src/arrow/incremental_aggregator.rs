@@ -444,6 +444,19 @@ impl IncrementalState {
         }
     }
 
+    /// Called once the changed weights are written to the "b" table
+    fn written(&mut self) {
+        if let IncrementalState::Weighted {
+            data,
+            changed_values,
+            ..
+        } = self
+        {
+            changed_values.clear();
+            data.retain(|_, v| v.count != 0);
+        }
+    }
+
     /// Whether all of the weights have cancelled out (the latest timestamp doesn't count as state)
     fn is_empty(&self) -> bool {
         match self {
@@ -723,8 +736,8 @@ impl IncrementalAggregatingFunc {
                     continue;
                 };
 
-                for vk in changed_values.drain() {
-                    if let Some(weight) = data.get(&vk) {
+                for vk in changed_values.iter() {
+                    if let Some(weight) = data.get(vk) {
                         accumulator_builder.append_value(i as u32);
                         args_row_builder.append_value(&*vk.0);
                         count_builder.append_value(weight.count);
@@ -733,9 +746,6 @@ impl IncrementalAggregatingFunc {
                         rows.push(row.to_owned())
                     }
                 }
-
-                // once we've checkpointed them, we can clear out zero weights
-                data.retain(|_, v| v.count != 0);
             }
         }
 
@@ -962,9 +972,20 @@ impl IncrementalAggregatingFunc {
         if let Some(batch) = self.checkpoint_batch()? {
             let table = ctx.table_manager.get_uncached_key_value_view("b").await?;
             table.insert_batch(batch).await?;
+            self.weights_written();
         }
 
         Ok(())
+    }
+
+    /// Once the weights are written, we can forget which ones changed and clear out the zero weights; doing it any
+    /// earlier would lose them if the write failed
+    fn weights_written(&mut self) {
+        for k in self.updated_keys.keys() {
+            if let Some(group) = self.accumulators.get_mut(k.0.as_ref()) {
+                group.states.iter_mut().for_each(IncrementalState::written);
+            }
+        }
     }
 
     async fn flush(&mut self, ctx: &mut OperatorContext) -> Result<Option<RecordBatch>> {
@@ -1460,6 +1481,9 @@ impl OperatorConstructor for IncrementalAggregatingConstructor {
 mod tests {
     use super::*;
     use arrow_array::Int64Array;
+    use datafusion::functions_aggregate::min_max::max_udaf;
+    use datafusion::physical_expr::aggregate::AggregateExprBuilder;
+    use datafusion::physical_expr::expressions::col;
 
     fn int(values: &[i64]) -> Vec<ArrayRef> {
         vec![Arc::new(Int64Array::from(values.to_vec()))]
@@ -1492,6 +1516,52 @@ mod tests {
             }
             assert_eq!(restored[&[2][..]].count, 1);
         }
+    }
+
+    fn weighted_max() -> IncrementalState {
+        let schema = Arc::new(Schema::new(vec![Field::new("v", DataType::Int64, true)]));
+        let expr = AggregateExprBuilder::new(max_udaf(), vec![col("v", &schema).unwrap()])
+            .schema(schema)
+            .alias("max_v")
+            .build()
+            .unwrap();
+        IncrementalState::Weighted {
+            expr: Arc::new(expr),
+            extreme: Some(Extreme::Max),
+            data: Default::default(),
+            row_converter: Arc::new(
+                RowConverter::new(vec![SortField::new(DataType::Int64)]).unwrap(),
+            ),
+            changed_values: Default::default(),
+        }
+    }
+
+    fn changed(state: &IncrementalState) -> usize {
+        match state {
+            IncrementalState::Weighted { changed_values, .. } => changed_values.len(),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn changed_weights_wait_until_written() {
+        let mut max = weighted_max();
+        max.add(0, &int(&[2]), 1).unwrap();
+        max.add(0, &int(&[2]), -1).unwrap();
+        max.add(0, &int(&[5]), 1).unwrap();
+        assert_eq!(
+            changed(&max),
+            2,
+            "until they're written, a retry still sees both changes"
+        );
+
+        max.written();
+        assert_eq!(changed(&max), 0);
+        assert_eq!(max.evaluate().unwrap(), ScalarValue::Int64(Some(5)));
+        let IncrementalState::Weighted { data, .. } = &max else {
+            unreachable!()
+        };
+        assert_eq!(data.len(), 1, "the zero weight for 2 is cleared out");
     }
 
     #[test]
