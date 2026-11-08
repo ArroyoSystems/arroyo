@@ -69,6 +69,34 @@ impl BatchData {
     }
 }
 
+/// Restores a weight from the "b" table; when there are several records for a value, the one with the highest
+/// generation wins
+fn restore_weight(
+    data: &mut BTreeMap<Key, BatchData>,
+    args_row: &[u8],
+    count: i64,
+    generation: u64,
+) {
+    if let Some(existing) = data.get_mut(args_row) {
+        if existing.generation < generation {
+            existing.count = count;
+            existing.generation = generation;
+        }
+    } else {
+        data.insert(
+            Key(Arc::new(args_row.to_vec())),
+            BatchData::new(count, generation),
+        );
+    }
+}
+
+/// The generation for new values, which must be above any generation we've written or restored: we drop a zero weight
+/// from memory once it's checkpointed, but its record stays in the table, and a value inserted again later has to win
+/// over it on restore
+fn generation_after(current: u64, seen: Option<u64>) -> u64 {
+    seen.map_or(current, |g| current.max(g + 1))
+}
+
 /// The aggregates we can compute from a running total and row count
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum SignedKind {
@@ -637,9 +665,10 @@ impl IncrementalAggregatingFunc {
         }
 
         let generations = generation_builder.finish();
-        self.new_generation = self
-            .new_generation
-            .max(max_array::<UInt64Type, _>(&generations).unwrap());
+        self.new_generation = generation_after(
+            self.new_generation,
+            max_array::<UInt64Type, _>(&generations),
+        );
         cols.push(Arc::new(generations));
 
         Ok(Some(cols))
@@ -718,9 +747,10 @@ impl IncrementalAggregatingFunc {
         cols.push(Arc::new(timestamp_builder.finish()));
 
         let generations = generation_builder.finish();
-        self.new_generation = self
-            .new_generation
-            .max(max_array::<UInt64Type, _>(&generations).unwrap_or(0));
+        self.new_generation = generation_after(
+            self.new_generation,
+            max_array::<UInt64Type, _>(&generations),
+        );
         cols.push(Arc::new(generations));
 
         Ok(Some(cols))
@@ -781,6 +811,7 @@ impl IncrementalAggregatingFunc {
 
     async fn initialize(&mut self, ctx: &mut OperatorContext) -> Result<()> {
         let table = ctx.table_manager.get_uncached_key_value_view("a").await?;
+        let mut restored: Option<u64> = None;
 
         // restore the groups and their signed state
         let mut stream = Box::pin(table.get_all());
@@ -801,6 +832,7 @@ impl IncrementalAggregatingFunc {
                 .collect();
 
             let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
+            restored = restored.max(max_array::<UInt64Type, _>(generations));
 
             let now = Instant::now();
 
@@ -861,6 +893,7 @@ impl IncrementalAggregatingFunc {
                     .downcast_ref::<BinaryArray>()
                     .unwrap();
                 let generations = batch.columns().last().unwrap().as_primitive::<UInt64Type>();
+                restored = restored.max(max_array::<UInt64Type, _>(generations));
 
                 let key_rows = if key_cols.is_empty() {
                     // every row belongs to the single global group
@@ -890,20 +923,12 @@ impl IncrementalAggregatingFunc {
                         bail!("expected aggregate {accumulator_idx} to be weighted");
                     };
 
-                    if let Some(existing) = data.get_mut(args_row) {
-                        if existing.generation < generation {
-                            existing.count = count;
-                            existing.generation = generation;
-                        }
-                    } else {
-                        data.insert(
-                            Key(Arc::new(args_row.to_vec())),
-                            BatchData::new(count, generation),
-                        );
-                    }
+                    restore_weight(data, args_row, count, generation);
                 }
             }
         }
+
+        self.new_generation = generation_after(self.new_generation, restored);
 
         // drop groups whose state had cancelled out when they were checkpointed
         let mut empty = vec![];
@@ -1446,6 +1471,26 @@ mod tests {
             total: Total::zero(true),
             rows: 0,
             output,
+        }
+    }
+
+    #[test]
+    fn reinserted_value_wins_over_its_zero_weight() {
+        // a zero weight for 2 was checkpointed at generation 3, and dropped from memory after restoring
+        let mut data = BTreeMap::new();
+        restore_weight(&mut data, &[5], 1, 1);
+        restore_weight(&mut data, &[2], 0, 3);
+        data.retain(|_, v: &mut BatchData| v.count != 0);
+        assert!(!data.contains_key(&[2][..]));
+
+        // we insert 2 again, and the next restore reads both of its records, in either order
+        let generation = generation_after(0, Some(3));
+        for records in [[(0, 3), (1, generation)], [(1, generation), (0, 3)]] {
+            let mut restored = BTreeMap::new();
+            for (count, g) in records {
+                restore_weight(&mut restored, &[2], count, g);
+            }
+            assert_eq!(restored[&[2][..]].count, 1);
         }
     }
 
