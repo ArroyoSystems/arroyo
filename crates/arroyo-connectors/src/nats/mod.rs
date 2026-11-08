@@ -103,7 +103,6 @@ impl NatsConnector {
                         inactive_threshold: options
                             .pull_opt_i64("consumer.inactive_threshold")?
                             .unwrap_or(600),
-                        rate_limit: options.pull_opt_i64("consumer.rate_limit")?.unwrap_or(-1),
                         max_ack_pending: options
                             .pull_opt_i64("consumer.max_ack_pending")?
                             .unwrap_or(-1),
@@ -402,4 +401,28 @@ async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::
         .await
         .map_err(|e| anyhow!("Failed to connect to nats: {:?}", e))?;
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jetstream_source_does_not_support_server_rate_limits() {
+        let mut options = ConnectorOptions::new(&[], &None).unwrap();
+        options.insert_str("type", "source").unwrap();
+        options.insert_str("stream", "events").unwrap();
+        options.insert_str("consumer.rate_limit", "100").unwrap();
+
+        let table = NatsConnector::table_from_options(&mut options).unwrap();
+
+        // Leave unsupported options for the planner to reject, rather than silently ignore them.
+        assert!(options.contains_key("consumer.rate_limit"));
+        let table = serde_json::to_value(table).unwrap();
+        assert!(
+            table["connectorType"]["sourceType"]
+                .get("rateLimit")
+                .is_none()
+        );
+    }
 }

@@ -79,12 +79,6 @@
                                             "description": "Duration that instructs the server to cleanup consumers that are inactive for that long. Prior to 2.9, this only applied to ephemeral consumers.",
                                             "default": 600
                                         },
-                                        "rateLimit": {
-                                            "title": "Rate limit",
-                                            "type": "integer",
-                                            "description": "The maximum number of messages per second that will be delivered to consumers.",
-                                            "default": -1
-                                        },
                                         "maxAckPending": {
                                             "title": "Max messages pending for acknowledgement",
                                             "type": "integer",
