@@ -159,6 +159,67 @@ impl NatsSourceFunc {
         stream
     }
 
+    fn consumer_config(
+        source_type: &SourceType,
+        consumer_name: String,
+        deliver_policy: consumer::DeliverPolicy,
+    ) -> consumer::pull::Config {
+        match source_type {
+            SourceType::Jetstream {
+                ack_policy,
+                replay_policy,
+                ack_wait,
+                description,
+                filter_subjects,
+                rate_limit,
+                sample_frequency,
+                num_replicas,
+                inactive_threshold,
+                max_ack_pending,
+                max_deliver,
+                max_waiting,
+                max_batch,
+                max_bytes,
+                max_expires,
+                ..
+            } => {
+                if *rate_limit > 0 {
+                    tracing::warn!(
+                        "consumer.rate_limit (rateLimit) is deprecated and ignored: NATS pull consumers do not support server-side rate limits. Remove this option before a future breaking release."
+                    );
+                }
+                consumer::pull::Config {
+                    name: Some(consumer_name),
+                    ack_policy: match ack_policy {
+                        AcknowledgmentPolicy::Explicit => consumer::AckPolicy::Explicit,
+                        AcknowledgmentPolicy::All => consumer::AckPolicy::All,
+                        AcknowledgmentPolicy::None => consumer::AckPolicy::None,
+                    },
+                    replay_policy: match replay_policy {
+                        ReplayPolicy::Original => consumer::ReplayPolicy::Original,
+                        ReplayPolicy::Instant => consumer::ReplayPolicy::Instant,
+                    },
+                    ack_wait: Duration::from_secs(*ack_wait as u64),
+                    description: description.clone(),
+                    filter_subjects: filter_subjects.clone(),
+                    sample_frequency: *sample_frequency as u8,
+                    num_replicas: *num_replicas as usize,
+                    inactive_threshold: Duration::from_secs(*inactive_threshold as u64),
+                    max_ack_pending: *max_ack_pending,
+                    max_deliver: *max_deliver,
+                    max_waiting: *max_waiting,
+                    max_batch: *max_batch,
+                    max_bytes: *max_bytes,
+                    max_expires: Duration::from_secs(*max_expires as u64),
+                    deliver_policy,
+                    // Pull consumers reject nonzero rate limits; the default zero is omitted.
+                    ..Default::default()
+                }
+            }
+            _ => panic!("Core source type not supported for NATS consumer"),
+        }
+    }
+
     async fn create_nats_consumer(
         &mut self,
         stream: &async_nats::jetstream::stream::Stream,
@@ -200,53 +261,8 @@ impl NatsSourceFunc {
             ctx.task_info.job_id.replace("job_", "")
         );
 
-        let consumer_config = match &self.source_type {
-            SourceType::Jetstream {
-                ack_policy,
-                replay_policy,
-                ack_wait,
-                description,
-                filter_subjects,
-                sample_frequency,
-                num_replicas,
-                inactive_threshold,
-                max_ack_pending,
-                max_deliver,
-                max_waiting,
-                max_batch,
-                max_bytes,
-                max_expires,
-                ..
-            } => consumer::pull::Config {
-                name: Some(consumer_name.clone()),
-                ack_policy: match ack_policy {
-                    AcknowledgmentPolicy::Explicit => consumer::AckPolicy::Explicit,
-                    AcknowledgmentPolicy::All => consumer::AckPolicy::All,
-                    AcknowledgmentPolicy::None => consumer::AckPolicy::None,
-                },
-                replay_policy: match replay_policy {
-                    ReplayPolicy::Original => consumer::ReplayPolicy::Original,
-                    ReplayPolicy::Instant => consumer::ReplayPolicy::Instant,
-                },
-                ack_wait: Duration::from_secs(*ack_wait as u64),
-                description: description.clone(),
-                filter_subjects: filter_subjects.clone(),
-                sample_frequency: *sample_frequency as u8,
-                num_replicas: *num_replicas as usize,
-                inactive_threshold: Duration::from_secs(*inactive_threshold as u64),
-                max_ack_pending: *max_ack_pending,
-                max_deliver: *max_deliver,
-                max_waiting: *max_waiting,
-                max_batch: *max_batch,
-                max_bytes: *max_bytes,
-                max_expires: Duration::from_secs(*max_expires as u64),
-                deliver_policy,
-                ..Default::default()
-            },
-            _ => {
-                panic!("Core source type not supported for NATS consumer")
-            }
-        };
+        let consumer_config =
+            Self::consumer_config(&self.source_type, consumer_name.clone(), deliver_policy);
 
         match stream.delete_consumer(&consumer_name).await {
             Ok(_) => {
@@ -519,6 +535,47 @@ impl NatsSourceFunc {
                 }
                 Ok(SourceFinishType::Graceful)
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_nats::jetstream::consumer::IntoConsumerConfig;
+
+    #[test]
+    fn jetstream_consumer_omits_deprecated_rate_limits() {
+        for rate_limit in [None, Some(-1), Some(0), Some(100)] {
+            let mut source = serde_json::json!({
+                "stream": "events",
+                "filterSubjects": ["events.created"],
+                "maxAckPending": 42
+            });
+            if let Some(rate_limit) = rate_limit {
+                source["rateLimit"] = rate_limit.into();
+            }
+            let source_type: SourceType = serde_json::from_value(source).unwrap();
+            let config = NatsSourceFunc::consumer_config(
+                &source_type,
+                "test-consumer".to_string(),
+                consumer::DeliverPolicy::ByStartSequence {
+                    start_sequence: 123,
+                },
+            );
+
+            assert_eq!(config.rate_limit, 0);
+            let request = serde_json::to_value(config.into_consumer_config()).unwrap();
+            assert!(request.get("rate_limit").is_none());
+            assert!(request.get("rate_limit_bps").is_none());
+            assert_eq!(request["name"], "test-consumer");
+            assert_eq!(request["max_ack_pending"], 42);
+            assert_eq!(
+                request["filter_subjects"],
+                serde_json::json!(["events.created"])
+            );
+            assert_eq!(request["deliver_policy"], "by_start_sequence");
+            assert_eq!(request["opt_start_seq"], 123);
         }
     }
 }

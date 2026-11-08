@@ -79,6 +79,13 @@
                                             "description": "Duration that instructs the server to cleanup consumers that are inactive for that long. Prior to 2.9, this only applied to ephemeral consumers.",
                                             "default": 600
                                         },
+                                        "rateLimit": {
+                                            "title": "Rate limit (deprecated)",
+                                            "type": "integer",
+                                            "description": "[Deprecated] Ignored: NATS pull consumers do not support server-side rate limits. Retained for configuration compatibility; remove this option before a future breaking release.",
+                                            "default": -1,
+                                            "deprecated": true
+                                        },
                                         "maxAckPending": {
                                             "title": "Max messages pending for acknowledgement",
                                             "type": "integer",

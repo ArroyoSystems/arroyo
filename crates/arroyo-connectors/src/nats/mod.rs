@@ -103,6 +103,7 @@ impl NatsConnector {
                         inactive_threshold: options
                             .pull_opt_i64("consumer.inactive_threshold")?
                             .unwrap_or(600),
+                        rate_limit: options.pull_opt_i64("consumer.rate_limit")?.unwrap_or(-1),
                         max_ack_pending: options
                             .pull_opt_i64("consumer.max_ack_pending")?
                             .unwrap_or(-1),
@@ -408,21 +409,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn jetstream_source_does_not_support_server_rate_limits() {
+    fn jetstream_source_accepts_deprecated_rate_limits() {
+        for rate_limit in [None, Some("-1"), Some("0"), Some("100")] {
+            let mut options = ConnectorOptions::new(&[], &None).unwrap();
+            options.insert_str("type", "source").unwrap();
+            options.insert_str("stream", "events").unwrap();
+            if let Some(rate_limit) = rate_limit {
+                options
+                    .insert_str("consumer.rate_limit", rate_limit)
+                    .unwrap();
+            }
+
+            let table = NatsConnector::table_from_options(&mut options).unwrap();
+
+            assert!(!options.contains_key("consumer.rate_limit"));
+            let table = serde_json::to_value(table).unwrap();
+            assert_eq!(
+                table["connectorType"]["sourceType"]["rateLimit"],
+                rate_limit.unwrap_or("-1").parse::<i64>().unwrap()
+            );
+            let restored: NatsTable = serde_json::from_value(table.clone()).unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), table);
+        }
+    }
+
+    #[test]
+    fn jetstream_source_rejects_invalid_deprecated_rate_limits() {
         let mut options = ConnectorOptions::new(&[], &None).unwrap();
         options.insert_str("type", "source").unwrap();
         options.insert_str("stream", "events").unwrap();
-        options.insert_str("consumer.rate_limit", "100").unwrap();
+        options
+            .insert_str("consumer.rate_limit", "invalid")
+            .unwrap();
 
-        let table = NatsConnector::table_from_options(&mut options).unwrap();
-
-        // Leave unsupported options for the planner to reject, rather than silently ignore them.
-        assert!(options.contains_key("consumer.rate_limit"));
-        let table = serde_json::to_value(table).unwrap();
-        assert!(
-            table["connectorType"]["sourceType"]
-                .get("rateLimit")
-                .is_none()
-        );
+        assert!(NatsConnector::table_from_options(&mut options).is_err());
     }
 }
