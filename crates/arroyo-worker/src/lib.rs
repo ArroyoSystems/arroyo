@@ -1223,6 +1223,7 @@ impl LeaderServer {
         Ok(())
     }
 
+    #[allow(clippy::result_large_err)]
     async fn send_job_message(&self, msg: RunningMessage) -> Result<(), Status> {
         self.state
             .job_controller_tx
