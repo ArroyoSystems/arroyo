@@ -970,7 +970,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
         }
     }
 
-    pub fn finalize(&mut self) -> DataflowResult<UploadFuture> {
+    pub fn finalize(&mut self, skip_missing_output: bool) -> DataflowResult<UploadFuture> {
         let (fut, total_size, meta) = match &mut self.state {
             OpenFileState::ClosingMulti {
                 multipart_id,
@@ -986,6 +986,7 @@ impl<BBW: BatchBufferingWriter + 'static> OpenFile<BBW> {
                     parts.drain(..).map(|p| p.content_id.unwrap()).collect(),
                     *total_size,
                     self.logger.clone(),
+                    skip_missing_output,
                 );
 
                 (future, *total_size, iceberg_metadata.take())
