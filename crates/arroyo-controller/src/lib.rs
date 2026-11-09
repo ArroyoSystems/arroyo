@@ -648,6 +648,7 @@ impl ControllerServer {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     async fn send_to_job_queue(&self, job_id: &str, msg: JobMessage) -> Result<(), Status> {
         // Keep per-job backpressure from holding the global job map lock.
         let tx = {

@@ -36,7 +36,7 @@ pub fn to_arrow(schema: &str) -> anyhow::Result<arrow_schema::Schema> {
 }
 
 fn field_to_avro(name: &str, field: &Field) -> serde_json::value::Value {
-    let next_name = format!("{}_{}", name, &field.name());
+    let next_name = format!("{}_{}", name, field.name());
     let mut schema = arrow_to_avro(&next_name, field.data_type());
 
     if field.is_nullable() {

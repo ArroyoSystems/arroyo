@@ -73,12 +73,20 @@ pub mod identity;
 
 pub mod grpc {
     pub mod rpc {
-        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
+        #![allow(
+            clippy::derive_partial_eq_without_eq,
+            clippy::result_large_err,
+            deprecated
+        )]
         tonic::include_proto!("arroyo_rpc");
     }
 
     pub mod api {
-        #![allow(clippy::derive_partial_eq_without_eq, deprecated)]
+        #![allow(
+            clippy::derive_partial_eq_without_eq,
+            clippy::result_large_err,
+            deprecated
+        )]
         tonic::include_proto!("api");
 
         impl From<self::JoinType> for arroyo_types::JoinType {
