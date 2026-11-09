@@ -522,7 +522,10 @@ impl JobControllerGrpc for ControllerServer {
                 task_id: err.task_id,
                 subtask_idx: err.subtask_idx,
                 error_domain: err.error_domain().into(),
-                retry_hint: err.retry_hint().into(),
+                retry_hint: arroyo_rpc::errors::RetryHint::from_rpc(
+                    err.retry_policy.as_ref(),
+                    err.retry_hint(),
+                ),
                 operator_id: err.operator_id,
                 reason: err.error,
                 details: err.details,

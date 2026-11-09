@@ -618,20 +618,21 @@ impl JobContext<'_> {
             );
         }
 
-        match event.retry_hint {
-            errors::RetryHint::NoRetry => Err(StateError::FatalError {
-                source: anyhow!("task failed: {}", event.reason),
-                message: event.reason,
-                domain: event.error_domain,
-            }),
-            errors::RetryHint::WithBackoff => Ok(Transition::next(
+        if event.retry_hint.should_retry(self.status.restarts) {
+            Ok(Transition::next(
                 *state,
                 Recovering {
                     source: anyhow!("task failed: {}", event.reason),
                     reason: event.reason,
                     domain: event.error_domain,
                 },
-            )),
+            ))
+        } else {
+            Err(StateError::FatalError {
+                source: anyhow!("task failed: {}", event.reason),
+                message: event.reason,
+                domain: event.error_domain,
+            })
         }
     }
 
