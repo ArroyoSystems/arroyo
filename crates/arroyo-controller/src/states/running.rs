@@ -17,7 +17,7 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::log_event;
 
-use super::{JobContext, State, Transition};
+use super::{JobContext, State, Transition, stop_workers_for_missing_job};
 
 #[derive(Debug)]
 pub struct Running {}
@@ -101,15 +101,23 @@ impl State for Running {
                     if ctx.status.restarts > 0 && running_start.elapsed() > *pipeline_config.healthy_duration {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
-                        if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(
-                                message = "Failed to update status",
-                                error = format!("{:?}", e),
-                                job_id = %ctx.config.id,
-                                pipeline_id = *ctx.pipeline_info.pipeline_id
-                            );
-                            ctx.status.restarts = restarts;
-                            // we'll try again on the next round
+                        match ctx.status.update_db(&ctx.db).await {
+                            Ok(crate::JobStatusUpdate::Updated) => {}
+                            Ok(crate::JobStatusUpdate::Missing) => {
+                                ctx.rx.close();
+                                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                                return Ok(Transition::Stop);
+                            }
+                            Err(e) => {
+                                error!(
+                                    message = "Failed to update status",
+                                    error = format!("{:?}", e),
+                                    job_id = %ctx.config.id,
+                                    pipeline_id = *ctx.pipeline_info.pipeline_id
+                                );
+                                ctx.status.restarts = restarts;
+                                // we'll try again on the next round
+                            }
                         }
                     }
 

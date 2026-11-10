@@ -11,7 +11,10 @@ use tokio::{select, sync::Mutex, task::JoinHandle};
 use tonic::Request;
 use tracing::{debug, error, info, warn};
 
-use super::{JobContext, State, Transition, leader_running::LeaderRunning, running::Running};
+use super::{
+    JobContext, State, Transition, leader_running::LeaderRunning, running::Running,
+    stop_workers_for_missing_job,
+};
 use crate::job_controller::checkpoint_store::DbCheckpointMetadataStore;
 use crate::job_controller::leader_manager::LeaderManager;
 use crate::{JobMessage, schedulers::SchedulerError};
@@ -641,13 +644,21 @@ impl State for Scheduling {
 
         // update the generation for this scheduling attempt
         ctx.status.generation += 1;
-        if let Err(e) = ctx.status.update_db(&ctx.db).await {
-            return Err(ctx.retryable(
-                self,
-                "failed to advance generation for scheduling retry",
-                anyhow!("{}", e),
-                10,
-            ));
+        match ctx.status.update_db(&ctx.db).await {
+            Ok(crate::JobStatusUpdate::Updated) => {}
+            Ok(crate::JobStatusUpdate::Missing) => {
+                ctx.rx.close();
+                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                return Ok(Transition::Stop);
+            }
+            Err(err) => {
+                return Err(ctx.retryable(
+                    self,
+                    "failed to advance generation for scheduling retry",
+                    anyhow!("{}", err),
+                    10,
+                ));
+            }
         }
 
         // clear out any existing workers for this job
