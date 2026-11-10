@@ -1,4 +1,4 @@
-use super::{JobContext, State, Transition, controller_job_failure};
+use super::{JobContext, State, Transition, controller_job_failure, stop_workers_for_missing_job};
 use crate::JobMessage;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
@@ -152,14 +152,22 @@ impl State for LeaderRunning {
                     if ctx.status.restarts > 0 && self.started.elapsed() > *pipeline_config.healthy_duration {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
-                        if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(
-                                message = "Failed to update status",
-                                error = format!("{:?}", e),
-                                job_id = %ctx.config.id,
-                                pipeline_id = *ctx.pipeline_info.pipeline_id
-                            );
-                            ctx.status.restarts = restarts;
+                        match ctx.status.update_db(&ctx.db).await {
+                            Ok(crate::JobStatusUpdate::Updated) => {}
+                            Ok(crate::JobStatusUpdate::Missing) => {
+                                ctx.rx.close();
+                                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                                return Ok(Transition::Stop);
+                            }
+                            Err(err) => {
+                                error!(
+                                    message = "Failed to update status",
+                                    error = format!("{:?}", err),
+                                    job_id = %ctx.config.id,
+                                    pipeline_id = *ctx.pipeline_info.pipeline_id
+                                );
+                                ctx.status.restarts = restarts;
+                            }
                         }
                     }
 

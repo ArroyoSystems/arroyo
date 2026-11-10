@@ -27,7 +27,9 @@ use self::scheduling::Scheduling;
 use self::stopping::Stopping;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
-use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
+use crate::{
+    JobConfig, JobMessage, JobStatus, JobStatusUpdate, PipelineInfo, queries, schedulers::Scheduler,
+};
 use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
@@ -107,6 +109,15 @@ async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
             job_id = %ctx.config.id,
             pipeline_id = *ctx.pipeline_info.pipeline_id
         );
+    }
+}
+
+async fn stop_workers_for_missing_job(scheduler: &dyn Scheduler, job_id: &str) {
+    // No later database poll will find this job. Clean up every generation and
+    // keep retrying failures; a replacement job has a different ID.
+    while let Err(err) = scheduler.stop_workers(job_id, None, true).await {
+        warn!(job_id, error = ?err, "Failed to stop workers for missing job; retrying");
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
@@ -723,10 +734,20 @@ async fn execute_state<'a>(
     if let Some(s) = &next {
         ctx.status.state = s.name().to_string();
 
-        ctx.status
+        match ctx
+            .status
             .update_db(&ctx.db)
             .await
-            .expect("Failed to update status");
+            .expect("Failed to update status")
+        {
+            JobStatusUpdate::Updated => {}
+            JobStatusUpdate::Missing => {
+                // Reject stale config updates while cleanup retries, releasing the updater's lock.
+                ctx.rx.close();
+                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                return (None, ctx);
+            }
+        }
     }
 
     (next, ctx)
@@ -935,7 +956,22 @@ impl StateMachine {
 
         if let Some(initial_state) = initial_state {
             status.state = initial_state.name().to_string();
-            status.update_db(&self.db).await.unwrap();
+            match status
+                .update_db(&self.db)
+                .await
+                .expect("Failed to update initial job status")
+            {
+                JobStatusUpdate::Updated => {}
+                JobStatusUpdate::Missing => {
+                    // The updater holds the jobs lock here, so retry cleanup in a separate task.
+                    let scheduler = self.scheduler.clone();
+                    shutdown_guard.into_spawn_task(async move {
+                        stop_workers_for_missing_job(scheduler.as_ref(), &status.id).await;
+                        Ok(())
+                    });
+                    return;
+                }
+            }
             let (tx, rx) = channel(1024);
             {
                 let config = self.config.clone();
