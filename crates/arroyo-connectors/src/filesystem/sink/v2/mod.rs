@@ -828,16 +828,19 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
             }
 
             // Finalize multipart uploads
+            let context = self.context.as_ref().unwrap();
+            // Only skip missing outputs for plain files, not table formats.
+            let skip_missing_output = matches!(context.commit_state, CommitState::VanillaParquet);
             let mut futures = FuturesUnordered::new();
             let mut files = HashMap::new();
             for file in multipart_files {
                 let mut file: OpenFile<BBW> = OpenFile::from_commit(
                     file,
-                    self.context.as_ref().unwrap().storage_provider.clone(),
+                    context.storage_provider.clone(),
                     &self.config,
                     self.event_logger.clone(),
                 )?;
-                futures.push(file.finalize()?);
+                futures.push(file.finalize(skip_missing_output)?);
                 files.insert(file.path.clone(), file);
             }
 
