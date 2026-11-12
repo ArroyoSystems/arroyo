@@ -98,10 +98,26 @@ async fn handle_worker_connect<'a>(
             rpc_address,
             data_address,
             slots,
-            ..
+            registered_by,
         } => {
             let job_id = ctx.config.id.clone();
             let pipeline_id = ctx.pipeline_info.pipeline_id.clone();
+
+            let expected = ctx
+                .scheduler
+                .worker_registration(&ctx.config.scheduler_config);
+            if registered_by != expected {
+                warn!(
+                    message = "ignoring worker connect from unexpected registrar",
+                    job_id = %job_id,
+                    pipeline_id = *pipeline_id,
+                    worker_id = worker_id.0,
+                    registered_by = ?registered_by,
+                    expected = ?expected,
+                    rpc_address,
+                );
+                return Ok(());
+            }
 
             if ctx.status.generation != run_id {
                 info!(
