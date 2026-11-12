@@ -5,6 +5,7 @@ use super::{
 use crate::JobMessage;
 use crate::states::recovering::Recovering;
 use crate::types::public::RestartMode;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{JobState, JobStopMode};
 use std::time::{Duration, Instant};
@@ -81,7 +82,7 @@ impl State for LeaderRestarting {
                                 ctx.handle_job_failure(*self, controller_job_failure(
                                     format!("failed while taking final checkpoint: {e}"),
                                     rpc::ErrorDomain::Internal,
-                                    rpc::RetryHint::WithBackoff,
+                                    RetryHint::WithBackoff,
                                 )).await
                             } else {
                                 Ok(Transition::next(*self, Scheduling {}))
@@ -91,7 +92,7 @@ impl State for LeaderRestarting {
                             return ctx.handle_job_failure(*self, controller_job_failure(
                                 "timed out while taking final checkpoint",
                                 rpc::ErrorDomain::Internal,
-                                rpc::RetryHint::WithBackoff,
+                                RetryHint::WithBackoff,
                             )).await;
                         }
                     }

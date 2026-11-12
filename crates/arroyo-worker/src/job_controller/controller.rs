@@ -508,7 +508,6 @@ impl WorkerJobController {
                                 subtask_index: None,
                                 message: err.to_string(),
                                 error_domain: rpc::ErrorDomain::Internal.into(),
-                                retry_hint: rpc::RetryHint::WithBackoff.into(),
                                 details: String::new(),
                                 retry_policy: Some(RetryHint::WithBackoff.into()),
                             })

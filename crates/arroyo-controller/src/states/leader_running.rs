@@ -8,8 +8,9 @@ use crate::states::{StateError, fatal};
 use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::{ErrorDomain, RetryHint};
+use arroyo_rpc::grpc::rpc::ErrorDomain;
 use arroyo_rpc::log_event;
 use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
@@ -199,7 +200,7 @@ impl State for LeaderRunning {
                                     return ctx.handle_job_failure(*self, controller_job_failure(
                                         format!("job unexpectedly in {:?} state, should be running", state),
                                         rpc::ErrorDomain::Internal,
-                                        rpc::RetryHint::WithBackoff,
+                                        RetryHint::WithBackoff,
                                     )).await;
                                 }
                                 rpc::JobState::JobFinishing | rpc::JobState::JobFinished => {

@@ -7,6 +7,7 @@ use crate::states::{
 use crate::types::public::StopMode as SqlStopMode;
 use anyhow::{Context, anyhow, bail};
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
 use arroyo_rpc::grpc::rpc::{JobState, JobStatusReq, JobStopMode, StopJobReq};
@@ -241,7 +242,7 @@ where
                         return ctx.handle_job_failure(state, controller_job_failure(
                             format!("failed while taking final checkpoint: {:?}", e),
                             rpc::ErrorDomain::Internal,
-                            rpc::RetryHint::WithBackoff,
+                            RetryHint::WithBackoff,
                         )).await;
                     }
                 };
@@ -258,7 +259,7 @@ where
                 return ctx.handle_job_failure(state, controller_job_failure(
                     "timed out while taking final checkpoint".to_string(),
                     rpc::ErrorDomain::Internal,
-                    rpc::RetryHint::WithBackoff,
+                    RetryHint::WithBackoff,
                 )).await;
             }
         }
