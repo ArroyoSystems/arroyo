@@ -245,21 +245,15 @@ impl<'a> MinMaxColAggregator<'a> {
             );
         };
 
-        if value.min_is_exact() {
-            let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, value)? else {
-                bail!("Statistics {} is not match with field type {}.", value, ty);
-            };
+        let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, value)? else {
+            bail!("Statistics {} is not match with field type {}.", value, ty);
+        };
+        self.update_state_min(field_id, min_datum);
 
-            self.update_state_min(field_id, min_datum);
-        }
-
-        if value.max_is_exact() {
-            let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, value)? else {
-                bail!("Statistics {} is not match with field type {}.", value, ty);
-            };
-
-            self.update_state_max(field_id, max_datum);
-        }
+        let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, value)? else {
+            bail!("Statistics {} is not match with field type {}.", value, ty);
+        };
+        self.update_state_max(field_id, max_datum);
 
         Ok(())
     }
