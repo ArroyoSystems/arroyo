@@ -46,6 +46,11 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
         ParquetCompression::Lz4Raw => parquet::basic::Compression::LZ4_RAW,
     });
 
+    // parquet-rs truncates column-chunk statistics to 64 bytes by default (as of 58.x). We rely
+    // on exact statistics for Iceberg metadata: partition values are derived from column lower
+    // bounds, and inexact bounds are dropped. So we disable truncation to keep stats exact.
+    parquet_writer_options = parquet_writer_options.set_statistics_truncate_length(None);
+
     (
         parquet_writer_options.build(),
         format.row_group_bytes.unwrap_or(DEFAULT_ROW_GROUP_BYTES) as usize,
@@ -376,4 +381,78 @@ pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Res
         .ok_or_else(|| anyhow::anyhow!("timestamp column is not nanosecond"))?
         .value(0);
     Ok(from_nanos(time as u128))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filesystem::config::{IcebergPartitioning, IcebergPartitioningField, Transform};
+    use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
+    use arrow::array::StringArray;
+    use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+    use iceberg::spec::{
+        Datum, Literal, NestedField, PrimitiveType, Schema as IcebergSchema, Struct, Type,
+    };
+
+    #[test]
+    fn long_string_statistics_are_exact() {
+        // longer than parquet-rs's default statistics truncation length of 64 bytes
+        let value = "x".repeat(100);
+
+        let arrow_schema = Arc::new(ArrowSchema::new(vec![Field::new(
+            "s",
+            DataType::Utf8,
+            false,
+        )]));
+        let ice_schema = IcebergSchema::builder()
+            .with_fields(vec![
+                NestedField::required(1, "s", Type::Primitive(PrimitiveType::String)).into(),
+            ])
+            .build()
+            .unwrap();
+
+        let (props, _) = writer_properties_from_format(&ParquetFormat::default());
+        let mut writer =
+            ArrowWriter::try_new(Vec::new(), arrow_schema.clone(), Some(props)).unwrap();
+        let batch = RecordBatch::try_new(
+            arrow_schema,
+            vec![Arc::new(StringArray::from(vec![
+                value.clone(),
+                value.clone(),
+            ]))],
+        )
+        .unwrap();
+        writer.write(&batch).unwrap();
+        let metadata = IcebergFileMetadata::from_parquet(writer.close().unwrap(), &ice_schema);
+
+        let df = build_datafile_from_meta(
+            &ice_schema,
+            &metadata,
+            &IcebergPartitioning {
+                fields: vec![IcebergPartitioningField {
+                    name: None,
+                    field: "s".to_string(),
+                    transform_fn: Transform::Identity,
+                }],
+                ..Default::default()
+            },
+            "s3://bucket/data/file.parquet".to_string(),
+            1234,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(
+            df.lower_bounds().get(&1),
+            Some(&Datum::string(value.clone()))
+        );
+        assert_eq!(
+            df.upper_bounds().get(&1),
+            Some(&Datum::string(value.clone()))
+        );
+        assert_eq!(
+            df.partition(),
+            &Struct::from_iter([Some(Literal::string(value))])
+        );
+    }
 }
