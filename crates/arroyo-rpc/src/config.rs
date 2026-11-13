@@ -488,6 +488,19 @@ pub struct CompilerConfig {
     pub tls: Option<TlsConfig>,
 }
 
+/// Who tells the controller that a worker is up.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkerRegistration {
+    /// The worker calls `RegisterWorker`, reporting its own identity and
+    /// addresses.
+    Worker,
+    /// The scheduler assigns the worker's identity and ports, finds it, and
+    /// connects it to its job. The controller rejects `RegisterWorker` for
+    /// such workers.
+    Scheduler,
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct WorkerConfig {
@@ -520,6 +533,11 @@ pub struct WorkerConfig {
     /// TLS configuration for worker TCP shuffling
     #[serde(default)]
     pub tls: Option<TlsConfig>,
+
+    /// Who tells the controller this worker is up. With `scheduler`, the worker
+    /// doesn't call `RegisterWorker`, and `id`, `machine-id`, `rpc-port` and
+    /// `data-port` must be set to the values the scheduler registers it under.
+    pub registration: WorkerRegistration,
 
     /// DEPRECATED -- use pipelines.checkpoint-details-to-keep
     pub checkpoint_details_to_keep: Option<u32>,

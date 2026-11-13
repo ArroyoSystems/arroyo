@@ -49,7 +49,7 @@ use crate::job_controller::controller::WorkerJobController;
 use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::config::{PipelineWorkerConfigs, config, update};
+use arroyo_rpc::config::{PipelineWorkerConfigs, WorkerRegistration, config, update};
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
@@ -649,6 +649,20 @@ pub struct WorkerServer {
 
 impl WorkerServer {
     pub fn from_config(shutdown_guard: ShutdownGuard) -> Result<Self> {
+        let worker = &config().worker;
+        if worker.registration == WorkerRegistration::Scheduler
+            && (worker.id.is_none()
+                || worker.machine_id.is_none()
+                || worker.rpc_port == 0
+                || worker.data_port == 0)
+        {
+            // The scheduler can only register a worker whose identity and ports it chose.
+            anyhow::bail!(
+                "worker.registration = scheduler requires worker.id, worker.machine-id, \
+                 worker.rpc-port and worker.data-port to be set"
+            );
+        }
+
         let worker_id = WorkerId(config().worker.id.unwrap_or_else(random));
         let cluster_id =
             std::env::var(CLUSTER_ID_ENV).unwrap_or_else(|_| panic!("{CLUSTER_ID_ENV} is not set"));
@@ -735,15 +749,7 @@ impl WorkerServer {
         .await?;
         let local_addr = listener.local_addr()?;
 
-        let mut client = retry!(
-            controller_client("worker", &config.worker.tls).await,
-            2,
-            Duration::from_millis(100),
-            Duration::from_secs(2),
-            |e| warn!("Failed to connect to controller: {e}, retrying...")
-        )?;
-
-        let mut network = NetworkManager::new(0).await?;
+        let mut network = NetworkManager::new(config.worker.data_port).await?;
         let data_port = network
             .open_listener(self.shutdown_guard.child("network-manager"))
             .await;
@@ -816,6 +822,22 @@ impl WorkerServer {
 
         // ideally, get a signal when the server is started...
         tokio::time::sleep(Duration::from_millis(50)).await;
+
+        if config.worker.registration == WorkerRegistration::Scheduler {
+            info!("Not registering with the controller; the scheduler registers this worker");
+            return Ok(());
+        }
+
+        // This connection is only for `RegisterWorker`; the worker's other
+        // controller calls open their own. Connect after the check above so a
+        // worker its scheduler registers doesn't open one it never uses.
+        let mut client = retry!(
+            controller_client("worker", &config.worker.tls).await,
+            2,
+            Duration::from_millis(100),
+            Duration::from_secs(2),
+            |e| warn!("Failed to connect to controller: {e}, retrying...")
+        )?;
 
         client
             .register_worker(Request::new(RegisterWorkerReq {

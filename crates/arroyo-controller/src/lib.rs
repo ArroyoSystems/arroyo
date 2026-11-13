@@ -5,7 +5,7 @@
 #![allow(clippy::needless_lifetimes)]
 
 use anyhow::Result;
-use arroyo_rpc::config::{PipelineConfig, config};
+use arroyo_rpc::config::{PipelineConfig, WorkerRegistration, config};
 use arroyo_rpc::grpc::rpc::controller_grpc_server::{ControllerGrpc, ControllerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
     GrpcOutputSubscription, HeartbeatNodeReq, HeartbeatNodeResp, OutputData, RegisterNodeReq,
@@ -37,6 +37,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
 //pub mod compiler;
+pub mod job_queues;
 pub mod leader_manager;
 pub mod schedulers;
 mod states;
@@ -82,6 +83,7 @@ fn update_job_state_metrics(counts: &HashMap<&str, i64>) {
 
 include!(concat!(env!("OUT_DIR"), "/controller-sql.rs"));
 
+use crate::job_queues::{JobQueues, JobStates};
 use crate::schedulers::{ManualScheduler, NodeScheduler, ProcessScheduler, Scheduler};
 use crate::states::{StateError, fatal};
 use types::public::{RestartMode, StopMode};
@@ -199,6 +201,8 @@ pub enum JobMessage {
         rpc_address: String,
         data_address: String,
         slots: usize,
+        /// Who sent this: the worker through `RegisterWorker`, or its scheduler.
+        registered_by: WorkerRegistration,
     },
     WorkerInitializationComplete {
         worker_id: WorkerId,
@@ -214,7 +218,8 @@ pub enum JobMessage {
 
 #[derive(Clone)]
 pub struct ControllerServer {
-    job_state: Arc<tokio::sync::Mutex<HashMap<String, StateMachine>>>,
+    job_state: JobStates,
+    job_queues: JobQueues,
     data_txs: Arc<tokio::sync::Mutex<HashMap<String, Vec<Sender<Result<OutputData, Status>>>>>>,
     scheduler: Arc<dyn Scheduler>,
     db: DatabaseSource,
@@ -248,6 +253,7 @@ impl ControllerGrpc for ControllerServer {
                 rpc_address: req.rpc_address,
                 data_address: req.data_address,
                 slots: req.slots as usize,
+                registered_by: WorkerRegistration::Worker,
             },
         )
         .await?;
@@ -442,37 +448,27 @@ impl ControllerServer {
             }
         };
 
+        Self::with_scheduler(database, scheduler)
+    }
+
+    /// Builds a controller around `scheduler` instead of the one named in the
+    /// config, for schedulers defined outside this crate.
+    pub fn with_scheduler(database: DatabaseSource, scheduler: Arc<dyn Scheduler>) -> Self {
+        let job_state: JobStates = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let job_queues = JobQueues::new(&job_state);
+        scheduler.set_job_queues(job_queues.clone());
+
         Self {
             scheduler,
             data_txs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
-            job_state: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            job_state,
+            job_queues,
             db: database,
         }
     }
 
     async fn send_to_job_queue(&self, job_id: &str, msg: JobMessage) -> Result<(), Status> {
-        // Keep per-job backpressure from holding the global job map lock.
-        let tx = {
-            let jobs = self.job_state.lock().await;
-            let Some(sm) = jobs.get(job_id) else {
-                warn!(message = "Received message for unknown job id", %job_id);
-                return Err(Status::failed_precondition(format!(
-                    "No job with id {job_id}"
-                )));
-            };
-
-            sm.sender().ok_or_else(|| {
-                Status::failed_precondition(format!(
-                    "Cannot handle message for {job_id}: State machine is inactive"
-                ))
-            })?
-        };
-
-        tx.send(msg).await.map_err(|_| {
-            Status::failed_precondition(format!(
-                "Cannot handle message for {job_id}: State machine is inactive"
-            ))
-        })
+        self.job_queues.send(job_id, msg).await
     }
 
     fn start_updater(&self, guard: ShutdownGuard) {

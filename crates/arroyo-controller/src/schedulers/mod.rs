@@ -1,5 +1,6 @@
+use crate::job_queues::JobQueues;
 use anyhow::bail;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{WorkerRegistration, config};
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
 use arroyo_rpc::grpc::rpc::{
@@ -65,6 +66,18 @@ pub trait Scheduler: Send + Sync {
         job_id: &str,
         generation: Option<u64>,
     ) -> anyhow::Result<Vec<WorkerId>>;
+
+    /// Called once when the controller starts. Schedulers that discover their
+    /// workers themselves keep this to connect them; see [`crate::job_queues`].
+    fn set_job_queues(&self, _queues: JobQueues) {}
+
+    /// Who registers the workers of a job with this per-job `scheduler_config`
+    /// overlay. The job ignores connects from anyone else, so when the scheduler
+    /// registers workers, a caller holding a valid client certificate can't
+    /// call `RegisterWorker` on their behalf.
+    fn worker_registration(&self, _scheduler_config: &serde_json::Value) -> WorkerRegistration {
+        WorkerRegistration::Worker
+    }
 
     async fn shutdown(&self) {}
 }

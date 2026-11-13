@@ -59,6 +59,7 @@ bind-address = "0.0.0.0"
 rpc-port = 0
 data-port = 0
 task-slots = 16
+registration = 'worker'
 
 [node]
 bind-address = "0.0.0.0"
