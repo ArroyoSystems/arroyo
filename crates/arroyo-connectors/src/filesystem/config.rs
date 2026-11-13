@@ -29,16 +29,15 @@ const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024; // 5MB
 const MAXIMUM_PART_SIZE: u64 = 5 * 1024 * 1024 * 1024; // 5GB
 const MAXIMUM_FILE_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024; // 5TB
 
-/// Which version of the FileSystemSink to use
-#[derive(
-    Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString,
-)]
+/// Deprecated: the `version` field used to select between the v1 and v2 object-store
+/// sinks. Only one implementation remains, but the field (and the `sink.version` SQL
+/// option) is still accepted and ignored so that existing connection tables, compiled
+/// programs, and SQL continue to parse.
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
-#[schemars(title = "File System Sink Version")]
 pub enum SinkVersion {
     V1,
-    #[default]
     V2,
 }
 
@@ -129,7 +128,7 @@ pub struct MultipartConfig {
     /// Minimum multipart size
     #[schemars(
         title = "Minimum multipart size",
-        description = "Files smaller than this will be written as a single put rather than a multipart upload (only available on v2)"
+        description = "Files smaller than this will be written as a single put rather than a multipart upload"
     )]
     pub minimum_multipart_size: Option<u64>,
 }
@@ -492,8 +491,10 @@ pub struct FileSystemSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for FileSystemSink {
@@ -505,7 +506,7 @@ impl FromOpts for FileSystemSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }
@@ -569,8 +570,10 @@ pub struct DeltaLakeSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for DeltaLakeSink {
@@ -582,7 +585,7 @@ impl FromOpts for DeltaLakeSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }
@@ -1017,8 +1020,10 @@ pub struct IcebergSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for IcebergSink {
@@ -1034,7 +1039,7 @@ impl FromOpts for IcebergSink {
             rolling_policy: opts.pull_struct()?,
             file_naming: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }

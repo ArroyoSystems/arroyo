@@ -162,7 +162,7 @@ impl Connector for DeltaLakeConnector {
                         file_naming: sink.file_naming,
                         partitioning: sink.partitioning,
                         multipart: sink.multipart,
-                        version: sink.version,
+                        version: None,
                     },
                     config,
                     TableFormat::Delta {},

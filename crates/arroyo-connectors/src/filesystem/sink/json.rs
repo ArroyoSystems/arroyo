@@ -448,7 +448,7 @@ mod tests {
             file_naming: Default::default(),
             partitioning: Default::default(),
             multipart: Default::default(),
-            version: Default::default(),
+            version: None,
         };
 
         let arroyo_schema = Arc::new(arroyo_rpc::df::ArroyoSchema::new(
@@ -648,7 +648,7 @@ mod tests {
             file_naming: Default::default(),
             partitioning: Default::default(),
             multipart: Default::default(),
-            version: Default::default(),
+            version: None,
         };
 
         JsonLocalWriter::new(tmp_path, final_path, &config, format, arroyo_schema)

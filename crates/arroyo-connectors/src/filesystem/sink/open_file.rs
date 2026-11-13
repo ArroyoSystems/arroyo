@@ -1,9 +1,9 @@
 use super::checkpoint::{FileToCommit, FileToCommitType, InProgressFile, InProgressFileState};
 use crate::filesystem::sink::iceberg::metadata::IcebergFileMetadata;
 use crate::filesystem::sink::map_storage_error;
+use crate::filesystem::sink::operator::SinkConfig;
 use crate::filesystem::sink::two_phase_committer::CommitStrategy;
-use crate::filesystem::sink::v2::SinkConfig;
-use crate::filesystem::sink::v2::uploads::{
+use crate::filesystem::sink::uploads::{
     FsResponseData, UploadFuture, create_last_parts_upload_future,
     create_multipart_finalize_future, create_multipart_init_future, create_part_upload_future,
     create_single_file_upload_future,

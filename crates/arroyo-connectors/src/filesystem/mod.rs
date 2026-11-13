@@ -4,14 +4,12 @@ pub(crate) mod iceberg;
 pub mod sink;
 mod source;
 
-use self::sink::{
-    JsonFileSystemSink, LocalJsonFileSystemSink, LocalParquetFileSystemSink, ParquetFileSystemSink,
-};
+use self::sink::{LocalJsonFileSystemSink, LocalParquetFileSystemSink};
 use crate::filesystem::config::*;
 use crate::filesystem::sink::json::JsonWriter;
+use crate::filesystem::sink::operator::FileSystemSinkV2;
 use crate::filesystem::sink::parquet::ParquetBatchBufferingWriter;
 use crate::filesystem::sink::partitioning::PartitionerMode;
-use crate::filesystem::sink::v2::FileSystemSinkV2;
 use crate::filesystem::source::FileSystemSourceFunc;
 use crate::{EmptyConfig, render_schema};
 use anyhow::{Result, anyhow, bail};
@@ -94,50 +92,32 @@ pub fn make_sink(
 
     let format = config.format.expect("must have format for FileSystemSink");
 
-    match (&format, is_local, sink.version) {
-        (Format::Parquet { .. }, true, _) => Ok(ConstructedOperator::from_operator(Box::new(
+    match (&format, is_local) {
+        (Format::Parquet { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalParquetFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
-        (Format::Parquet { .. }, false, SinkVersion::V1) => Ok(ConstructedOperator::from_operator(
-            Box::new(ParquetFileSystemSink::create_and_start(
+        (Format::Parquet { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
+            FileSystemSinkV2::<ParquetBatchBufferingWriter>::new(
                 sink,
                 table_format,
                 format,
                 partitioner,
                 connection_id,
-            )),
-        )),
-        (Format::Parquet { .. }, false, SinkVersion::V2) => Ok(ConstructedOperator::from_operator(
-            Box::new(FileSystemSinkV2::<ParquetBatchBufferingWriter>::new(
-                sink,
-                table_format,
-                format,
-                partitioner,
-                connection_id,
-            )),
-        )),
-        (Format::Json { .. }, true, _) => Ok(ConstructedOperator::from_operator(Box::new(
+            ),
+        ))),
+        (Format::Json { .. }, true) => Ok(ConstructedOperator::from_operator(Box::new(
             LocalJsonFileSystemSink::new(sink, table_format, format, partitioner),
         ))),
-        (Format::Json { .. }, false, SinkVersion::V1) => Ok(ConstructedOperator::from_operator(
-            Box::new(JsonFileSystemSink::create_and_start(
+        (Format::Json { .. }, false) => Ok(ConstructedOperator::from_operator(Box::new(
+            FileSystemSinkV2::<JsonWriter>::new(
                 sink,
                 table_format,
                 format,
                 partitioner,
                 connection_id,
-            )),
-        )),
-        (Format::Json { .. }, false, SinkVersion::V2) => Ok(ConstructedOperator::from_operator(
-            Box::new(FileSystemSinkV2::<JsonWriter>::new(
-                sink,
-                table_format,
-                format,
-                partitioner,
-                connection_id,
-            )),
-        )),
-        (f, _, _) => bail!("unsupported format {f}"),
+            ),
+        ))),
+        (f, _) => bail!("unsupported format {f}"),
     }
 }
 
@@ -219,7 +199,6 @@ impl Connector for FileSystemConnector {
             FileSystemTableType::Sink(FileSystemSink {
                 path,
                 partitioning,
-                version,
                 rolling_policy,
                 multipart,
                 ..
@@ -228,7 +207,7 @@ impl Connector for FileSystemConnector {
                 rolling_policy.validate()?;
                 multipart.validate()?;
 
-                let description = format!("FileSystemSink{:?}<{format}, {path}>", version);
+                let description = format!("FileSystemSink<{format}, {path}>");
 
                 let exprs = partitioning
                     .partition_expr(&schema.arroyo_schema().schema)?
