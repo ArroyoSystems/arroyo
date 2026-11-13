@@ -391,7 +391,7 @@ macro_rules! leader_stop_if_desired_running {
 pub fn controller_job_failure(
     message: impl Into<String>,
     error_domain: rpc::ErrorDomain,
-    retry_hint: rpc::RetryHint,
+    retry_hint: errors::RetryHint,
 ) -> JobFailure {
     JobFailure {
         operator_id: None,
@@ -399,9 +399,8 @@ pub fn controller_job_failure(
         subtask_index: None,
         message: message.into(),
         error_domain: error_domain as i32,
-        retry_hint: retry_hint as i32,
         details: String::new(),
-        retry_policy: Some(errors::RetryHint::from(retry_hint).into()),
+        retry_policy: Some(retry_hint.into()),
     }
 }
 
@@ -476,8 +475,7 @@ impl JobContext<'_> {
         failure: arroyo_rpc::grpc::rpc::JobFailure,
     ) -> Result<Transition, StateError> {
         let error_domain = errors::ErrorDomain::from(failure.error_domain());
-        let retry_hint =
-            errors::RetryHint::from_rpc(failure.retry_policy.as_ref(), failure.retry_hint());
+        let retry_hint = errors::RetryHint::from_rpc(failure.retry_policy.as_ref());
         let operator_id = failure
             .operator_id
             .clone()

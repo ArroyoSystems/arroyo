@@ -93,11 +93,6 @@ enum ErrorDomain {
   EXTERNAL = 2;
 }
 
-enum RetryHint {
-  NO_RETRY = 0;
-  WITH_BACKOFF = 1;
-}
-
 message RetryPolicy {
   message NoRetry {}
   message Backoff {
@@ -116,10 +111,10 @@ message TaskError {
   uint32 subtask_idx = 3;
   string error = 4;
   ErrorDomain error_domain = 5;
-  RetryHint retry_hint = 6;
+  // Was `RetryHint retry_hint`, replaced by retry_policy.
+  reserved 6;
+  reserved "retry_hint";
   string details = 7;
-  // Replaces retry_hint, which is retained for older peers and will be
-  // deprecated once the compatibility rollout is complete.
   RetryPolicy retry_policy = 8;
 }
 
@@ -309,10 +304,10 @@ message JobFailure {
   optional uint32 subtask_index = 3;
   string message = 4;
   ErrorDomain error_domain = 5;
-  RetryHint retry_hint = 6;
+  // Was `RetryHint retry_hint`, replaced by retry_policy.
+  reserved 6;
+  reserved "retry_hint";
   string details = 7;
-  // Replaces retry_hint, which is retained for older peers and will be
-  // deprecated once the compatibility rollout is complete.
   RetryPolicy retry_policy = 8;
 }
 

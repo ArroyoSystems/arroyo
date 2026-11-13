@@ -168,17 +168,8 @@ impl From<RetryHint> for rpc::RetryPolicy {
     }
 }
 
-impl From<rpc::RetryHint> for RetryHint {
-    fn from(value: rpc::RetryHint) -> Self {
-        match value {
-            rpc::RetryHint::NoRetry => RetryHint::NoRetry,
-            rpc::RetryHint::WithBackoff => RetryHint::WithBackoff,
-        }
-    }
-}
-
 impl RetryHint {
-    pub fn from_rpc(policy: Option<&rpc::RetryPolicy>, legacy_hint: rpc::RetryHint) -> Self {
+    pub fn from_rpc(policy: Option<&rpc::RetryPolicy>) -> Self {
         use rpc::retry_policy::Policy;
 
         match policy.and_then(|policy| policy.policy.as_ref()) {
@@ -187,14 +178,7 @@ impl RetryHint {
                 Some(max_retries) => Self::WithBackoffLimited(max_retries),
                 None => Self::WithBackoff,
             },
-            None => legacy_hint.into(),
-        }
-    }
-
-    pub fn legacy_hint(&self) -> rpc::RetryHint {
-        match self {
-            Self::NoRetry => rpc::RetryHint::NoRetry,
-            Self::WithBackoff | Self::WithBackoffLimited(_) => rpc::RetryHint::WithBackoff,
+            None => Self::WithBackoff,
         }
     }
 
