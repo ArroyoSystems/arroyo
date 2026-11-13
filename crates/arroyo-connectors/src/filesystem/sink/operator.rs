@@ -1,22 +1,17 @@
-mod checkpoint;
-pub mod migration;
-mod open_file;
-mod uploads;
-
+use super::checkpoint::{self, FileToCommit, FilesCheckpointV2};
 use super::delta::{commit_files_to_delta, load_or_create_table};
 use super::iceberg::IcebergTable;
 use super::parquet::representitive_timestamp;
 use super::partitioning::{Partitioner, PartitionerMode};
-use super::v2::checkpoint::{FileToCommit, FilesCheckpointV2};
-use super::v2::uploads::{FsResponse, UploadFuture};
+use super::uploads::{FsResponse, UploadFuture};
 use super::{
     BatchBufferingWriter, CommitState, FinishedFile, FsEventLogger, RollingPolicy,
-    add_suffix_prefix, classify_storage_error, map_storage_error,
+    add_suffix_prefix,
 };
 use crate::filesystem::TableFormat;
 use crate::filesystem::config::{self, FilenameStrategy, NamingConfig};
+use crate::filesystem::sink::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
 use crate::filesystem::sink::two_phase_committer::CommitStrategy;
-use crate::filesystem::sink::v2::open_file::{CommitPreparation, OpenFile, PendingSingleFile};
 use arrow::record_batch::RecordBatch;
 use arrow::row::OwnedRow;
 use arroyo_operator::context::{Collector, OperatorContext};
@@ -69,7 +64,7 @@ pub struct SinkConfig {
 }
 
 impl SinkConfig {
-    fn target_part_size(&self) -> usize {
+    pub(super) fn target_part_size(&self) -> usize {
         self.config
             .multipart
             .target_part_size_bytes
@@ -77,7 +72,7 @@ impl SinkConfig {
             .unwrap_or(DEFAULT_TARGET_PART_SIZE)
     }
 
-    fn minimum_multipart_size(&self) -> usize {
+    pub(super) fn minimum_multipart_size(&self) -> usize {
         self.config
             .multipart
             .minimum_multipart_size
@@ -490,11 +485,8 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         self.context =
             Some(SinkContext::new(&mut self.config, schema, ctx.task_info.clone()).await?);
 
-        let state: HashMap<usize, FilesCheckpointV2> = ctx
-            .table_manager
-            .get_global_keyed_state_migratable("r")
-            .await?
-            .take();
+        let state: HashMap<usize, FilesCheckpointV2> =
+            ctx.table_manager.get_global_keyed_state("r").await?.take();
 
         for s in state.values() {
             self.active.max_file_index = self.active.max_file_index.max(s.file_index);
@@ -525,7 +517,7 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
 
             let pre_commit_state: &mut GlobalKeyedView<String, FileToCommit> = ctx
                 .table_manager
-                .get_global_keyed_state_migratable("p")
+                .get_global_keyed_state("p")
                 .await
                 .expect("should be able to get table");
 
