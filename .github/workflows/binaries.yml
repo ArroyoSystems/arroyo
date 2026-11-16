@@ -15,7 +15,7 @@ env:
 jobs:
   linux:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
@@ -38,6 +38,11 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+      - name: Install system dependencies
+        # librdkafka 2.12 includes curl/curl.h under `#ifdef WITH_OAUTHBEARER_OIDC`, which is
+        # always defined by its CMake config (as 0), so the header is needed even with curl
+        # disabled. Only the header is used; nothing links against libcurl.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -75,7 +80,7 @@ jobs:
     env:
       CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
