@@ -120,9 +120,14 @@ jobs:
         run: rustup toolchain install
       - name: Install Postgres and prepare DB
         run: |
-          brew install postgresql@14 && brew services start postgresql && sleep 10
-          psql postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
-          createdb arroyo
+          set -euxo pipefail
+          brew install postgresql@14
+          # use the versioned name: unversioned `postgresql` now resolves to a newer formula
+          brew services start postgresql@14
+          PG_BIN="$(brew --prefix postgresql@14)/bin"
+          for i in $(seq 1 30); do "$PG_BIN/pg_isready" -q && break; sleep 1; done
+          "$PG_BIN/psql" postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+          "$PG_BIN/createdb" arroyo
       - name: Run DB migrations
         run: |
           cargo install --debug refinery_cli --version $REFINERY_VERSION
