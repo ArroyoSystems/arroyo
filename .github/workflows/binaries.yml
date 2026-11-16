@@ -15,7 +15,7 @@ env:
 jobs:
   linux:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
@@ -38,6 +38,11 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+      - name: Install system dependencies
+        # librdkafka 2.12 includes curl/curl.h under `#ifdef WITH_OAUTHBEARER_OIDC`, which is
+        # always defined by its CMake config (as 0), so the header is needed even with curl
+        # disabled. Only the header is used; nothing links against libcurl.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -75,12 +80,12 @@ jobs:
     env:
       CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: macos-14-large, protoc: osx-x86_64, artifact: macos-x86_64 }
-          - { runner: macos-14-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
+          - { runner: macos-15-large, protoc: osx-x86_64, artifact: macos-x86_64 }
+          - { runner: macos-15-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Check out
@@ -115,9 +120,14 @@ jobs:
         run: rustup toolchain install
       - name: Install Postgres and prepare DB
         run: |
-          brew install postgresql@14 && brew services start postgresql && sleep 10
-          psql postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
-          createdb arroyo
+          set -euxo pipefail
+          brew install postgresql@14
+          # use the versioned name: unversioned `postgresql` now resolves to a newer formula
+          brew services start postgresql@14
+          PG_BIN="$(brew --prefix postgresql@14)/bin"
+          for i in $(seq 1 30); do "$PG_BIN/pg_isready" -q && break; sleep 1; done
+          "$PG_BIN/psql" postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+          "$PG_BIN/createdb" arroyo
       - name: Run DB migrations
         run: |
           cargo install --debug refinery_cli --version $REFINERY_VERSION
