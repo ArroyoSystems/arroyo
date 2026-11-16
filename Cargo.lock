@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-udf-common"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -1101,7 +1101,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-udf-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arrow-schema",
  "arroyo-udf-common",
@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "arroyo-udf-plugin"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "arrow",
  "arroyo-udf-common",
