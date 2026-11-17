@@ -403,3 +403,45 @@ async fn get_nats_client(connection: &NatsConfig) -> anyhow::Result<async_nats::
         .map_err(|e| anyhow!("Failed to connect to nats: {:?}", e))?;
     Ok(client)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jetstream_source_accepts_deprecated_rate_limits() {
+        for rate_limit in [None, Some("-1"), Some("0"), Some("100")] {
+            let mut options = ConnectorOptions::new(&[], &None).unwrap();
+            options.insert_str("type", "source").unwrap();
+            options.insert_str("stream", "events").unwrap();
+            if let Some(rate_limit) = rate_limit {
+                options
+                    .insert_str("consumer.rate_limit", rate_limit)
+                    .unwrap();
+            }
+
+            let table = NatsConnector::table_from_options(&mut options).unwrap();
+
+            assert!(!options.contains_key("consumer.rate_limit"));
+            let table = serde_json::to_value(table).unwrap();
+            assert_eq!(
+                table["connectorType"]["sourceType"]["rateLimit"],
+                rate_limit.unwrap_or("-1").parse::<i64>().unwrap()
+            );
+            let restored: NatsTable = serde_json::from_value(table.clone()).unwrap();
+            assert_eq!(serde_json::to_value(restored).unwrap(), table);
+        }
+    }
+
+    #[test]
+    fn jetstream_source_rejects_invalid_deprecated_rate_limits() {
+        let mut options = ConnectorOptions::new(&[], &None).unwrap();
+        options.insert_str("type", "source").unwrap();
+        options.insert_str("stream", "events").unwrap();
+        options
+            .insert_str("consumer.rate_limit", "invalid")
+            .unwrap();
+
+        assert!(NatsConnector::table_from_options(&mut options).is_err());
+    }
+}
