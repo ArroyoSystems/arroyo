@@ -152,12 +152,12 @@ async fn compile_sql(
         .collect();
 
     for table in tables {
-        let Some(connector) = connector_for_type(&table.connector) else {
-            warn!(
-                "Saved table found with unknown connector {}",
-                table.connector
-            );
-            continue;
+        let connector = match connector_for_type(&table.connector) {
+            Ok(connector) => connector,
+            Err(e) => {
+                warn!("Skipping saved table '{}': {e}", table.name);
+                continue;
+            }
         };
 
         let connection = connector

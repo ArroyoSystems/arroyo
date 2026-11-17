@@ -12,7 +12,7 @@ use std::convert::Infallible;
 use tokio::sync::mpsc::channel;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::debug;
+use tracing::warn;
 use utoipa::ToSchema;
 
 use arroyo_connector_confluent::ConfluentProfile;
@@ -59,9 +59,7 @@ async fn get_and_validate_connector(
     ErrorResp,
 > {
     let client = db.client().await?;
-    let connector = connector_for_type(&req.connector)
-        .ok_or_else(|| anyhow!("Unknown connector '{}'", req.connector,))
-        .map_err(log_and_map)?;
+    let connector = connector_for_type(&req.connector).map_err(|e| bad_request(e.to_string()))?;
 
     let (connection_profile_id, profile_config) = if let Some(connection_profile_id) =
         &req.connection_profile_id
@@ -241,7 +239,7 @@ pub(crate) async fn get_all_connection_tables(
         .map(|t| t.try_into())
         .inspect(|result| {
             if let Err(err) = result {
-                debug!("Error building connection table: {}", err);
+                warn!("Hiding connection table from listing: {err}");
             }
         })
         .filter_map(Result::ok)
@@ -448,12 +446,8 @@ pub async fn patch_connection_table(
 impl TryInto<ConnectionTable> for DbConnectionTable {
     type Error = String;
     fn try_into(self) -> Result<ConnectionTable, Self::Error> {
-        let Some(connector) = connector_for_type(&self.connector) else {
-            return Err(format!(
-                "invalid connector {} in saved ConnectionTable {}",
-                self.connector, self.id
-            ));
-        };
+        let connector = connector_for_type(&self.connector)
+            .map_err(|e| format!("connection table '{}': {e}", self.name))?;
 
         let profile = get_connection_profile(&self, &*connector).map_err(|e| e.to_string())?;
 
@@ -545,7 +539,7 @@ pub(crate) async fn get_connection_tables(
         .map(|t| t.try_into())
         .inspect(|result| {
             if let Err(err) = result {
-                debug!("Error building connection table: {}", err);
+                warn!("Hiding connection table from listing: {err}");
             }
         })
         .filter_map(Result::ok)

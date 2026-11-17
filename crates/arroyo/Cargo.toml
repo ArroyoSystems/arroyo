@@ -7,6 +7,27 @@ edition = "2024"
 profiling = ["tikv-jemallocator/profiling"]
 python = ["arroyo-udf-python/python-enabled"]
 all-connectors = ["arroyo-connectors/all"]
+# One feature per connector, so a build can include just the ones it needs.
+# These must mirror the connector features of arroyo-connectors.
+blackhole = ["arroyo-connectors/blackhole"]
+confluent = ["arroyo-connectors/confluent"]
+filesystem = ["arroyo-connectors/filesystem"]
+fluvio = ["arroyo-connectors/fluvio"]
+impulse = ["arroyo-connectors/impulse"]
+kafka = ["arroyo-connectors/kafka"]
+kinesis = ["arroyo-connectors/kinesis"]
+mqtt = ["arroyo-connectors/mqtt"]
+nats = ["arroyo-connectors/nats"]
+nexmark = ["arroyo-connectors/nexmark"]
+polling-http = ["arroyo-connectors/polling-http"]
+preview = ["arroyo-connectors/preview"]
+rabbitmq = ["arroyo-connectors/rabbitmq"]
+redis = ["arroyo-connectors/redis"]
+single-file = ["arroyo-connectors/single-file"]
+sse = ["arroyo-connectors/sse"]
+stdout = ["arroyo-connectors/stdout"]
+webhook = ["arroyo-connectors/webhook"]
+websocket = ["arroyo-connectors/websocket"]
 
 [dependencies]
 arroyo-types = { path ="../arroyo-types" }

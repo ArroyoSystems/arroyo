@@ -49,3 +49,4 @@ arroyo-connector-sse = { path = "../arroyo-connector-sse", optional = true }
 arroyo-connector-stdout = { path = "../arroyo-connector-stdout", optional = true }
 arroyo-connector-webhook = { path = "../arroyo-connector-webhook", optional = true }
 arroyo-connector-websocket = { path = "../arroyo-connector-websocket", optional = true }
+thiserror = { workspace = true }

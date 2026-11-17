@@ -91,6 +91,131 @@ pub fn connectors() -> HashMap<&'static str, Box<dyn ErasedConnector>> {
     connectors.into_iter().map(|c| (c.name(), c)).collect()
 }
 
-pub fn connector_for_type(t: &str) -> Option<Box<dyn ErasedConnector>> {
-    connectors().remove(t)
+/// A connector Arroyo knows about, whether or not it was compiled in.
+struct KnownConnector {
+    /// The name the connector registers under (`ErasedConnector::name`).
+    name: &'static str,
+    /// The `arroyo-connectors` feature that compiles it in.
+    feature: &'static str,
+    enabled: bool,
+}
+
+macro_rules! known {
+    ($name:literal, $feature:literal) => {
+        KnownConnector {
+            name: $name,
+            feature: $feature,
+            enabled: cfg!(feature = $feature),
+        }
+    };
+}
+
+/// Every connector, including ones left out of this build. Lets us tell a
+/// misspelled connector apart from one whose feature is turned off.
+const KNOWN_CONNECTORS: &[KnownConnector] = &[
+    known!("blackhole", "blackhole"),
+    known!("confluent", "confluent"),
+    known!("delta", "filesystem"),
+    known!("filesystem", "filesystem"),
+    known!("fluvio", "fluvio"),
+    known!("iceberg", "filesystem"),
+    known!("impulse", "impulse"),
+    known!("kafka", "kafka"),
+    known!("kinesis", "kinesis"),
+    known!("mqtt", "mqtt"),
+    known!("nats", "nats"),
+    known!("nexmark", "nexmark"),
+    known!("polling_http", "polling-http"),
+    known!("preview", "preview"),
+    known!("rabbitmq", "rabbitmq"),
+    known!("redis", "redis"),
+    known!("single_file", "single-file"),
+    known!("sse", "sse"),
+    known!("stdout", "stdout"),
+    known!("webhook", "webhook"),
+    known!("websocket", "websocket"),
+];
+
+/// Names of the connectors compiled into this build.
+pub fn enabled_connector_names() -> Vec<&'static str> {
+    KNOWN_CONNECTORS
+        .iter()
+        .filter(|c| c.enabled)
+        .map(|c| c.name)
+        .collect()
+}
+
+/// Names of the connectors left out of this build.
+pub fn disabled_connector_names() -> Vec<&'static str> {
+    KNOWN_CONNECTORS
+        .iter()
+        .filter(|c| !c.enabled)
+        .map(|c| c.name)
+        .collect()
+}
+
+/// Features that would add the connectors left out of this build.
+pub fn disabled_connector_features() -> Vec<&'static str> {
+    let mut features: Vec<_> = KNOWN_CONNECTORS
+        .iter()
+        .filter(|c| !c.enabled)
+        .map(|c| c.feature)
+        .collect();
+    features.sort_unstable();
+    features.dedup();
+    features
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConnectorLookupError {
+    #[error(
+        "connector '{name}' is not included in this build of Arroyo; rebuild with \
+         `--features {feature}` to use it"
+    )]
+    NotEnabled { name: String, feature: &'static str },
+    #[error("unknown connector '{name}'")]
+    Unknown { name: String },
+}
+
+pub fn connector_for_type(t: &str) -> Result<Box<dyn ErasedConnector>, ConnectorLookupError> {
+    if let Some(connector) = connectors().remove(t) {
+        return Ok(connector);
+    }
+
+    Err(match KNOWN_CONNECTORS.iter().find(|c| c.name == t) {
+        Some(known) => ConnectorLookupError::NotEnabled {
+            name: t.to_string(),
+            feature: known.feature,
+        },
+        None => ConnectorLookupError::Unknown {
+            name: t.to_string(),
+        },
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_connectors_match_registered_connectors() {
+        let registered = connectors();
+
+        for known in KNOWN_CONNECTORS {
+            assert_eq!(
+                registered.contains_key(known.name),
+                known.enabled,
+                "KNOWN_CONNECTORS entry '{}' (feature `{}`) disagrees with connectors()",
+                known.name,
+                known.feature,
+            );
+        }
+
+        for name in registered.keys() {
+            assert!(
+                KNOWN_CONNECTORS.iter().any(|k| k.name == *name),
+                "connector '{name}' is missing from KNOWN_CONNECTORS",
+            );
+        }
+    }
 }
