@@ -21,6 +21,3 @@ tokio = { workspace = true }
 typify = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-
-[build-dependencies]
-glob = "0.3"

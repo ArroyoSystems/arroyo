@@ -23,6 +23,3 @@ typify = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 rand = { workspace = true }
-
-[build-dependencies]
-glob = "0.3"

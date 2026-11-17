@@ -23,6 +23,3 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
 reqwest = { workspace = true, features = ["stream"] }
-
-[build-dependencies]
-glob = "0.3"

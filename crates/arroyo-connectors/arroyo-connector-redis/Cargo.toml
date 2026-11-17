@@ -27,6 +27,3 @@ redis = { version = "0.28", features = [
     "cluster-async",
     "connection-manager",
 ] }
-
-[build-dependencies]
-glob = "0.3"

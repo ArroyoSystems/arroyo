@@ -27,6 +27,3 @@ uuid = { workspace = true, features = ["v7"] }
 rand = { workspace = true }
 aws-sdk-kinesis = { version = "1.95" }
 aws-config = { workspace = true }
-
-[build-dependencies]
-glob = "0.3"

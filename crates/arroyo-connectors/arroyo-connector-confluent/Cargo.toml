@@ -17,6 +17,3 @@ tokio = { workspace = true }
 typify = { workspace = true }
 anyhow = { workspace = true }
 regress = "0.10.0"
-
-[build-dependencies]
-glob = "0.3"

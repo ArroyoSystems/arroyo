@@ -33,6 +33,3 @@ rustls = "0.22"
 
 [dev-dependencies]
 arroyo-connector-common = { path = "../arroyo-connector-common", features = ["test-utils"] }
-
-[build-dependencies]
-glob = "0.3"
