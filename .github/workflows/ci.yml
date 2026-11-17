@@ -103,11 +103,11 @@ jobs:
         working-directory: webui
         run: pnpm build
       - name: Build
-        run: cargo build --all-features
+        run: cargo build --workspace --all-features
       - name: Run Clippy
         run: cargo clippy --no-deps --all-features --all-targets --workspace -- -D warnings
       - name: Test
-        run: cargo nextest run -E 'kind(lib)' --all-features
+        run: cargo nextest run --workspace -E 'kind(lib)' --all-features
       - name: Integ
         run: |
           set -euo pipefail
