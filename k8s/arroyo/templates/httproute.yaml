@@ -1,0 +1,35 @@
+{{- if .Values.gateway.httpRoute.enabled -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "arroyo.fullname" . }}
+  labels:
+    {{- include "arroyo.labels" . | nindent 4 }}
+  {{- with .Values.gateway.httpRoute.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.gateway.httpRoute.parentRefs }}
+  parentRefs:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.gateway.httpRoute.hostnames }}
+  hostnames:
+    {{- range . }}
+    - {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  rules:
+    - matches:
+        {{- with .Values.gateway.httpRoute.matches }}
+        {{- toYaml . | nindent 8 }}
+        {{- else }}
+        - path:
+            type: PathPrefix
+            value: /
+        {{- end }}
+      backendRefs:
+        - name: {{ include "arroyo.fullname" . }}
+          port: {{ .Values.controller.service.httpPort }}
+{{- end }}
