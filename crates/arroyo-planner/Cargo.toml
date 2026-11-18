@@ -8,7 +8,7 @@ edition = "2024"
 arroyo-types = { path = "../arroyo-types" }
 arroyo-rpc = {path = "../arroyo-rpc"}
 arroyo-datastream = { path = "../arroyo-datastream" }
-arroyo-connectors = { path = "../arroyo-connectors" }
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors" }
 arroyo-operator = { path = "../arroyo-operator" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-python = { path = "../arroyo-udf/arroyo-udf-python" }
@@ -43,6 +43,7 @@ itertools = { workspace = true }
 sqlparser = { workspace = true}
 
 [dev-dependencies]
+arroyo-connectors = { path = "../arroyo-connectors/arroyo-connectors", features = ["all"] }
 test-log = {version = "0.2.15", default-features = false, features = ["trace"]}
 rstest = { version = "0.25" }
 
