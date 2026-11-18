@@ -5,7 +5,7 @@ use arrow_array::cast::AsArray;
 use arrow_array::types::UInt64Type;
 use arrow_array::{Array, BooleanArray, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use arroyo_connectors::connectors;
+use arroyo_connectors::connector_for_type;
 use arroyo_operator::connector::LookupConnector;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::{
@@ -235,9 +235,8 @@ impl OperatorConstructor for LookupJoinConstructor {
                 .schema_without_timestamp(),
         );
 
-        let connector = connectors()
-            .get(op.connector.as_str())
-            .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
+        let connector = connector_for_type(&op.connector)
+            .unwrap_or_else(|e| panic!("{e}"))
             .make_lookup(operator_config.clone(), lookup_schema.clone())?;
 
         let max_capacity_bytes = config.max_capacity_bytes.unwrap_or(8 * 1024 * 1024);

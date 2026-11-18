@@ -26,12 +26,8 @@ impl TryFrom<DbConnectionProfile> for ConnectionProfile {
     type Error = String;
 
     fn try_from(val: DbConnectionProfile) -> Result<Self, String> {
-        let connector = connector_for_type(&val.r#type).ok_or_else(|| {
-            format!(
-                "Connection profile '{}' has unknown type '{}'",
-                val.name, val.r#type
-            )
-        })?;
+        let connector = connector_for_type(&val.r#type)
+            .map_err(|e| format!("Connection profile '{}': {e}", val.name))?;
 
         let description = (*connector)
             .config_description(&val.config)
@@ -64,8 +60,7 @@ pub async fn test_connection_profile(
 ) -> Result<Json<TestSourceMessage>, ErrorResp> {
     let _auth_data = authenticate(&state.database, bearer_auth).await?;
 
-    let connector = connector_for_type(&req.connector)
-        .ok_or_else(|| bad_request("Unknown connector type".to_string()))?;
+    let connector = connector_for_type(&req.connector).map_err(|e| bad_request(e.to_string()))?;
 
     let Some(rx) = connector
         .test_profile(&req.config)
@@ -99,7 +94,7 @@ pub async fn create_connection_profile(
     let auth_data = authenticate(&state.database, bearer_auth).await?;
 
     connector_for_type(&req.connector)
-        .ok_or_else(|| bad_request("Unknown connector type".to_string()))?
+        .map_err(|e| bad_request(e.to_string()))?
         .validate_config(&req.config)
         .map_err(|e| bad_request(format!("Invalid config: {e:?}")))?;
 
@@ -213,7 +208,8 @@ pub(crate) async fn get_connection_profile_autocomplete(
     .next()
     .ok_or_else(|| not_found("Connection profile"))?;
 
-    let connector = connector_for_type(&connection_profile.r#type).unwrap();
+    let connector =
+        connector_for_type(&connection_profile.r#type).map_err(|e| bad_request(e.to_string()))?;
 
     let result = connector
         .get_autocomplete(&connection_profile.config)

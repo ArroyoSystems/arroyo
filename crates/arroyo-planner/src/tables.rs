@@ -285,9 +285,8 @@ impl ConnectorTable {
                 .collect();
         }
 
-        let connector = connector_for_type(connector_name).ok_or_else(|| {
-            DataFusionError::Plan(format!("Unknown connector '{connector_name}'"))
-        })?;
+        let connector =
+            connector_for_type(connector_name).map_err(|e| DataFusionError::Plan(e.to_string()))?;
 
         let format = Format::from_opts(options)
             .map_err(|e| DataFusionError::Plan(format!("invalid format: '{e}'")))?;

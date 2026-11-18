@@ -1087,6 +1087,7 @@ dependencies = [
  "arroyo-connector-webhook",
  "arroyo-connector-websocket",
  "arroyo-operator",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

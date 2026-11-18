@@ -11,7 +11,7 @@ use crate::arrow::window_fn::WindowFunctionConstructor;
 use crate::arrow::{KeyExecutionConstructor, ProjectionConstructor, ValueExecutionConstructor};
 use crate::job_controller::WorkerContext;
 use crate::network_manager::{NetworkManager, Quad, Senders};
-use arroyo_connectors::connectors;
+use arroyo_connectors::connector_for_type;
 use arroyo_datastream::logical::{
     LogicalEdge, LogicalEdgeType, LogicalGraph, LogicalNode, OperatorChain, OperatorName,
 };
@@ -921,9 +921,8 @@ pub fn construct_operator(
         OperatorName::WindowFunction => Box::new(WindowFunctionConstructor),
         OperatorName::ConnectorSource | OperatorName::ConnectorSink => {
             let op: api::ConnectorOp = prost::Message::decode(config).unwrap();
-            return connectors()
-                .get(op.connector.as_str())
-                .unwrap_or_else(|| panic!("No connector with name '{}'", op.connector))
+            return connector_for_type(&op.connector)
+                .unwrap_or_else(|e| panic!("{e}"))
                 .make_operator(
                     serde_json::from_str(&op.config)
                         .unwrap_or_else(|e| panic!("invalid operator config: {op:?}, {e:?}")),

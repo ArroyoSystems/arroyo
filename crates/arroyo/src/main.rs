@@ -442,8 +442,28 @@ async fn migrate(wait: Option<u32>) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Logs which connectors this binary was built with, so a missing connector
+/// is visible at startup instead of only when a pipeline tries to use it.
+pub(crate) fn log_connectors() {
+    info!(
+        "Enabled connectors: {}",
+        arroyo_connectors::enabled_connector_names().join(", ")
+    );
+
+    let disabled = arroyo_connectors::disabled_connector_names();
+    if !disabled.is_empty() {
+        info!(
+            "Connectors not included in this build: {}. Rebuild with `--features <feature>` \
+             to add one ({}), or `--features all-connectors` for all of them",
+            disabled.join(", "),
+            arroyo_connectors::disabled_connector_features().join(", ")
+        );
+    }
+}
+
 async fn start_control_plane(service: CPService) {
     let _guard = arroyo_server_common::init_logging(service.name(), &[]);
+    log_connectors();
 
     let config = config::config();
 
@@ -496,6 +516,7 @@ async fn start_worker() {
 
     let _guard =
         arroyo_server_common::init_logging("worker", &[("worker_id", &server.id().to_string())]);
+    log_connectors();
 
     shutdown.spawn_task("admin", start_admin_server("worker"));
     let token = shutdown.token();
