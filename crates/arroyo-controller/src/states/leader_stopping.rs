@@ -1,6 +1,5 @@
 use super::{JobContext, State, Stopped, Transition};
 use crate::states::StateError;
-use arroyo_rpc::config::config;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::JobStopMode;
 use std::time::Duration;
@@ -37,10 +36,10 @@ impl State for LeaderStopping {
                 }
 
                 let timeout = match self.stop_behavior {
-                    LeaderStopBehavior::StopJob(JobStopMode::JobStopCheckpoint) => config()
-                        .pipeline
-                        .checkpoint
-                        .timeout
+                    LeaderStopBehavior::StopJob(JobStopMode::JobStopCheckpoint) => ctx
+                        .config
+                        .pipeline_config()?
+                        .stopping_timeout
                         .as_ref()
                         .map(|t| **t)
                         .unwrap_or(Duration::MAX),
@@ -49,7 +48,8 @@ impl State for LeaderStopping {
 
                 info!(
                     msg = "waiting for workers to terminate",
-                    job_id = *ctx.config.id
+                    job_id = %ctx.config.id,
+                    pipeline_id = *ctx.pipeline_info.pipeline_id
                 );
                 // TODO: we should watch the config queue and move immediately to force stop if requested
                 //  by the user
@@ -63,7 +63,8 @@ impl State for LeaderStopping {
                     Ok(Err(e)) => {
                         error!(
                             msg = "encountered error while waiting for job to stop gracefully; will try force-stopping",
-                            job_id = *ctx.config.id,
+                            job_id = %ctx.config.id,
+                            pipeline_id = *ctx.pipeline_info.pipeline_id,
                             error = e.to_string(),
                         );
 
@@ -77,7 +78,8 @@ impl State for LeaderStopping {
                     Err(_e) => {
                         error!(
                             msg = "timed out waiting for job to stop",
-                            job_id = *ctx.config.id,
+                            job_id = %ctx.config.id,
+                            pipeline_id = *ctx.pipeline_info.pipeline_id,
                         );
 
                         return Ok(Transition::next(

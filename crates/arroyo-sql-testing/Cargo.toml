@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-sql-testing"
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 edition = "2024"
 
 [features]
@@ -25,6 +25,7 @@ arroyo-state = { path = "../arroyo-state" }
 arroyo-udf-host = { path = "../arroyo-udf/arroyo-udf-host" }
 arroyo-udf-macros = { path = "../arroyo-udf/arroyo-udf-macros" }
 arroyo-udf-plugin = { path = "../arroyo-udf/arroyo-udf-plugin" }
+arroyo-state-protocol = { path = "../arroyo-state-protocol" }
 
 arrow = {workspace = true }
 tracing = { workspace = true }

@@ -3,61 +3,64 @@ name: CI
 on: [push, pull_request]
 
 jobs:
+  check-rust-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+      - name: Check Dockerfile matches rust-toolchain.toml
+        run: |
+          toolchain=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+          dockerfile=$(sed -n 's/^ARG RUST_VERSION=//p' docker/Dockerfile)
+          if [ -z "$toolchain" ] || [ "$toolchain" != "$dockerfile" ]; then
+            echo "::error file=docker/Dockerfile::RUST_VERSION ($dockerfile) does not match rust-toolchain.toml ($toolchain)"
+            exit 1
+          fi
   lint-console:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Run prettier
-        run: |
-          cd webui
-          pnpm check
-          
+        working-directory: webui
+        run: pnpm check
+
   build-rust:
     runs-on: ubuntu-22.04-32
     env:
       DATABASE_URL: "postgres://arroyo:arroyo@localhost:5432/arroyo"
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - uses: actions/setup-java@v3
+        uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
-          distribution: 'temurin'
-          java-version: '11'
+          distribution: "temurin"
+          java-version: "17"
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
-          components: clippy, rustfmt
-          toolchain: 1.93
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Check Formatting
         run: cargo fmt -- --check
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         name: Setup Python
         with:
-          python-version: '3.12'            
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+          python-version: "3.12"
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]        
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install OpenAPI Generator
         run: |
           pnpm install @openapitools/openapi-generator-cli -g
@@ -78,18 +81,18 @@ jobs:
       - name: Install dependencies
         run: |
           curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
-          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev netcat
+          sudo apt-get install -y cmake clang ruby unzip postgresql libsasl2-dev libcurl4-openssl-dev netcat
           wget https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protoc-21.8-linux-x86_64.zip
           unzip protoc*.zip
           sudo mv bin/protoc /usr/local/bin
           curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Install Kafka
         run: |
-          wget --progress=dot --show-progress  https://dlcdn.apache.org/kafka/3.9.2/kafka_2.13-3.9.2.tgz
-          tar xvfz kafka*.tgz
+          wget --progress=dot --show-progress -O kafka.tgz 'https://www.apache.org/dyn/closer.lua/kafka/4.3.1/kafka_2.13-4.3.1.tgz?action=download'
+          tar xvfz kafka.tgz
           mkdir /tmp/kraft-combined-logs
-          kafka_*/bin/kafka-storage.sh format -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/kraft/server.properties
-          kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/kraft/server.properties
+          kafka_*/bin/kafka-storage.sh format --standalone -t 9v5PspiySuWU2l5NjTgRuA -c kafka_*/config/server.properties
+          kafka_*/bin/kafka-server-start.sh -daemon kafka_*/config/server.properties
       - name: Install mosquitto
         run: |
           sudo apt-get install -y mosquitto
@@ -97,40 +100,81 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
       - name: Build console
-        run: |
-          cd webui
-          pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Build
         run: cargo build --all-features
       - name: Run Clippy
-        run: cargo clippy --all-features --all-targets --workspace -- -D warnings
+        run: cargo clippy --no-deps --all-features --all-targets --workspace -- -D warnings
       - name: Test
         run: cargo nextest run -E 'kind(lib)' --all-features
-      - name: Integ postgres
+      - name: Integ
         run: |
-          mkdir /tmp/arroyo-integ
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts target/debug/arroyo cluster &
-          cargo nextest run --package integ -E 'kind(test)'
-      - name: Integ sqlite
-        run: |
-          killall arroyo
-          ARROYO__DISABLE_TELEMETRY=true ARROYO__CHECKPOINT_URL=file:///tmp/arroyo-integ ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts ARROYO__DATABASE__TYPE=sqlite target/debug/arroyo cluster &
-          timeout=10; while ! nc -z localhost 5115 && [ $timeout -gt 0 ]; do sleep 1; timeout=$((timeout - 1)); done; [ $timeout -gt 0 ]
-          cargo nextest run --package integ -E 'kind(test)'
-          
+          set -euo pipefail
+
+          cluster_pid=""
+
+          cleanup_cluster() {
+            if [ -n "${cluster_pid}" ]; then
+              kill "${cluster_pid}" 2>/dev/null || true
+              wait "${cluster_pid}" 2>/dev/null || true
+              cluster_pid=""
+            fi
+            killall arroyo 2>/dev/null || true
+          }
+
+          trap cleanup_cluster EXIT
+
+          run_integ() {
+            name="$1"
+            shift
+
+            echo "Starting integration scenario: ${name}"
+            cleanup_cluster
+            rm -rf "/tmp/arroyo-integ-${name}"
+            mkdir -p "/tmp/arroyo-integ-${name}" /tmp/artifacts
+
+            env \
+              ARROYO__DISABLE_TELEMETRY=true \
+              ARROYO__CHECKPOINT_URL="file:///tmp/arroyo-integ-${name}" \
+              ARROYO__COMPILER__ARTIFACT_URL=file:///tmp/artifacts \
+              "$@" \
+              target/debug/arroyo cluster &
+            cluster_pid=$!
+
+            timeout=20
+            while ! nc -z localhost 5115 && [ "${timeout}" -gt 0 ]; do
+              sleep 1
+              timeout=$((timeout - 1))
+            done
+
+            if [ "${timeout}" -le 0 ]; then
+              echo "Timed out waiting for integration scenario ${name} to start"
+              cleanup_cluster
+              return 1
+            fi
+
+            status=0
+            cargo nextest run --package integ -E 'kind(test)' || status=$?
+            cleanup_cluster
+            return "${status}"
+          }
+
+          run_integ postgres ARROYO__DATABASE__TYPE=postgres
+          run_integ sqlite ARROYO__DATABASE__TYPE=sqlite
+
   build-console:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
-        uses: actions/checkout@v3
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.0.6
-          run_install: |
-            - recursive: true
-              args: [--frozen-lockfile, --strict-peer-dependencies]
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Build console
-        run: |
-          cd webui
-          pnpm build
+        working-directory: webui
+        run: pnpm build

@@ -36,7 +36,7 @@ import UdfEditTab from '../udfs/UdfEditTab';
 import { FiCheckCircle, FiPlay } from 'react-icons/fi';
 import { IoRocketOutline } from 'react-icons/io5';
 import { PreviewOptions } from './CreatePipeline';
-import { Job } from '../../lib/data_fetching';
+import { Job, SqlDiagnostic } from '../../lib/data_fetching';
 
 export interface PipelineEditorTabsProps {
   queryInput: string;
@@ -49,6 +49,8 @@ export interface PipelineEditorTabsProps {
   updateQuery: (s: string) => void;
   previewOptions: PreviewOptions;
   setPreviewOptions: Dispatch<PreviewOptions>;
+  queryDiagnostics: SqlDiagnostic[];
+  selectedQueryDiagnostic?: SqlDiagnostic;
   job?: Job;
 }
 
@@ -63,6 +65,8 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
   updateQuery,
   previewOptions,
   setPreviewOptions,
+  queryDiagnostics,
+  selectedQueryDiagnostic,
   job,
 }) => {
   const { openedUdfs, isGlobal, editorTab, handleEditorTabChange } = useContext(LocalUdfsContext);
@@ -136,7 +140,12 @@ const PipelineEditorTabs: React.FC<PipelineEditorTabsProps> = ({
   const tabPanels = (
     <TabPanels flex={1}>
       <TabPanel height={'100%'} p={0} display={'flex'}>
-        <CodeEditor code={queryInput} setCode={updateQuery} />
+        <CodeEditor
+          code={queryInput}
+          setCode={updateQuery}
+          diagnostics={queryDiagnostics}
+          selectedDiagnostic={selectedQueryDiagnostic}
+        />
       </TabPanel>
       {openedUdfs.map(udf => {
         let globalBanner = <></>;

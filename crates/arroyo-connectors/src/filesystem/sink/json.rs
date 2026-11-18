@@ -22,6 +22,7 @@ use std::{fs::File, io::Write, time::Instant};
 ///
 /// Generic over `W: Write` so it can wrap both in-memory buffers (`Writer<BytesMut>`)
 /// and file handles (`File`).
+#[allow(clippy::large_enum_variant)]
 enum JsonBuffer<W: Write> {
     Uncompressed(W),
     /// The `Gzipped` variant uses an `Option` so that the encoder can be temporarily
@@ -410,6 +411,7 @@ mod tests {
     use super::*;
     use arrow::array::{RecordBatch, StringArray, TimestampNanosecondArray};
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+    use arroyo_rpc::TIMESTAMP_FIELD;
     use arroyo_rpc::formats::JsonFormat;
     use arroyo_types::{CheckpointFilePathLayout, TaskInfo};
     use flate2::read::MultiGzDecoder;
@@ -446,7 +448,7 @@ mod tests {
             file_naming: Default::default(),
             partitioning: Default::default(),
             multipart: Default::default(),
-            version: Default::default(),
+            version: None,
         };
 
         let arroyo_schema = Arc::new(arroyo_rpc::df::ArroyoSchema::new(
@@ -598,7 +600,7 @@ mod tests {
     fn local_writer_schema() -> (Arc<Schema>, ArroyoSchemaRef) {
         let schema = Arc::new(Schema::new(vec![
             Field::new(
-                "_timestamp",
+                TIMESTAMP_FIELD,
                 DataType::Timestamp(TimeUnit::Nanosecond, None),
                 false,
             ),
@@ -646,7 +648,7 @@ mod tests {
             file_naming: Default::default(),
             partitioning: Default::default(),
             multipart: Default::default(),
-            version: Default::default(),
+            version: None,
         };
 
         JsonLocalWriter::new(tmp_path, final_path, &config, format, arroyo_schema)

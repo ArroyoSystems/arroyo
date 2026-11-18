@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1.4
 
-FROM rust:1-bookworm AS builder
+# Keep in sync with rust-toolchain.toml; CI checks that they match
+ARG RUST_VERSION=1.99.1
+
+FROM rust:${RUST_VERSION}-slim-trixie AS builder
 WORKDIR /app
 ARG GIT_SHA
 ARG TARGETPLATFORM
@@ -8,26 +11,28 @@ ARG PROFILE=release
 ARG FEATURES=python
 
 RUN apt-get update && \
-    apt-get -y install curl pkg-config unzip build-essential libssl-dev openssl \
-    cmake clang wget postgresql postgresql-client supervisor sudo bash libsasl2-dev && \
+    apt-get -y install ca-certificates curl libcurl4-openssl-dev pkg-config unzip build-essential libssl-dev openssl \
+    cmake clang wget git gnupg postgresql postgresql-client supervisor sudo bash libsasl2-dev && \
     cargo install refinery_cli
 
-# Install Python (manually, as no bookworm package for 3.12)
+# Install Python (manually, as trixie only packages 3.13)
 
 
 # Install node & pnpm
+ENV PNPM_HOME=/root/.local/share/pnpm
+ENV PATH="${PNPM_HOME}/bin:${PATH}"
 RUN mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_18.x nodistro main" |  \
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" |  \
       sudo tee /etc/apt/sources.list.d/nodesource.list && \
     apt-get update && apt-get install -y nodejs && \
-    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=9.0.6 SHELL=$(which bash) bash -
+    curl -fsSL https://get.pnpm.io/install.sh | env PNPM_VERSION=12.8.1 SHELL=$(which bash) bash -
 
 COPY docker/install_deps.sh /install_deps.sh
 RUN sh /install_deps.sh
 
-COPY webui/pnpm-lock.yaml webui/pnpm-lock.yaml
-RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm fetch"
+COPY webui/pnpm-lock.yaml webui/pnpm-workspace.yaml webui/
+RUN pnpm --dir webui fetch
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
@@ -37,7 +42,7 @@ COPY webui webui
 
 # set git hash
 ENV VERGEN_GIT_SHA=$GIT_SHA
-RUN bash -c "cd webui && source ~/.bashrc && /root/.local/share/pnpm/pnpm install && /root/.local/share/pnpm/pnpm build"
+RUN pnpm --dir webui install && pnpm --dir webui build
 
 COPY docker/refinery.toml refinery.toml
 
@@ -55,7 +60,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,id=${TARGETPLATFORM}-${P
     mv target/*/arroyo /arroyo
 
 
-FROM debian:bookworm-slim as arroyo
+FROM debian:trixie-slim as arroyo
 WORKDIR /app
 
 RUN apt-get update && \
@@ -83,7 +88,7 @@ EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]
 CMD ["cluster"]
 
-FROM rust:slim-bookworm AS arroyo-full
+FROM rust:${RUST_VERSION}-slim-trixie AS arroyo-full
 WORKDIR /app
 RUN apt-get update && \
     apt-get -y install libsasl2-2 ca-certificates curl pkg-config
@@ -101,7 +106,7 @@ RUN cp -r /python/bin/* /usr/local/bin/ && \
     cp -r /python/share/* /usr/local/share/ && \
     rm -rf /python && \
     ldconfig
-  
+
 
 EXPOSE 5115
 ENTRYPOINT [ "/app/arroyo" ]

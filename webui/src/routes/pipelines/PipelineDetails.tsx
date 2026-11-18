@@ -35,6 +35,8 @@ import {
   Tabs,
   Text,
   useDisclosure,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react';
 import React, { useEffect, useRef, useState } from 'react';
 import 'reactflow/dist/style.css';
@@ -58,6 +60,7 @@ import PipelineNotFound from '../../components/PipelineNotFound';
 import { QuestionOutlineIcon, WarningIcon } from '@chakra-ui/icons';
 import { formatError } from '../../lib/util';
 import { PipelineOutputs } from './PipelineOutputs';
+import { PipelineConfigs } from './PipelineConfigs';
 import PaginatedContent from '../../components/PaginatedContent';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { vs2015 } from 'react-syntax-highlighter/dist/esm/styles/hljs';
@@ -82,7 +85,7 @@ export function PipelineDetails() {
   const { pipeline, pipelineError, updatePipeline, restartPipeline } = usePipeline(id, true);
   const { jobs, jobsError } = usePipelineJobs(id, true);
   const job = jobs?.length ? jobs[0] : undefined;
-  const { checkpoints } = useJobCheckpoints(id, job?.id);
+  const { checkpoints, checkpointsError } = useJobCheckpoints(id, job?.id);
   const { operatorErrorsPages, operatorErrorsTotalPages, setOperatorErrorsMaxPages } =
     useOperatorErrors(id, job?.id);
   const [operatorErrors, setOperatorErrors] = useState<JobLogMessage[]>([]);
@@ -111,12 +114,16 @@ export function PipelineDetails() {
 
   async function updateJobState(stop: StopType) {
     console.log(`Setting pipeline stop_mode=${stop}`);
-    updatePipeline({ stop });
+    await updatePipeline({ stop });
   }
 
   async function updateJobParallelism(parallelism: number) {
     console.log(`Setting pipeline parallelism=${parallelism}`);
     updatePipeline({ parallelism });
+  }
+
+  async function updateJobPipelineConfig(pipelineConfig: Record<string, unknown>) {
+    await updatePipeline({ pipelineConfig });
   }
 
   let operatorDetail = undefined;
@@ -168,6 +175,30 @@ export function PipelineDetails() {
             <Text>{job.state}</Text>
           </Box>
         </Box>
+        {pipeline.state_url ? (
+          <Box className="field">
+            <Box className="fieldName">State URL</Box>
+            <Box className="fieldValue">
+              <Text wordBreak="break-all">{pipeline.state_url}</Text>
+            </Box>
+          </Box>
+        ) : null}
+        {Object.keys(pipeline.tags).length > 0 ? (
+          <Box className="field">
+            <Box className="fieldName">Tags</Box>
+            <Box className="fieldValue">
+              <Wrap spacing={1}>
+                {Object.entries(pipeline.tags).map(([k, v]) => (
+                  <WrapItem key={k}>
+                    <Badge>
+                      {k}: {v}
+                    </Badge>
+                  </WrapItem>
+                ))}
+              </Wrap>
+            </Box>
+          </Box>
+        ) : null}
         {operatorDetail}
       </Stack>
     </TabPanel>
@@ -185,7 +216,20 @@ export function PipelineDetails() {
 
   const checkpointsTab = (
     <TabPanel>
-      {<Checkpoints pipeline={pipeline} job={job} checkpoints={checkpoints ?? []} />}
+      {
+        <Checkpoints
+          pipeline={pipeline}
+          job={job}
+          checkpoints={checkpoints ?? []}
+          checkpointsError={checkpointsError}
+        />
+      }
+    </TabPanel>
+  );
+
+  const configsTab = (
+    <TabPanel height="100%" overflow="hidden" padding={5}>
+      <PipelineConfigs job={job} updatePipelineConfig={updateJobPipelineConfig} />
     </TabPanel>
   );
 
@@ -235,6 +279,7 @@ export function PipelineDetails() {
         <Tab>Operators</Tab>
         <Tab>Outputs</Tab>
         <Tab>Checkpoints</Tab>
+        <Tab>Configs</Tab>
         <Tab>Query</Tab>
         <Tab>UDFs</Tab>
         <Tab>Errors {hasErrors && <Icon as={WarningIcon} color={'red.400'} ml={2} />}</Tab>
@@ -243,6 +288,7 @@ export function PipelineDetails() {
         {operatorsTab}
         {outputsTab}
         {checkpointsTab}
+        {configsTab}
         {queryTab}
         {udfsTab}
         {errorsTab}
@@ -268,23 +314,29 @@ export function PipelineDetails() {
   let actionButton = <></>;
   if (pipeline) {
     editPipelineButton = <Button onClick={onConfigModalOpen}>Edit</Button>;
-    if (job.state == 'Failed') {
+    const isStopped = job.state === 'Stopped' && pipeline.action != null;
+    if (job.state === 'Failed' || isStopped) {
+      const actionText = isStopped ? 'Start' : 'Restart';
       actionButton = (
         <Popover trigger="hover" placement="bottom-start">
           <PopoverTrigger>
             <Button
               onClick={async () => {
-                await restartPipeline(false);
+                if (isStopped) {
+                  await updateJobState(pipeline.action!);
+                } else {
+                  await restartPipeline(false);
+                }
               }}
             >
-              Restart
+              {actionText}
             </Button>
           </PopoverTrigger>
           <PopoverContent width="auto">
             <PopoverArrow />
             <PopoverBody p={4}>
               <Button size="sm" colorScheme="red" onClick={onRestartWithoutStateModalOpen}>
-                Restart Without State
+                {actionText} Without State
               </Button>
             </PopoverBody>
           </PopoverContent>
@@ -304,6 +356,10 @@ export function PipelineDetails() {
       );
     }
   }
+
+  const startingWithoutState = job.state === 'Stopped';
+  const withoutStateAction = startingWithoutState ? 'Start' : 'Restart';
+  const withoutStateActionPresentParticiple = startingWithoutState ? 'Starting' : 'Restarting';
 
   const headerArea = (
     <Flex>
@@ -338,13 +394,13 @@ export function PipelineDetails() {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Restart Without State
+              {withoutStateAction} Without State
             </AlertDialogHeader>
 
             <AlertDialogBody>
               <Text>
-                Restarting without state could lead to data loss, duplication, and incorrect
-                results. Are you sure you want to continue?
+                {withoutStateActionPresentParticiple} without state could lead to data loss,
+                duplication, and incorrect results. Are you sure you want to continue?
               </Text>
             </AlertDialogBody>
 
@@ -360,7 +416,7 @@ export function PipelineDetails() {
                 }}
                 ml={3}
               >
-                Restart Without State
+                {withoutStateAction} Without State
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

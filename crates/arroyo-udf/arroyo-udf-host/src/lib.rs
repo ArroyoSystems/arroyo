@@ -13,8 +13,8 @@ use datafusion::error::Result as DFResult;
 use datafusion::logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature};
 use dlopen2::wrapper::{Container, WrapperApi};
 use quote::{ToTokens, format_ident};
-use std::any::Any;
 use std::fmt::Debug;
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
@@ -222,6 +222,21 @@ impl Debug for SyncUdfDylib {
     }
 }
 
+impl PartialEq for SyncUdfDylib {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.signature == other.signature
+    }
+}
+
+impl Eq for SyncUdfDylib {}
+
+impl Hash for SyncUdfDylib {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.signature.hash(state);
+    }
+}
+
 impl TryFrom<&UdfDylib> for SyncUdfDylib {
     type Error = anyhow::Error;
 
@@ -361,10 +376,6 @@ impl SyncUdfDylib {
 }
 
 impl ScalarUDFImpl for SyncUdfDylib {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
     fn name(&self) -> &str {
         &self.name
     }

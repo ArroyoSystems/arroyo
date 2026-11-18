@@ -67,13 +67,7 @@ fn proto_value_to_json(field: &FieldDescriptor, value: &Value) -> JsonValue {
         }
         Value::Map(m) => {
             let value_field = match field.kind() {
-                Kind::Message(m) => {
-                    if m.is_map_entry() {
-                        m.map_entry_value_field()
-                    } else {
-                        return JsonValue::Null;
-                    }
-                }
+                Kind::Message(m) if m.is_map_entry() => m.map_entry_value_field(),
                 _ => {
                     return JsonValue::Null;
                 }

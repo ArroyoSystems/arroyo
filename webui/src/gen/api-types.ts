@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/v1/configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Controller configuration endpoint */
+        get: operations["get_configs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/connection_profiles": {
         parameters: {
             query?: never;
@@ -470,7 +487,8 @@ export interface components {
         };
         Checkpoint: {
             backend: string;
-            /** Format: int32 */
+            checkpoint_type: components["schemas"]["CheckpointType"];
+            /** Format: int64 */
             epoch: number;
             events: components["schemas"]["CheckpointEventSpan"][];
             /** Format: int64 */
@@ -489,6 +507,8 @@ export interface components {
             /** Format: int64 */
             start_time: number;
         };
+        /** @enum {string} */
+        CheckpointType: "scheduled" | "stopping";
         ConnectionAutocompleteResp: {
             values: {
                 [key: string]: string[];
@@ -683,15 +703,30 @@ export interface components {
             data: components["schemas"]["GlobalUdf"][];
         };
         Job: {
+            /** @description The current run is stopped after a completed checkpoint-stop, including any required
+             *     external commits. False also covers completion the controller could not confirm. */
+            checkpoint_stop_complete?: boolean;
             /** Format: int64 */
             created_at: number;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars: unknown;
             failure_reason?: components["schemas"]["FailureReason"] | null;
             /** Format: int64 */
             finish_time?: number | null;
             id: string;
+            /** @description Per-job pipeline configuration overlay (see `PipelinePost`).
+             *     An empty object means "no overrides, use the global pipeline
+             *     config unchanged". */
+            pipeline_config: unknown;
+            /** @description The `pub_id` of the pipeline this job belongs to. */
+            pipeline_id: string;
             /** Format: int64 */
             run_id: number;
             running_desired: boolean;
+            /** @description Per-job scheduler configuration overlay (see `PipelinePost`).
+             *     An empty object means "no overrides, use the controller's
+             *     global scheduler config unchanged". */
+            scheduler_config: unknown;
             /** Format: int64 */
             start_time?: number | null;
             state: string;
@@ -805,15 +840,19 @@ export interface components {
             action_in_progress: boolean;
             action_text: string;
             /** Format: int64 */
-            checkpoint_interval_micros: number;
-            /** Format: int64 */
             created_at: number;
             graph: components["schemas"]["PipelineGraph"];
             id: string;
             name: string;
             preview: boolean;
             query: string;
+            /** @description Optional URL pointing to the state the pipeline was started from. */
+            state_url?: string | null;
             stop: components["schemas"]["StopType"];
+            /** @description User-defined key/value tags associated with the pipeline. */
+            tags: {
+                [key: string]: string;
+            };
             udfs: components["schemas"]["Udf"][];
         };
         PipelineCollection: {
@@ -842,19 +881,45 @@ export interface components {
             parallelism: number;
         };
         PipelinePatch: {
-            /** Format: int64 */
-            checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             /** Format: int64 */
             parallelism?: number | null;
+            /** @description Per-job pipeline configuration overlay (see `PipelinePost`).
+             *     Supplying this field replaces the job's existing overlay. */
+            pipeline_config?: unknown;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             stop?: components["schemas"]["StopType"] | null;
         };
         PipelinePost: {
-            /** Format: int64 */
-            checkpoint_interval_micros?: number | null;
+            /** @description Per-job environment variables forwarded to workers. */
+            env_vars?: {
+                [key: string]: string;
+            } | null;
             name: string;
             /** Format: int64 */
             parallelism: number;
+            /** @description Per-job pipeline configuration overlay. The shape mirrors the
+             *     controller's global `pipeline` config block and is merged on top
+             *     of it when the job runs. An omitted field, `null`, or an empty
+             *     object all mean "use the global pipeline config unchanged". */
+            pipeline_config?: unknown;
             query: string;
+            /** @description Per-job scheduler configuration overlay. The shape mirrors the
+             *     controller's global scheduler config (e.g. the
+             *     `kubernetes-scheduler.*` block) and is merged on top of it at
+             *     scheduling time. An omitted field, `null`, or an empty object
+             *     all mean "use the controller's global scheduler config
+             *     unchanged". */
+            scheduler_config?: unknown;
             state_url?: string | null;
             tags?: {
                 [key: string]: string;
@@ -879,7 +944,7 @@ export interface components {
             message_name?: string | null;
         };
         QueryValidationResult: {
-            errors: string[];
+            errors: components["schemas"]["SqlDiagnostic"][];
             graph?: components["schemas"]["PipelineGraph"] | null;
         };
         RawBytesFormat: Record<string, never>;
@@ -908,6 +973,20 @@ export interface components {
             required?: boolean;
             readonly sql_name?: string | null;
         });
+        SqlDiagnostic: {
+            message: string;
+            span?: components["schemas"]["SqlSpan"] | null;
+        };
+        SqlLocation: {
+            /** Format: int64 */
+            column: number;
+            /** Format: int64 */
+            line: number;
+        };
+        SqlSpan: {
+            end: components["schemas"]["SqlLocation"];
+            start: components["schemas"]["SqlLocation"];
+        };
         /** @enum {string} */
         StopType: "none" | "checkpoint" | "graceful" | "immediate" | "force";
         StructField: {
@@ -970,6 +1049,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_configs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Controller configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     get_connection_profiles: {
         parameters: {
             query?: never;

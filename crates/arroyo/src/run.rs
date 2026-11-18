@@ -134,7 +134,7 @@ async fn get_pipelines(client: &Client) -> anyhow::Result<Vec<Pipeline>> {
             starting_after = next;
         }
 
-        result.extend(pipelines.data.into_iter());
+        result.extend(pipelines.data);
 
         if !pipelines.has_more {
             break;
@@ -167,7 +167,7 @@ async fn run_pipeline(
     if !errors.errors.is_empty() {
         eprintln!("There were some issues with the provided query");
         for error in errors.errors {
-            eprintln!("  * {error}");
+            eprintln!("  * {}", error.message);
         }
         exit(1);
     }
@@ -400,6 +400,7 @@ pub(crate) fn add_client_auth_headers(mut client_builder: ClientBuilder) -> Clie
 pub async fn run(args: RunArgs) {
     let _guard = arroyo_server_common::init_logging_with_filter(
         "pipeline",
+        &[],
         if env::var("RUST_LOG").is_err() {
             unsafe { set_var("RUST_LOG", "WARN") };
             EnvFilter::builder()
@@ -446,11 +447,14 @@ pub async fn run(args: RunArgs) {
         }
         c.controller.rpc_port = 0;
 
-        if c.controller.scheduler != Scheduler::Embedded {
+        if !matches!(
+            c.controller.scheduler,
+            Scheduler::Embedded | Scheduler::Manual
+        ) {
             c.controller.scheduler = Scheduler::Process;
         }
 
-        c.pipeline.default_sink = DefaultSink::Stdout;
+        c.pipeline.compiler.default_sink = DefaultSink::Stdout;
     });
 
     let db = db_source().await;

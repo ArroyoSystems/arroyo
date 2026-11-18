@@ -1,5 +1,6 @@
 pub mod metadata;
 pub mod schema;
+mod storage;
 pub mod transforms;
 
 use crate::filesystem::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
@@ -15,8 +16,8 @@ use arroyo_types::TaskInfo;
 use iceberg::spec::ManifestFile;
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, Transaction};
-use iceberg::{Catalog, ErrorKind, TableCreation, TableIdent};
-use iceberg_catalog_rest::{RestCatalog, RestCatalogConfig};
+use iceberg::{Catalog, CatalogBuilder, ErrorKind, TableCreation, TableIdent};
+use iceberg_catalog_rest::{RestCatalog, RestCatalogBuilder};
 use itertools::Itertools;
 use regex::Regex;
 use reqwest::Client;
@@ -27,14 +28,16 @@ use std::future::Future;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
+use storage::ArroyoStorageFactory;
 use tracing::{debug, info};
 use uuid::Uuid;
 
-const CONFIG_MAPPINGS: [(&str, &str); 4] = [
+const CONFIG_MAPPINGS: [(&str, &str); 5] = [
     ("s3.region", "aws_region"),
     ("s3.endpoint", "aws_endpoint"),
     ("s3.access-key-id", "aws_access_key_id"),
     ("s3.secret-access-key", "aws_secret_access_key"),
+    ("s3.session-token", "aws_session_token"),
 ];
 
 const ARROYO_COMMIT_ID: &str = "arroyo.commit-id";
@@ -43,7 +46,8 @@ const ICEBERG_COMMIT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 #[derive(Debug)]
 pub struct IcebergTable {
     pub task_info: Option<Arc<TaskInfo>>,
-    pub catalog: RestCatalog,
+    catalog: Option<RestCatalog>,
+    catalog_config: IcebergCatalog,
     pub storage_options: HashMap<String, String>,
     pub table_ident: TableIdent,
     pub location_path: Option<String>,
@@ -88,44 +92,47 @@ fn extract_catalog_status(display: &str) -> Option<u16> {
 }
 
 fn extract_catalog_message(display: &str) -> Option<String> {
-    let re = Regex::new(r#""message"\s*:\s*"([^"]+)""#).unwrap();
+    // Capture the full JSON string value, such as `NoSuchBucket`
+    let re = Regex::new(r#""message"\s*:\s*"((?:[^"\\]|\\.)*)""#).unwrap();
     re.captures(display).map(|c| c[1].to_string())
 }
 
 fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
     debug!(error = ?error, "iceberg catalog error");
 
-    let (domain, msg) = match error.kind() {
-        ErrorKind::PreconditionFailed => (ErrorDomain::Internal, error.to_string()),
+    let (domain, retry, msg) = match error.kind() {
+        ErrorKind::PreconditionFailed => (
+            ErrorDomain::Internal,
+            RetryHint::WithBackoff,
+            error.to_string(),
+        ),
         ErrorKind::DataInvalid | ErrorKind::NamespaceNotFound | ErrorKind::TableNotFound => {
-            (ErrorDomain::User, error.to_string())
+            (ErrorDomain::User, RetryHint::NoRetry, error.to_string())
         }
         ErrorKind::Unexpected => {
             // For Unexpected errors from iceberg-catalog-rest, the HTTP status and response
             // body are embedded in the error's Display output as context fields. Extract the
             // status to determine the domain, and try to pull out a clean error message.
             let display = error.to_string();
-            let status = extract_catalog_status(&display);
+            let status = extract_catalog_status(&display).or_else(|| {
+                error
+                    .source()
+                    .and_then(|source| source.downcast_ref::<reqwest::Error>())
+                    .and_then(|source| source.status())
+                    .map(|status| status.as_u16())
+            });
 
-            let domain = match status {
-                Some(400..=499) => ErrorDomain::User,
-                Some(_) => ErrorDomain::External,
-                // No status found — could be a transport error or something else
-                None => {
-                    if let Some(source) = error.source() {
-                        if let Some(err) = source.downcast_ref::<reqwest::Error>() {
-                            if err.status().map(|c| c.is_client_error()).unwrap_or(false) {
-                                ErrorDomain::User
-                            } else {
-                                ErrorDomain::External
-                            }
-                        } else {
-                            ErrorDomain::External
-                        }
-                    } else {
-                        ErrorDomain::External
-                    }
-                }
+            let (domain, retry) = match status {
+                // We have seen spurious 409s from upstream intermediaries, so allow a few
+                // retries before failing with a user error.
+                Some(409) => (
+                    ErrorDomain::User,
+                    RetryHint::WithBackoffLimited(super::MAX_CONFLICT_RETRIES),
+                ),
+                // Rate limiting is a transient failure in the external service, not a user error.
+                Some(429) => (ErrorDomain::External, RetryHint::WithBackoff),
+                Some(400..=499) => (ErrorDomain::User, RetryHint::NoRetry),
+                _ => (ErrorDomain::External, RetryHint::WithBackoff),
             };
 
             let msg = if let Some(catalog_msg) = extract_catalog_message(&display) {
@@ -134,18 +141,18 @@ fn map_iceberg_error(error: iceberg::Error) -> DataflowError {
                 format!("Iceberg catalog error: {error}")
             };
 
-            (domain, msg)
+            (domain, retry, msg)
         }
-        _ => (ErrorDomain::External, error.to_string()),
+        _ => (
+            ErrorDomain::External,
+            RetryHint::WithBackoff,
+            error.to_string(),
+        ),
     };
 
     DataflowError::ConnectorError {
         domain,
-        retry: if matches!(domain, ErrorDomain::User) {
-            RetryHint::NoRetry
-        } else {
-            RetryHint::WithBackoff
-        },
+        retry,
         error: msg,
         source: error.source().map(|e| anyhow!("{}", e)),
     }
@@ -172,49 +179,81 @@ async fn run_with_iceberg_timeout<T>(
 
 impl IcebergTable {
     pub fn new(catalog: &IcebergCatalog, sink: &IcebergSink) -> anyhow::Result<Self> {
-        match catalog {
-            IcebergCatalog::Rest(rest) => {
-                let mut props = HashMap::new();
-                if let Some(token) = &rest.token {
-                    props.insert("token".to_string(), token.sub_env_vars()?);
-                }
+        let table_ident = TableIdent::from_strs(
+            sink.namespace
+                .as_str()
+                .split(".")
+                .chain(once(sink.table_name.as_str())),
+        )?;
 
-                for (k, v) in &sink.storage_options {
-                    if let Some((mapped, _)) = CONFIG_MAPPINGS.iter().find(|(_, n)| n == k) {
-                        props.insert(mapped.to_string(), v.to_string());
-                    }
-                }
+        Ok(Self {
+            task_info: None,
+            catalog: None,
+            catalog_config: catalog.clone(),
+            location_path: sink.location_path.clone(),
+            storage_options: sink.storage_options.clone(),
+            table_ident,
+            table: None,
+            manifest_files: vec![],
+            partitioning: sink.partitioning.clone(),
+        })
+    }
 
-                let config = RestCatalogConfig::builder()
-                    .uri(rest.url.clone())
-                    .warehouse_opt(rest.warehouse.clone())
-                    .props(props)
-                    .client(Some(
-                        Client::builder().timeout(ICEBERG_COMMIT_TIMEOUT).build()?,
-                    ))
-                    .build();
-
-                let catalog = RestCatalog::new(config);
-
-                let table_ident = TableIdent::from_strs(
-                    sink.namespace
-                        .as_str()
-                        .split(".")
-                        .chain(once(sink.table_name.as_str())),
-                )?;
-
-                Ok(Self {
-                    task_info: None,
-                    catalog,
-                    location_path: sink.location_path.clone(),
-                    storage_options: sink.storage_options.clone(),
-                    table_ident,
-                    table: None,
-                    manifest_files: vec![],
-                    partitioning: sink.partitioning.clone(),
-                })
+    pub(crate) async fn initialize_catalog(&mut self) -> DataflowResult<()> {
+        if self.catalog.is_none() {
+            let IcebergCatalog::Rest(rest) = &self.catalog_config;
+            let mut props = HashMap::from([("uri".to_string(), rest.url.clone())]);
+            if let Some(warehouse) = &rest.warehouse {
+                props.insert("warehouse".to_string(), warehouse.clone());
             }
+            if let Some(token) = &rest.token {
+                props.insert(
+                    "token".to_string(),
+                    token.sub_env_vars().map_err(|e| {
+                        connector_err!(
+                            User,
+                            NoRetry,
+                            source: e,
+                            "failed to resolve Iceberg catalog token"
+                        )
+                    })?,
+                );
+            }
+
+            for (k, v) in &self.storage_options {
+                if let Some((mapped, _)) = CONFIG_MAPPINGS.iter().find(|(_, n)| n == k) {
+                    props.insert(mapped.to_string(), v.to_string());
+                }
+            }
+
+            let client = Client::builder()
+                .timeout(ICEBERG_COMMIT_TIMEOUT)
+                .build()
+                .map_err(|e| {
+                    connector_err!(
+                        Internal,
+                        NoRetry,
+                        source: e.into(),
+                        "failed to construct Iceberg catalog client"
+                    )
+                })?;
+
+            self.catalog = Some(
+                RestCatalogBuilder::default()
+                    .with_client(client)
+                    .with_storage_factory(Arc::new(ArroyoStorageFactory))
+                    .load("arroyo", props)
+                    .await
+                    .map_err(map_iceberg_error)?,
+            );
         }
+        Ok(())
+    }
+
+    pub(crate) fn catalog(&self) -> &RestCatalog {
+        self.catalog
+            .as_ref()
+            .expect("Iceberg catalog must be initialized")
     }
 
     pub async fn load_or_create(
@@ -226,15 +265,16 @@ impl IcebergTable {
             return Ok(table);
         }
 
+        self.initialize_catalog().await?;
         self.task_info = Some(task_info);
 
         if !self
-            .catalog
+            .catalog()
             .namespace_exists(self.table_ident.namespace())
             .await
             .map_err(map_iceberg_error)?
             && let Err(e) = self
-                .catalog
+                .catalog()
                 .create_namespace(self.table_ident.namespace(), HashMap::new())
                 .await
             && e.kind() != iceberg::ErrorKind::NamespaceAlreadyExists
@@ -243,7 +283,7 @@ impl IcebergTable {
         }
 
         let table = if !self
-            .catalog
+            .catalog()
             .table_exists(&self.table_ident)
             .await
             .map_err(map_iceberg_error)?
@@ -258,7 +298,7 @@ impl IcebergTable {
                 .map_err(map_iceberg_error)?;
 
             match self
-                .catalog
+                .catalog()
                 .create_table(
                     self.table_ident.namespace(),
                     TableCreation::builder()
@@ -272,7 +312,7 @@ impl IcebergTable {
             {
                 Ok(table) => table,
                 Err(e) if e.kind() == iceberg::ErrorKind::TableAlreadyExists => self
-                    .catalog
+                    .catalog()
                     .load_table(&self.table_ident)
                     .await
                     .map_err(map_iceberg_error)?,
@@ -281,7 +321,7 @@ impl IcebergTable {
                 }
             }
         } else {
-            self.catalog
+            self.catalog()
                 .load_table(&self.table_ident)
                 .await
                 .map_err(map_iceberg_error)?
@@ -299,7 +339,7 @@ impl IcebergTable {
     ) -> Result<StorageProvider, DataflowError> {
         let storage_options = self.storage_options.clone();
         let table = self.load_or_create(task_info, schema).await?;
-        let (_, mut config) = table.file_io().clone().into_builder().into_parts();
+        let mut config = table.file_io().config().props().clone();
 
         let mut our_config = HashMap::new();
         for (from, to) in CONFIG_MAPPINGS {
@@ -337,7 +377,7 @@ impl IcebergTable {
             run_with_iceberg_timeout(
                 ICEBERG_COMMIT_TIMEOUT,
                 operation,
-                self.catalog.load_table(&self.table_ident),
+                self.catalog().load_table(&self.table_ident),
             )
             .await?,
         );
@@ -397,15 +437,6 @@ impl IcebergTable {
             })
             .try_collect()?;
 
-        // Workaround for iceberg-rust 0.6.0 bug: SnapshotProducer drains added_data_files
-        // before computing the summary, producing all-zero added-* stats. We inject the
-        // correct values via set_snapshot_properties so they appear in the snapshot summary.
-        // Fixed upstream in 0.8.0 (https://github.com/apache/iceberg-rust/pull/1767);
-        // this workaround can be removed when iceberg-rust is upgraded.
-        let added_data_files = files.len().to_string();
-        let added_records: u64 = files.iter().map(|f| f.record_count()).sum();
-        let added_files_size: u64 = files.iter().map(|f| f.file_size_in_bytes()).sum();
-
         // commit the transaction in the rest catalog
         debug!(
             message = "starting iceberg commit",
@@ -416,14 +447,9 @@ impl IcebergTable {
         let tx = tx
             .fast_append()
             .set_snapshot_properties(
-                [
-                    (ARROYO_COMMIT_ID.to_string(), tx_id),
-                    ("added-data-files".to_string(), added_data_files),
-                    ("added-records".to_string(), added_records.to_string()),
-                    ("added-files-size".to_string(), added_files_size.to_string()),
-                ]
-                .into_iter()
-                .collect(),
+                [(ARROYO_COMMIT_ID.to_string(), tx_id)]
+                    .into_iter()
+                    .collect(),
             )
             .add_data_files(files)
             .with_check_duplicate(false)
@@ -433,7 +459,7 @@ impl IcebergTable {
         run_with_iceberg_timeout(
             ICEBERG_COMMIT_TIMEOUT,
             "committing to the Iceberg catalog",
-            tx.commit(&self.catalog),
+            tx.commit(self.catalog()),
         )
         .await?;
         debug!("finished iceberg catalog commit");
@@ -520,6 +546,28 @@ mod tests {
         match map_iceberg_error(error) {
             DataflowError::ConnectorError { domain, .. } => {
                 assert_eq!(domain, ErrorDomain::External);
+            }
+            other => panic!("expected ConnectorError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_map_iceberg_error_object_store_429() {
+        let error = iceberg::Error::new(ErrorKind::Unexpected, "Failure in doing io operation")
+            .with_source(anyhow::Error::msg(
+                r#"Unexpected (persistent) at read, context: { uri: https://account.r2.cloudflarestorage.com/bucket/metadata/snapshot.avro, response: Parts { status: 429, version: HTTP/1.1, headers: {"retry-after": "5"} }, service: s3, path: metadata/snapshot.avro, range: 0- } => S3Error { code: "ServiceUnavailable", message: "Reduce your rate of simultaneous reads on the same object." }"#
+            ));
+
+        match map_iceberg_error(error) {
+            DataflowError::ConnectorError {
+                domain,
+                retry,
+                error,
+                ..
+            } => {
+                assert_eq!(domain, ErrorDomain::External);
+                assert_eq!(retry, RetryHint::WithBackoff);
+                assert!(error.contains("status: 429"), "{error}");
             }
             other => panic!("expected ConnectorError, got: {other:?}"),
         }

@@ -31,6 +31,8 @@ use std::{
 };
 
 const DEFAULT_ROW_GROUP_BYTES: u64 = 1024 * 1024 * 128; // 128MB
+// Buffers grow on demand; this caps the up-front allocation from user-configured sizes
+const MAX_INITIAL_BUFFER_BYTES: usize = 1024 * 1024 * 8; // 8MB
 
 fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, usize) {
     let mut parquet_writer_options = WriterProperties::builder();
@@ -43,6 +45,11 @@ fn writer_properties_from_format(format: &ParquetFormat) -> (WriterProperties, u
         ParquetCompression::Lz4 => parquet::basic::Compression::LZ4,
         ParquetCompression::Lz4Raw => parquet::basic::Compression::LZ4_RAW,
     });
+
+    // parquet-rs truncates column-chunk statistics to 64 bytes by default (as of 58.x). We rely
+    // on exact statistics for Iceberg metadata: partition values are derived from column lower
+    // bounds, and inexact bounds are dropped. So we disable truncation to keep stats exact.
+    parquet_writer_options = parquet_writer_options.set_statistics_truncate_length(None);
 
     (
         parquet_writer_options.build(),
@@ -64,7 +71,9 @@ pub(crate) struct SharedBuffer {
 impl SharedBuffer {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buffer: Arc::new(Mutex::new(BytesMut::with_capacity(capacity).writer())),
+            buffer: Arc::new(Mutex::new(
+                BytesMut::with_capacity(capacity.min(MAX_INITIAL_BUFFER_BYTES)).writer(),
+            )),
         }
     }
 
@@ -163,10 +172,7 @@ impl BatchBufferingWriter for ParquetBatchBufferingWriter {
 
         let prev_size = writer.in_progress_size();
         writer.write(&data).unwrap();
-        let uncompressed_bytes = writer
-            .in_progress_size()
-            .checked_sub(prev_size)
-            .unwrap_or_default();
+        let uncompressed_bytes = writer.in_progress_size().saturating_sub(prev_size);
 
         let row_groups = if writer.in_progress_size() > self.row_group_size_bytes {
             writer.flush().unwrap();
@@ -375,4 +381,78 @@ pub(crate) fn representitive_timestamp(timestamp_column: &Arc<dyn Array>) -> Res
         .ok_or_else(|| anyhow::anyhow!("timestamp column is not nanosecond"))?
         .value(0);
     Ok(from_nanos(time as u128))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filesystem::config::{IcebergPartitioning, IcebergPartitioningField, Transform};
+    use crate::filesystem::sink::iceberg::metadata::build_datafile_from_meta;
+    use arrow::array::StringArray;
+    use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
+    use iceberg::spec::{
+        Datum, Literal, NestedField, PrimitiveType, Schema as IcebergSchema, Struct, Type,
+    };
+
+    #[test]
+    fn long_string_statistics_are_exact() {
+        // longer than parquet-rs's default statistics truncation length of 64 bytes
+        let value = "x".repeat(100);
+
+        let arrow_schema = Arc::new(ArrowSchema::new(vec![Field::new(
+            "s",
+            DataType::Utf8,
+            false,
+        )]));
+        let ice_schema = IcebergSchema::builder()
+            .with_fields(vec![
+                NestedField::required(1, "s", Type::Primitive(PrimitiveType::String)).into(),
+            ])
+            .build()
+            .unwrap();
+
+        let (props, _) = writer_properties_from_format(&ParquetFormat::default());
+        let mut writer =
+            ArrowWriter::try_new(Vec::new(), arrow_schema.clone(), Some(props)).unwrap();
+        let batch = RecordBatch::try_new(
+            arrow_schema,
+            vec![Arc::new(StringArray::from(vec![
+                value.clone(),
+                value.clone(),
+            ]))],
+        )
+        .unwrap();
+        writer.write(&batch).unwrap();
+        let metadata = IcebergFileMetadata::from_parquet(writer.close().unwrap(), &ice_schema);
+
+        let df = build_datafile_from_meta(
+            &ice_schema,
+            &metadata,
+            &IcebergPartitioning {
+                fields: vec![IcebergPartitioningField {
+                    name: None,
+                    field: "s".to_string(),
+                    transform_fn: Transform::Identity,
+                }],
+                ..Default::default()
+            },
+            "s3://bucket/data/file.parquet".to_string(),
+            1234,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(
+            df.lower_bounds().get(&1),
+            Some(&Datum::string(value.clone()))
+        );
+        assert_eq!(
+            df.upper_bounds().get(&1),
+            Some(&Datum::string(value.clone()))
+        );
+        assert_eq!(
+            df.partition(),
+            &Struct::from_iter([Some(Literal::string(value))])
+        );
+    }
 }

@@ -6,20 +6,19 @@ use crate::schemas::add_timestamp_field;
 use crate::tables::ConnectorTable;
 use crate::{ArroyoSchemaProvider, fields_with_qualifiers, schema_from_df_fields_with_metadata};
 use arroyo_datastream::WindowType;
-use arroyo_rpc::UPDATING_META_FIELD;
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{
     Transformed, TreeNode, TreeNodeRecursion, TreeNodeRewriter, TreeNodeVisitor,
 };
 use datafusion::common::{
-    Column, DataFusionError, JoinConstraint, JoinType, Result, ScalarValue, Spans, TableReference,
-    not_impl_err, plan_err,
+    Column, DataFusionError, JoinConstraint, JoinType, Result, Spans, TableReference, not_impl_err,
+    plan_err,
 };
 use datafusion::logical_expr;
 use datafusion::logical_expr::expr::Alias;
 use datafusion::logical_expr::{
     BinaryExpr, Case, Expr, Extension, Join, LogicalPlan, Projection, build_join_schema,
 };
-use datafusion::prelude::coalesce;
 use datafusion::sql::unparser::expr_to_sql;
 use std::sync::Arc;
 
@@ -123,7 +122,7 @@ impl JoinRewriter<'_> {
         let mut schema_with_timestamp = fields_with_qualifiers(&schema);
         let timestamp_fields = schema_with_timestamp
             .iter()
-            .filter(|field| field.name() == "_timestamp")
+            .filter(|field| field.name() == TIMESTAMP_FIELD)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -131,7 +130,7 @@ impl JoinRewriter<'_> {
             return not_impl_err!("join must have two timestamp fields");
         }
 
-        schema_with_timestamp.retain(|field| field.name() != "_timestamp");
+        schema_with_timestamp.retain(|field| field.name() != TIMESTAMP_FIELD);
         let mut projection_expr = schema_with_timestamp
             .iter()
             .map(|field| {
@@ -163,25 +162,26 @@ impl JoinRewriter<'_> {
             spans: Spans::default(),
         });
         let max_timestamp = Expr::Case(Case {
-            expr: Some(Box::new(Expr::BinaryExpr(BinaryExpr {
-                left: Box::new(left_column.clone()),
-                op: logical_expr::Operator::GtEq,
-                right: Box::new(right_column.clone()),
-            }))),
+            expr: None,
             when_then_expr: vec![
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(true)), None)),
+                    Box::new(Expr::IsNull(Box::new(left_column.clone()))),
+                    Box::new(right_column.clone()),
+                ),
+                (
+                    Box::new(Expr::IsNull(Box::new(right_column.clone()))),
                     Box::new(left_column.clone()),
                 ),
                 (
-                    Box::new(Expr::Literal(ScalarValue::Boolean(Some(false)), None)),
-                    Box::new(right_column.clone()),
+                    Box::new(Expr::BinaryExpr(BinaryExpr {
+                        left: Box::new(left_column.clone()),
+                        op: logical_expr::Operator::GtEq,
+                        right: Box::new(right_column.clone()),
+                    })),
+                    Box::new(left_column),
                 ),
             ],
-            else_expr: Some(Box::new(coalesce(vec![
-                left_column.clone(),
-                right_column.clone(),
-            ]))),
+            else_expr: Some(Box::new(right_column)),
         });
 
         projection_expr.push(Expr::Alias(Alias {
@@ -332,7 +332,8 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             join_type,
             join_constraint: JoinConstraint::On,
             schema: _,
-            null_equals_null: false,
+            null_equality: datafusion::common::NullEquality::NullEqualsNothing,
+            null_aware: false,
         } = join
         else {
             return not_impl_err!("can't handle join constraint other than ON");
@@ -359,7 +360,8 @@ impl TreeNodeRewriter for JoinRewriter<'_> {
             on,
             join_type,
             join_constraint: JoinConstraint::On,
-            null_equals_null: false,
+            null_equality: datafusion::common::NullEquality::NullEqualsNothing,
+            null_aware: false,
             filter,
         });
 

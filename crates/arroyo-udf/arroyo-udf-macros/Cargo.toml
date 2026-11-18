@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-udf-macros"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Arroyo Systems <support@arroyo.systems>"]
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ proc-macro = true
 
 [dependencies]
 arrow-schema = { workspace = true }
-arroyo-udf-common = { path = "../arroyo-udf-common" }
+arroyo-udf-common = { path = "../arroyo-udf-common", version = "0.3.0" }
 syn = { workspace = true }
 quote = "1.0"
 proc-macro2 = "1.0"

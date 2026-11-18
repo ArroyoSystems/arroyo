@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use arrow::datatypes::IntervalMonthDayNanoType;
 use arroyo_datastream::logical::{LogicalEdge, LogicalGraph, LogicalNode};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use arroyo_rpc::df::{ArroyoSchema, ArroyoSchemaRef};
 
 use async_trait::async_trait;
@@ -12,8 +13,8 @@ use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor
 use datafusion::common::{
     DFSchema, DFSchemaRef, DataFusionError, Result, ScalarValue, Spans, TableReference, plan_err,
 };
+use datafusion::execution::TaskContext;
 use datafusion::execution::context::SessionState;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::functions::datetime::date_bin;
 use datafusion::logical_expr::{Expr, Extension, LogicalPlan, UserDefinedLogicalNode};
 use datafusion::physical_expr::PhysicalExpr;
@@ -24,7 +25,6 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use tokio::runtime::Builder;
 use tokio::sync::oneshot;
 
-use crate::ArroyoSchemaProvider;
 use crate::extension::debezium::{
     DEBEZIUM_UNROLLING_EXTENSION_NAME, DebeziumUnrollingExtension, TO_DEBEZIUM_EXTENSION_NAME,
 };
@@ -35,6 +35,7 @@ use crate::physical::{
     ToDebeziumExec,
 };
 use crate::schemas::add_timestamp_field_arrow;
+use crate::{ArroyoSchemaProvider, SqlConfig};
 use datafusion_proto::physical_plan::DefaultPhysicalExtensionCodec;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_expr;
 use datafusion_proto::{
@@ -54,13 +55,17 @@ pub(crate) struct PlanToGraphVisitor<'a> {
 }
 
 impl<'a> PlanToGraphVisitor<'a> {
-    pub fn new(schema_provider: &'a ArroyoSchemaProvider, session_state: &'a SessionState) -> Self {
+    pub fn new(
+        schema_provider: &'a ArroyoSchemaProvider,
+        session_state: &'a SessionState,
+        sql_config: &'a SqlConfig,
+    ) -> Self {
         Self {
             graph: Default::default(),
             output_schemas: Default::default(),
             named_nodes: Default::default(),
             traversal: vec![],
-            planner: Planner::new(schema_provider, session_state),
+            planner: Planner::new(schema_provider, session_state, sql_config),
         }
     }
 }
@@ -69,12 +74,14 @@ pub(crate) struct Planner<'a> {
     schema_provider: &'a ArroyoSchemaProvider,
     planner: DefaultPhysicalPlanner,
     session_state: &'a SessionState,
+    pub(crate) sql_config: &'a SqlConfig,
 }
 
 impl<'a> Planner<'a> {
     pub(crate) fn new(
         schema_provider: &'a ArroyoSchemaProvider,
         session_state: &'a SessionState,
+        sql_config: &'a SqlConfig,
     ) -> Self {
         let planner = DefaultPhysicalPlanner::with_extension_planners(vec![Arc::new(
             ArroyoExtensionPlanner {},
@@ -83,6 +90,7 @@ impl<'a> Planner<'a> {
             schema_provider,
             planner,
             session_state,
+            sql_config,
         }
     }
 
@@ -161,11 +169,20 @@ impl<'a> Planner<'a> {
             .ok_or_else(|| DataFusionError::Plan("missing input".to_string()))?;
 
         // need to convert to ExecutionPlan to get the partial schema.
-        let partial_aggregation_exec_plan = partial_aggregation_plan.try_into_physical_plan(
-            self.schema_provider,
-            &RuntimeEnvBuilder::new().build().unwrap(),
-            &codec,
-        )?;
+        // Decoding resolves functions through TaskContext. Retain the
+        // same custom UDFs that were used to build the logical plan.
+        let task_context = TaskContext::new(
+            None,
+            self.session_state.session_id().to_string(),
+            self.session_state.config().clone(),
+            self.schema_provider.functions.clone(),
+            HashMap::new(),
+            self.schema_provider.aggregate_functions.clone(),
+            self.schema_provider.window_functions.clone(),
+            self.session_state.runtime_env().clone(),
+        );
+        let partial_aggregation_exec_plan =
+            partial_aggregation_plan.try_into_physical_plan(&task_context, &codec)?;
 
         let partial_schema = partial_aggregation_exec_plan.schema();
         let final_input_table_provider =
@@ -214,7 +231,7 @@ impl<'a> Planner<'a> {
             ),
             Expr::Column(datafusion::common::Column {
                 relation: None,
-                name: "_timestamp".into(),
+                name: TIMESTAMP_FIELD.into(),
                 spans: Spans::new(),
             }),
         ]);
@@ -244,7 +261,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
         physical_inputs: &[Arc<dyn ExecutionPlan>],
         _session_state: &SessionState,
     ) -> Result<Option<Arc<dyn ExecutionPlan>>> {
-        let schema = node.schema().as_ref().into();
+        let schema = node.schema().inner().clone();
         if let Ok::<&dyn ArroyoExtension, _>(arroyo_extension) = node.try_into()
             && arroyo_extension.transparent()
         {
@@ -275,7 +292,7 @@ impl ExtensionPlanner for ArroyoExtensionPlanner {
             };
         Ok(Some(Arc::new(ArroyoMemExec::new(
             name.unwrap_or("memory".to_string()),
-            Arc::new(schema),
+            schema,
         ))))
     }
 }
@@ -323,14 +340,13 @@ impl PlanToGraphVisitor<'_> {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        let NodeWithIncomingEdges { node, edges } = extension
-            .plan_node(&self.planner, self.graph.node_count(), input_schemas)
-            .map_err(|e| e.context(format!("planning operator {extension:?}")))?;
+        let NodeWithIncomingEdges { node, edges } =
+            extension.plan_node(&self.planner, self.graph.node_count(), input_schemas)?;
 
         let node_index = self.graph.add_node(node);
         self.add_index_to_traversal(node_index);
 
-        for (source, edge) in input_nodes.into_iter().zip(edges.into_iter()) {
+        for (source, edge) in input_nodes.into_iter().zip(edges) {
             self.graph.add_edge(source, node_index, edge);
         }
 

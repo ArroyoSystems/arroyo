@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-api"
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -41,6 +41,7 @@ utoipa-swagger-ui = { version = "7", features = ["axum"] }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+url = { workspace = true }
 
 # logging
 tracing = { workspace = true }

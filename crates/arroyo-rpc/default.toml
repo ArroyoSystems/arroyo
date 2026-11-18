@@ -1,6 +1,7 @@
 checkpoint-url = "/tmp/arroyo/checkpoints"
-default-checkpoint-interval = "10s"
-job-controller = "controller"
+
+[grpc]
+max-message-size = "32mb"
 
 [pipeline]
 source-batch-size = 512
@@ -15,12 +16,15 @@ state-initial-backoff = "500ms"
 state-max-backoff = "1m"
 chaining.enabled = true
 store-deserialization-errors = true
+queue-size = 8192
+checkpoint-details-to-keep = 10
 
 [pipeline.compaction]
 enabled = false
 checkpoints-to-compact = 4
 
 [pipeline.checkpoint]
+interval = "10s"
 
 # Services
 
@@ -28,11 +32,19 @@ checkpoints-to-compact = 4
 bind-address = "0.0.0.0"
 http-port = 5115
 
+[api.cors]
+origin-policy = "any"
+allowed-origins = []
+allow-credentials = false
+
 [controller]
 bind-address = "0.0.0.0"
 rpc-port = 5116
 scheduler = "process"
 leader-poll-interval = "500ms"
+
+[controller.metrics]
+enabled = true
 
 [compiler]
 bind-address = "0.0.0.0"
@@ -47,7 +59,6 @@ bind-address = "0.0.0.0"
 rpc-port = 0
 data-port = 0
 task-slots = 16
-queue-size = 8192
 
 [node]
 bind-address = "0.0.0.0"
@@ -64,6 +75,9 @@ http-port = 5114
 [process-scheduler]
 slots-per-process = 16
 shutdown-with-controller = true
+
+[manual-scheduler]
+slots-per-process = 16
 
 [kubernetes-scheduler]
 namespace = "default"

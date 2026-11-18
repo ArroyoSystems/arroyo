@@ -2,21 +2,26 @@
 #![allow(clippy::type_complexity)]
 
 use crate::engine::{Engine, Program, SubtaskNode};
-use crate::job_controller::{RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext};
+use crate::job_controller::{
+    CheckpointHistory, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
+};
 use crate::network_manager::NetworkManager;
+use crate::program::{ProgramAdmissionError, validate_start_execution_program};
 use anyhow::{Context, Result, anyhow};
 
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc::worker_grpc_server::{WorkerGrpc, WorkerGrpcServer};
 use arroyo_rpc::grpc::rpc::{
-    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp, GetWorkerPhaseReq,
-    GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq, JobControllerInitResp,
-    JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp, JobStatus, JobStatusReq,
-    JobStatusResp, JobStopMode, LoadCompactedDataReq, LoadCompactedDataRes, MetricFamily,
-    MetricsReq, MetricsResp, NonfatalErrorReq, RegisterWorkerReq, StartExecutionReq,
-    StartExecutionResp, StopExecutionReq, StopExecutionResp, StopJobReq, StopJobResp,
-    TaskAssignment, TaskCheckpointCompletedReq, TaskCheckpointCompletedResp,
-    TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq, TaskFailedResp,
-    TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
+    CheckpointManifest, CheckpointReq, CheckpointResp, CommitReq, CommitResp,
+    GetCheckpointDetailsReq, GetCheckpointDetailsResp, GetJobCheckpointsReq, GetJobCheckpointsResp,
+    GetWorkerPhaseReq, GetWorkerPhaseResp, HeartbeatReq, HeartbeatResp, JobControllerInitReq,
+    JobControllerInitResp, JobFinishedReq, JobFinishedResp, JobMetricsReq, JobMetricsResp,
+    JobStatus, JobStatusReq, JobStatusResp, JobStopMode, LoadCompactedDataReq,
+    LoadCompactedDataRes, MetricFamily, MetricsReq, MetricsResp, NonfatalErrorReq,
+    RegisterWorkerReq, StartExecutionReq, StartExecutionResp, StopExecutionReq, StopExecutionResp,
+    StopJobReq, StopJobResp, TaskAssignment, TaskCheckpointCompletedReq,
+    TaskCheckpointCompletedResp, TaskCheckpointEventReq, TaskCheckpointEventResp, TaskFailedReq,
+    TaskFailedResp, TaskFinishedReq, TaskFinishedResp, TaskStartedReq, WorkerErrorRes,
     WorkerInitializationCompleteReq, WorkerPhase, WorkerResources,
 };
 use arroyo_rpc::identity::VerifyWorkerId;
@@ -38,31 +43,34 @@ use tokio::select;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::job_controller::controller::WorkerJobController;
-use crate::utils::to_d2;
+use crate::utils::{MAX_TASK_ERROR_FIELD_BYTES, maybe_truncate, to_d2};
 use arroyo_datastream::logical::LogicalProgram;
 use arroyo_planner::physical::new_registry;
-use arroyo_rpc::config::config;
+use arroyo_rpc::config::{PipelineWorkerConfigs, config, update};
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_controller_grpc_server::{
     JobControllerGrpc, JobControllerGrpcServer,
 };
 use arroyo_rpc::grpc::rpc::job_status_grpc_server::{JobStatusGrpc, JobStatusGrpcServer};
 use arroyo_rpc::{
-    CompactionResult, ControlMessage, ControlResp, controller_client, job_controller_client,
-    local_address, retry,
+    CompactionResult, ControlMessage, ControlResp, controller_client, grpc_max_message_size,
+    job_controller_client, local_address, retry,
 };
 
+use crate::job_controller::job_metrics::JobMetrics;
 use arroyo_server_common::shutdown::{CancellationToken, ShutdownGuard};
 use arroyo_server_common::wrap_start;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::store::read_protobuf;
-use arroyo_state_protocol::types::CheckpointRef;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch};
 pub use ordered_float::OrderedFloat;
 use prometheus::{Encoder, ProtobufEncoder};
 use prost::Message;
+use tonic::codec::CompressionEncoding;
+use tonic::codegen::InterceptedService;
 use uuid::Uuid;
 
 pub mod arrow;
@@ -70,6 +78,7 @@ pub mod arrow;
 pub mod engine;
 pub mod job_controller;
 mod network_manager;
+mod program;
 pub mod utils;
 
 pub static TIMER_TABLE: char = '[';
@@ -204,6 +213,8 @@ pub struct WorkerState {
     // used to send messages to the local job controller -- only on the leader node
     job_controller_tx: Arc<OnceLock<Sender<RunningMessage>>>,
     job_status: Arc<Mutex<JobStatus>>,
+    checkpoint_history: Arc<Mutex<CheckpointHistory>>,
+    metrics: Arc<OnceLock<JobMetrics>>,
 }
 
 impl WorkerState {
@@ -243,11 +254,11 @@ impl WorkerState {
 
     #[allow(clippy::too_many_arguments)]
     async fn initialize_job_controller(
-        &self,
+        &mut self,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u64,
-        min_epoch: u64,
+        epoch: Epoch,
+        min_epoch: Epoch,
         shutdown: &ShutdownGuard,
         checkpoint_interval: Duration,
         parent: Option<(CheckpointRef, CheckpointManifest)>,
@@ -259,6 +270,16 @@ impl WorkerState {
         self.job_controller_tx.set(tx).map_err(|_| {
             anyhow!("tried to initialize job controller but it was already initialized!")
         })?;
+
+        let metrics = if config().controller.metrics.enabled {
+            let metrics = JobMetrics::new(program.clone());
+            if self.metrics.set(metrics.clone()).is_err() {
+                panic!("job controller already initialized!");
+            }
+            Some(metrics)
+        } else {
+            None
+        };
 
         debug!(
             "[{:?}] initialized job controller",
@@ -273,8 +294,10 @@ impl WorkerState {
             min_epoch,
             rx,
             self.job_status.clone(),
+            self.checkpoint_history.clone(),
             checkpoint_interval,
             parent,
+            metrics,
         )
         .await
         {
@@ -298,10 +321,15 @@ impl WorkerState {
     }
 
     async fn initialize_inner(
-        self,
+        mut self,
         shutdown_guard: ShutdownGuard,
         req: StartExecutionReq,
     ) -> Result<()> {
+        let pipeline_worker_config: PipelineWorkerConfigs =
+            serde_json::from_str(&req.pipeline_worker_config_json)
+                .context("invalid pipeline worker config")?;
+        update(|config| config.pipeline.worker = pipeline_worker_config.clone());
+
         let mut registry = new_registry();
         let logical = Arc::new(
             LogicalProgram::try_from(req.program.expect("Program is None"))
@@ -363,10 +391,10 @@ impl WorkerState {
                 .initialize_job_controller(
                     logical.clone(),
                     &req.tasks,
-                    req.start_epoch,
-                    req.min_epoch,
+                    Epoch(req.start_epoch),
+                    Epoch(req.min_epoch),
                     &shutdown_guard,
-                    Duration::from_micros(req.checkpoint_interval_micros),
+                    *config().pipeline.worker.checkpoint.interval,
                     parent.clone(),
                 )
                 .await?
@@ -384,13 +412,9 @@ impl WorkerState {
                     .ok_or_else(|| anyhow::anyhow!("Network manager not available"))?
             };
 
-            let file_path_layout = if req.wait_for_leader || req.is_leader {
-                CheckpointFilePathLayout::Protocol {
-                    pipeline_id: self.worker_context.pipeline_id.clone(),
-                    generation: self.worker_context.generation,
-                }
-            } else {
-                CheckpointFilePathLayout::Legacy
+            let file_path_layout = CheckpointFilePathLayout::Protocol {
+                pipeline_id: self.worker_context.pipeline_id.clone(),
+                generation: self.worker_context.generation,
             };
 
             let program = Program::from_logical(
@@ -429,32 +453,13 @@ impl WorkerState {
 
         let mut phase_guard = self.phase.lock().unwrap();
 
-        let job_controller_addr = req
-            .job_controller_addr
-            .clone()
-            .unwrap_or_else(|| config().controller_endpoint());
-
-        if req.wait_for_leader {
-            info!("waiting for leader");
-            *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
-                control_rx,
-                engine_state,
-                job_controller_addr,
-            };
-            drop(phase_guard);
-        } else {
-            info!("Worker moving to running phase");
-            *phase_guard = WorkerExecutionPhase::Running(engine_state);
-            drop(phase_guard);
-
-            let cancel_token = shutdown_guard.token();
-            shutdown_guard
-                .child("control-thread")
-                .into_spawn_task(async move {
-                    self.run_control_loop(cancel_token, control_rx, job_controller_addr, false)
-                        .await
-                });
-        }
+        info!("waiting for leader");
+        *phase_guard = WorkerExecutionPhase::WaitingOnLeader {
+            control_rx,
+            engine_state,
+            job_controller_addr: req.job_controller_addr,
+        };
+        drop(phase_guard);
 
         info!("Initialization completed successfully");
         Ok(())
@@ -465,114 +470,157 @@ impl WorkerState {
         cancel_token: CancellationToken,
         control_rx: Receiver<ControlResp>,
         job_controller_addr: String,
-        is_worker_job_controller: bool,
     ) -> Result<()> {
         // TODO: We need this just for sending TaskStarted notifications to the actual controller for
         //  scheduling; it would be nicer if we didn't need to retain it for the entire job lifecycle
         let mut controller = controller_client("worker", &config().worker.tls).await?;
-        let mut job_controller = job_controller_client(
-            "worker",
-            &config().worker.tls,
-            job_controller_addr,
-            is_worker_job_controller,
-        )
-        .await?;
+        let mut job_controller =
+            job_controller_client("worker", &config().worker.tls, job_controller_addr).await?;
 
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut control_rx = control_rx;
 
+        macro_rules! send_control_rpc {
+            ($rpc:literal, $client:ident.$method:ident, $req:ident, $($extra:tt)*) => {{
+                debug!(
+                    rpc = $rpc,
+                    encoded_size = $req.encoded_len(),
+                    $($extra)*
+                    "sending control message"
+                );
+                ($rpc, $client.$method(Request::new($req)).await.err())
+            }};
+        }
+
         loop {
             select! {
                 msg = control_rx.recv() => {
-                    let err = match msg {
+
+                    let (rpc_method, err): (&'static str, Option<Status>) = match msg {
                         Some(ControlResp::CheckpointEvent(c)) => {
-                            job_controller.task_checkpoint_event(Request::new(
-                                TaskCheckpointEventReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(c.time),
-                                    operator_id: c.operator_id,
-                                    subtask_idx: c.subtask_idx,
-                                    epoch: c.checkpoint_epoch,
-                                    event_type: c.event_type as i32,
-                                }
-                            )).await.err()
+                            let req = TaskCheckpointEventReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(c.time),
+                                operator_id: c.operator_id,
+                                subtask_idx: c.subtask_idx,
+                                epoch: c.checkpoint_epoch,
+                                event_type: c.event_type as i32,
+                            };
+                            send_control_rpc!(
+                                "task_checkpoint_event",
+                                job_controller.task_checkpoint_event,
+                                req,
+                                operator_id = %req.operator_id,
+                                subtask_idx = req.subtask_idx,
+                                epoch = req.epoch,
+                            )
                         }
                         Some(ControlResp::CheckpointCompleted(c)) => {
-                            job_controller.task_checkpoint_completed(Request::new(
-                                TaskCheckpointCompletedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: c.subtask_metadata.finish_time,
-                                    operator_id: c.operator_id,
-                                    epoch: c.checkpoint_epoch,
-                                    needs_commit: false,
-                                    metadata: Some(c.subtask_metadata),
-                                }
-                            )).await.err()
+                            let req = TaskCheckpointCompletedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: c.subtask_metadata.finish_time,
+                                operator_id: c.operator_id,
+                                epoch: c.checkpoint_epoch,
+                                needs_commit: false,
+                                metadata: Some(c.subtask_metadata),
+                            };
+                            send_control_rpc!(
+                                "task_checkpoint_completed",
+                                job_controller.task_checkpoint_completed,
+                                req,
+                                operator_id = %req.operator_id,
+                                epoch = req.epoch,
+                            )
                         }
                         Some(ControlResp::TaskFinished { task_id, subtask_idx }) => {
-                            info!(message = "Task finished", task_id, subtask_idx);
-                            job_controller.task_finished(Request::new(
-                                TaskFinishedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    task_id,
-                                    subtask_idx,
-                                }
-                            )).await.err()
+                            let req = TaskFinishedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                task_id,
+                                subtask_idx,
+                            };
+                            send_control_rpc!(
+                                "task_finished",
+                                job_controller.task_finished,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
                         }
                         Some(ControlResp::TaskFailed { task_id, subtask_idx, error }) => {
-                            job_controller.task_failed(Request::new(
-                                TaskFailedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    error: Some(rpc::TaskError {
-                                        task_id,
-                                        subtask_idx,
-                                        error: error.message,
-                                        error_domain: rpc::ErrorDomain::from(error.domain) as i32,
-                                        retry_hint: rpc::RetryHint::from(error.retry_hint) as i32,
-                                        operator_id: error.operator_id.unwrap_or_default(),
-                                        details: error.details.unwrap_or_default(),
-                                    }),
-                                }
-                            )).await.err()
-                        }
-                        Some(ControlResp::Error { task_id, operator_id, subtask_idx, message, details}) => {
-                            job_controller.nonfatal_error(Request::new(
-                                NonfatalErrorReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(SystemTime::now()),
-                                    error: Some(rpc::TaskError {
-                                        task_id,
-                                        operator_id,
-                                        subtask_idx,
-                                        error: message,
-                                        error_domain: rpc::ErrorDomain::External as i32,
-                                        retry_hint: rpc::RetryHint::NoRetry as i32,
-                                        details,
-                                    }),
-                                }
-                            )).await.err()
-                        }
-                        Some(ControlResp::TaskStarted {task_id, subtask_idx, start_time}) => {
-                            controller.task_started(Request::new(
-                                TaskStartedReq {
-                                    worker_context: Some(self.worker_context.as_proto()),
-                                    time: to_micros(start_time),
+                            let req = TaskFailedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                error: Some(rpc::TaskError {
                                     task_id,
                                     subtask_idx,
-                                }
-                            )).await.err()
+                                    error: maybe_truncate(error.message, MAX_TASK_ERROR_FIELD_BYTES),
+                                    error_domain: rpc::ErrorDomain::from(error.domain) as i32,
+                                    retry_policy: Some(error.retry_hint.into()),
+                                    operator_id: error.operator_id.unwrap_or_default(),
+                                    details: maybe_truncate(
+                                        error.details.unwrap_or_default(),
+                                        MAX_TASK_ERROR_FIELD_BYTES
+                                    ),
+                                }),
+                            };
+                            send_control_rpc!(
+                                "task_failed",
+                                job_controller.task_failed,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
+                        }
+                        Some(ControlResp::Error { task_id, operator_id, subtask_idx, message, details}) => {
+                            let req = NonfatalErrorReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(SystemTime::now()),
+                                error: Some(rpc::TaskError {
+                                    task_id,
+                                    operator_id,
+                                    subtask_idx,
+                                    error: maybe_truncate(message, MAX_TASK_ERROR_FIELD_BYTES),
+                                    error_domain: rpc::ErrorDomain::External as i32,
+                                    retry_policy: Some(RetryHint::NoRetry.into()),
+                                    details: maybe_truncate(details, MAX_TASK_ERROR_FIELD_BYTES),
+                                }),
+                            };
+                            send_control_rpc!(
+                                "nonfatal_error",
+                                job_controller.nonfatal_error,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
+                        }
+                        Some(ControlResp::TaskStarted {task_id, subtask_idx, start_time}) => {
+                            let req = TaskStartedReq {
+                                worker_context: Some(self.worker_context.as_proto()),
+                                time: to_micros(start_time),
+                                task_id,
+                                subtask_idx,
+                            };
+                            send_control_rpc!(
+                                "task_started",
+                                controller.task_started,
+                                req,
+                                task_id,
+                                subtask_idx,
+                            )
                         }
                         None => {
                             // TODO: remove the control queue from the select at this point
                             tokio::time::sleep(Duration::from_millis(50)).await;
-                            None
+                            ("", None)
                         }
                     };
                     if let Some(err) = err {
-                        error!("encountered control message failure {}", err);
+                        error!(
+                            rpc = rpc_method,
+                            "encountered control message failure: {}", err
+                        );
                         cancel_token.cancel();
                     }
                 }
@@ -659,9 +707,12 @@ impl WorkerServer {
                     job_state: rpc::JobState::JobInitializing.into(),
                     updated_at: to_micros(SystemTime::now()),
                     transitioned_at: to_micros(SystemTime::now()),
-                    last_checkpoint: None,
+                    last_checkpointed_at: None,
                     job_failure: None,
+                    checkpoint_stop_complete: false,
                 })),
+                checkpoint_history: Arc::new(Mutex::new(CheckpointHistory::default())),
+                metrics: Arc::new(OnceLock::new()),
             },
             shutdown_guard,
         }
@@ -710,6 +761,22 @@ impl WorkerServer {
             state: self.state.clone(),
         };
 
+        let job_controller = JobControllerGrpcServer::new(leader.clone())
+            .max_decoding_message_size(grpc_max_message_size())
+            .send_compressed(CompressionEncoding::Zstd)
+            .accept_compressed(CompressionEncoding::Zstd);
+
+        let leader = InterceptedService::new(
+            JobStatusGrpcServer::new(leader)
+                .max_decoding_message_size(grpc_max_message_size())
+                .send_compressed(CompressionEncoding::Zstd)
+                .accept_compressed(CompressionEncoding::Zstd),
+            VerifyWorkerId {
+                service: "job-status",
+                worker_id: context.worker_id,
+            },
+        );
+
         self.shutdown_guard
             .child("grpc")
             .into_spawn_task(wrap_start(
@@ -719,28 +786,30 @@ impl WorkerServer {
                     info!("Started worker-rpc with TLS on {}", local_addr);
                     arroyo_server_common::grpc_server_with_tls(tls)
                         .await?
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
-                            VerifyWorkerId(*context.worker_id),
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
+                            VerifyWorkerId {
+                                service: "worker-grpc",
+                                worker_id: context.worker_id,
+                            },
                         ))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::with_interceptor(
-                            leader,
-                            VerifyWorkerId(*context.worker_id),
-                        ))
+                        .add_service(job_controller)
+                        .add_service(leader)
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 } else {
                     info!("Started worker-rpc on {}", local_addr);
                     arroyo_server_common::grpc_server()
-                        .add_service(WorkerGrpcServer::with_interceptor(
-                            self,
-                            VerifyWorkerId(*context.worker_id),
+                        .add_service(InterceptedService::new(
+                            WorkerGrpcServer::new(self)
+                                .max_decoding_message_size(grpc_max_message_size()),
+                            VerifyWorkerId {
+                                service: "worker-grpc",
+                                worker_id: context.worker_id,
+                            },
                         ))
-                        .add_service(JobControllerGrpcServer::new(leader.clone()))
-                        .add_service(JobStatusGrpcServer::with_interceptor(
-                            leader,
-                            VerifyWorkerId(*context.worker_id),
-                        ))
+                        .add_service(job_controller)
+                        .add_service(leader)
                         .serve_with_incoming(TcpListenerStream::new(listener))
                 },
             ));
@@ -810,17 +879,20 @@ impl WorkerGrpc for WorkerServer {
         &self,
         request: Request<StartExecutionReq>,
     ) -> Result<Response<StartExecutionResp>, Status> {
+        let req = request.into_inner();
         let mut phase = self.state.phase.lock().unwrap();
 
         match &*phase {
             WorkerExecutionPhase::Idle => {
+                validate_start_execution_program(&req)
+                    .map_err(ProgramAdmissionError::into_status)?;
+
                 *phase = WorkerExecutionPhase::Initializing {
                     started_at: SystemTime::now(),
                 };
 
                 // Spawn async initialization
                 let state = self.state.clone();
-                let req = request.into_inner();
                 let shutdown_guard = self.shutdown_guard.clone_temporary();
 
                 self.shutdown_guard.spawn_temporary(async move {
@@ -867,7 +939,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in &sinks {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: HashMap::new(),
                     })
                     .await
@@ -877,8 +949,8 @@ impl WorkerGrpc for WorkerServer {
         }
 
         let barrier = CheckpointBarrier {
-            epoch: req.epoch,
-            min_epoch: req.min_epoch,
+            epoch: req.epoch as u32,
+            min_epoch: req.min_epoch as u32,
             timestamp: from_millis(req.timestamp),
             then_stop: req.then_stop,
         };
@@ -925,7 +997,7 @@ impl WorkerGrpc for WorkerServer {
             for sender in senders {
                 sender
                     .send(ControlMessage::Commit {
-                        epoch: req.epoch,
+                        epoch: req.epoch as u32,
                         commit_data: commit_map.clone(),
                     })
                     .await
@@ -1009,17 +1081,32 @@ impl WorkerGrpc for WorkerServer {
         &self,
         _request: Request<JobFinishedReq>,
     ) -> Result<Response<JobFinishedResp>, Status> {
-        let mut phase = self.state.phase.lock().unwrap();
-        if let WorkerExecutionPhase::Running(engine_state) = &*phase {
-            engine_state.shutdown_guard.cancel();
-        }
-        *phase = WorkerExecutionPhase::Idle;
+        let is_worker_leader = self.state.job_controller_tx.get().is_some();
 
-        let token = self.shutdown_guard.token();
-        tokio::task::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            token.cancel();
-        });
+        if is_worker_leader {
+            // Keep the worker leader reachable so the controller can observe the
+            // terminal job status before explicitly stopping the worker process.
+            info!(
+                message =
+                    "job finished on worker leader; waiting for controller to stop worker process",
+                worker_id = self.state.worker_context.worker_id.0,
+                job_id = *self.state.worker_context.job_id,
+                generation = self.state.worker_context.generation,
+            );
+        } else {
+            let mut phase = self.state.phase.lock().unwrap();
+            if let WorkerExecutionPhase::Running(engine_state) = &*phase {
+                engine_state.shutdown_guard.cancel();
+            }
+            *phase = WorkerExecutionPhase::Idle;
+            drop(phase);
+
+            let token = self.shutdown_guard.token();
+            tokio::task::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                token.cancel();
+            });
+        }
 
         Ok(Response::new(JobFinishedResp {}))
     }
@@ -1088,7 +1175,7 @@ impl WorkerGrpc for WorkerServer {
             .child("control-thread")
             .into_spawn_task(async move {
                 state
-                    .run_control_loop(cancel_token, control_rx, job_controller_addr, true)
+                    .run_control_loop(cancel_token, control_rx, job_controller_addr)
                     .await
             });
 
@@ -1102,6 +1189,20 @@ pub struct LeaderServer {
 }
 
 impl LeaderServer {
+    #[allow(clippy::result_large_err)]
+    fn validate_job_generation(&self, job_id: &str, generation: u64) -> Result<(), Status> {
+        if *self.state.worker_context.job_id != job_id
+            || self.state.worker_context.generation != generation
+        {
+            return Err(Status::failed_precondition(format!(
+                "requested job data for invalid job or generation ({job_id}, {generation}) - expected ({}, {})",
+                self.state.worker_context.job_id, self.state.worker_context.generation,
+            )));
+        }
+
+        Ok(())
+    }
+
     async fn send_job_message(&self, msg: RunningMessage) -> Result<(), Status> {
         self.state
             .job_controller_tx
@@ -1217,7 +1318,7 @@ impl JobControllerGrpc for LeaderServer {
             task_id: err.task_id,
             subtask_idx: err.subtask_idx,
             error_domain: err.error_domain().into(),
-            retry_hint: err.retry_hint().into(),
+            retry_hint: RetryHint::from_rpc(err.retry_policy.as_ref()),
             operator_id: err.operator_id,
             reason: err.error,
             details: err.details,
@@ -1235,16 +1336,25 @@ impl JobControllerGrpc for LeaderServer {
 
         self.validate_req(req.worker_context.as_ref())?;
 
-        debug!(
-            "[{:?}] Received heartbeat {:?}",
-            self.state.worker_context.worker_id, req
+        trace!(
+            worker_id =? self.state.worker_context.worker_id,
+            ?req,
+            "received heartbeat",
         );
 
-        self.send_job_message(RunningMessage::WorkerHeartbeat {
-            worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
-            time: Instant::now(),
-        })
-        .await?;
+        if self
+            .send_job_message(RunningMessage::WorkerHeartbeat {
+                worker_id: WorkerId(req.worker_context.as_ref().unwrap().worker_id),
+                time: Instant::now(),
+            })
+            .await
+            .is_err()
+        {
+            debug!(
+                worker_id =? self.state.worker_context.worker_id,
+                "received heartbeat while shutting down"
+            )
+        };
 
         Ok(Response::new(HeartbeatResp {}))
     }
@@ -1277,9 +1387,23 @@ impl JobControllerGrpc for LeaderServer {
 
     async fn job_metrics(
         &self,
-        _request: Request<JobMetricsReq>,
+        request: Request<JobMetricsReq>,
     ) -> Result<Response<JobMetricsResp>, Status> {
-        todo!("metric support")
+        let req = request.into_inner();
+        if req.job_id != *self.state.worker_context.job_id {
+            return Err(Status::failed_precondition(format!(
+                "requested metrics for incorrect job {}, this is the leader for {}",
+                req.job_id, *self.state.worker_context.job_id
+            )));
+        }
+
+        let Some(metrics) = self.state.metrics.get() else {
+            return Err(Status::not_found("No metrics for job"));
+        };
+
+        Ok(Response::new(JobMetricsResp {
+            metrics: serde_json::to_string(&metrics.get_groups()).unwrap(),
+        }))
     }
 }
 
@@ -1289,26 +1413,51 @@ impl JobStatusGrpc for LeaderServer {
         &self,
         request: Request<JobStatusReq>,
     ) -> std::result::Result<Response<JobStatusResp>, Status> {
-        if self.state.job_controller_tx.get().is_none() {
-            return Err(Status::failed_precondition(
-                "requested job status from non-leader node",
-            ));
-        }
-
-        let job_id = (*self.state.worker_context.job_id.0).clone();
         let req = request.into_inner();
-        if job_id != req.job_id {
-            return Err(Status::failed_precondition(format!(
-                "requested job status for invalid job {} - expected {}",
-                req.job_id, job_id
-            )));
-        }
+        self.validate_job_generation(&req.job_id, req.generation)?;
 
         Ok(Response::new(JobStatusResp {
-            job_id,
+            job_id: req.job_id,
             generation: self.state.worker_context.generation,
             job_status: Some((*self.state.job_status.lock().unwrap()).clone()),
         }))
+    }
+
+    async fn get_job_checkpoints(
+        &self,
+        request: Request<GetJobCheckpointsReq>,
+    ) -> std::result::Result<Response<GetJobCheckpointsResp>, Status> {
+        let req = request.into_inner();
+        self.validate_job_generation(&req.job_id, req.generation)?;
+
+        let checkpoints = self
+            .state
+            .checkpoint_history
+            .lock()
+            .map_err(|e| Status::internal(format!("checkpoint history mutex poisoned: {e}")))?
+            .checkpoints();
+
+        Ok(Response::new(GetJobCheckpointsResp { checkpoints }))
+    }
+
+    async fn get_checkpoint_details(
+        &self,
+        request: Request<GetCheckpointDetailsReq>,
+    ) -> std::result::Result<Response<GetCheckpointDetailsResp>, Status> {
+        let req = request.into_inner();
+        self.validate_job_generation(&req.job_id, req.generation)?;
+
+        let operators = self
+            .state
+            .checkpoint_history
+            .lock()
+            .map_err(|e| Status::internal(format!("checkpoint history mutex poisoned: {e}")))?
+            .operators_for_epoch(req.epoch)
+            .ok_or_else(|| {
+                Status::not_found(format!("checkpoint with epoch {} was not found", req.epoch))
+            })?;
+
+        Ok(Response::new(GetCheckpointDetailsResp { operators }))
     }
 
     async fn stop_job(

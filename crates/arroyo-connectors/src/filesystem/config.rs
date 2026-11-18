@@ -1,7 +1,9 @@
 use crate::filesystem::sink::iceberg::transforms;
 use arrow::datatypes::{DataType, Schema};
 use arroyo_rpc::var_str::VarStr;
-use arroyo_rpc::{ConnectorOptions, FromOpts, TIMESTAMP_FIELD};
+use arroyo_rpc::{
+    ConnectorOptions, FromOpts, TIMESTAMP_FIELD, check_data_size, timestamp_field_index,
+};
 use arroyo_storage::BackendConfig;
 use core::slice::Iter;
 use datafusion::common::{
@@ -23,18 +25,18 @@ use std::fmt::{Display, Formatter};
 use std::num::NonZeroU64;
 use strum_macros::EnumString;
 
-const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024;
-const MAXIMUM_SINGLE_PART_SIZE: u64 = 2 * 1024 * 1024;
+const MINIMUM_PART_SIZE: u64 = 5 * 1024 * 1024; // 5MB
+const MAXIMUM_PART_SIZE: u64 = 5 * 1024 * 1024 * 1024; // 5GB
+const MAXIMUM_FILE_SIZE: u64 = 5 * 1024 * 1024 * 1024 * 1024; // 5TB
 
-/// Which version of the FileSystemSink to use
-#[derive(
-    Debug, Copy, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default, EnumString,
-)]
+/// Deprecated: the `version` field used to select between the v1 and v2 object-store
+/// sinks. Only one implementation remains, but the field (and the `sink.version` SQL
+/// option) is still accepted and ignored so that existing connection tables, compiled
+/// programs, and SQL continue to parse.
+#[derive(Debug, Copy, Clone, PartialEq, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
-#[schemars(title = "File System Sink Version")]
 pub enum SinkVersion {
-    #[default]
     V1,
     V2,
 }
@@ -77,6 +79,15 @@ pub struct RollingPolicy {
     pub watermark_expiration: bool,
 }
 
+impl RollingPolicy {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(bytes) = self.file_size_bytes {
+            check_data_size("rolling_policy.file_size", bytes, 1..=MAXIMUM_FILE_SIZE)?;
+        }
+        Ok(())
+    }
+}
+
 impl FromOpts for RollingPolicy {
     fn from_opts(opts: &mut ConnectorOptions) -> Result<Self, DataFusionError> {
         Ok(Self {
@@ -117,10 +128,29 @@ pub struct MultipartConfig {
     /// Minimum multipart size
     #[schemars(
         title = "Minimum multipart size",
-        description = "Files smaller than this will be written as a single put rather than a multipart upload (only available on v2)",
-        range(max = MAXIMUM_SINGLE_PART_SIZE)
+        description = "Files smaller than this will be written as a single put rather than a multipart upload"
     )]
     pub minimum_multipart_size: Option<u64>,
+}
+
+impl MultipartConfig {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(bytes) = self.target_part_size_bytes {
+            check_data_size(
+                "multipart.target_part_size",
+                bytes,
+                MINIMUM_PART_SIZE..=MAXIMUM_PART_SIZE,
+            )?;
+        }
+        if let Some(bytes) = self.minimum_multipart_size {
+            check_data_size(
+                "multipart.minimum_multipart_size",
+                bytes,
+                0..=MAXIMUM_PART_SIZE,
+            )?;
+        }
+        Ok(())
+    }
 }
 
 impl FromOpts for MultipartConfig {
@@ -206,7 +236,7 @@ impl PartitioningConfig {
             (Some(pattern), fields) if !fields.is_empty() => Some(
                 Self::partition_string_for_fields_and_time(schema, fields, pattern)?,
             ),
-            (Some(pattern), _) => Some(Self::timestamp_logical_expression(pattern)),
+            (Some(pattern), _) => Some(Self::timestamp_logical_expression(schema, pattern)),
         })
     }
 
@@ -216,7 +246,7 @@ impl PartitioningConfig {
         time_partition_pattern: &str,
     ) -> Result<Expr, DataFusionError> {
         let field_function = Self::field_logical_expression(schema, partition_fields)?;
-        let time_function = Self::timestamp_logical_expression(time_partition_pattern);
+        let time_function = Self::timestamp_logical_expression(schema, time_partition_pattern);
         let function = concat(vec![
             time_function,
             Expr::Literal(ScalarValue::Utf8(Some("/".to_string())), None),
@@ -236,10 +266,10 @@ impl PartitioningConfig {
                 let column_expr = col(field.name());
                 let expr = match field.data_type() {
                     DataType::Utf8 => column_expr,
-                    _ => Expr::Cast(datafusion::logical_expr::Cast {
-                        expr: Box::new(column_expr),
-                        data_type: DataType::Utf8,
-                    }),
+                    _ => Expr::Cast(datafusion::logical_expr::Cast::new(
+                        Box::new(column_expr),
+                        DataType::Utf8,
+                    )),
                 };
                 Ok((field.name(), expr))
             })
@@ -263,8 +293,12 @@ impl PartitioningConfig {
         Ok(function)
     }
 
-    fn timestamp_logical_expression(time_partition_pattern: &str) -> Expr {
-        to_char(col(TIMESTAMP_FIELD), lit(time_partition_pattern))
+    fn timestamp_logical_expression(schema: &Schema, time_partition_pattern: &str) -> Expr {
+        // sinks from programs compiled before the rename still use the legacy name
+        let timestamp_field = timestamp_field_index(schema)
+            .map(|i| schema.field(i).name().as_str())
+            .unwrap_or(TIMESTAMP_FIELD);
+        to_char(col(timestamp_field), lit(time_partition_pattern))
     }
 }
 
@@ -457,8 +491,10 @@ pub struct FileSystemSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for FileSystemSink {
@@ -470,7 +506,7 @@ impl FromOpts for FileSystemSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }
@@ -534,8 +570,10 @@ pub struct DeltaLakeSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for DeltaLakeSink {
@@ -547,7 +585,7 @@ impl FromOpts for DeltaLakeSink {
             file_naming: opts.pull_struct()?,
             partitioning: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }
@@ -910,7 +948,7 @@ impl IcebergPartitioning {
                                 width
                             );
                         }
-                        transforms::fns::ice_bucket(col(&f.field), lit(width))
+                        transforms::fns::ice_truncate(col(&f.field), lit(width as i32))
                     }
                     Transform::Year => transforms::fns::ice_year(col(&f.field)),
                     Transform::Month => transforms::fns::ice_month(col(&f.field)),
@@ -928,7 +966,7 @@ impl IcebergPartitioning {
         for (expr, field) in exprs.iter().zip(&self.fields) {
             schema.field_with_name(&field.field)?;
 
-            if expr.data_type_and_nullable(&dfschema).is_err() {
+            if expr.to_field(&dfschema).is_err() {
                 return exec_err!("partition transform {} has invalid types", field);
             }
         }
@@ -982,8 +1020,10 @@ pub struct IcebergSink {
     #[serde(default)]
     pub multipart: MultipartConfig,
 
-    #[serde(default)]
-    pub version: SinkVersion,
+    /// Deprecated and ignored; see [`SinkVersion`]
+    #[serde(default, skip_serializing)]
+    #[schemars(skip)]
+    pub version: Option<SinkVersion>,
 }
 
 impl FromOpts for IcebergSink {
@@ -999,7 +1039,7 @@ impl FromOpts for IcebergSink {
             rolling_policy: opts.pull_struct()?,
             file_naming: opts.pull_struct()?,
             multipart: opts.pull_struct()?,
-            version: opts.pull_opt_parsed("sink.version")?.unwrap_or_default(),
+            version: opts.pull_opt_parsed("sink.version")?,
         })
     }
 }
@@ -1022,5 +1062,31 @@ impl FromOpts for IcebergTable {
                 return plan_err!("type must be 'sink'");
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_sink_sizes() {
+        let rolling = |file_size_bytes| RollingPolicy {
+            file_size_bytes,
+            ..Default::default()
+        };
+        assert!(rolling(None).validate().is_ok());
+        assert!(rolling(Some(MAXIMUM_FILE_SIZE)).validate().is_ok());
+        assert!(rolling(Some(0)).validate().is_err());
+        assert!(rolling(Some(MAXIMUM_FILE_SIZE + 1)).validate().is_err());
+
+        let multipart = |target_part_size_bytes| MultipartConfig {
+            target_part_size_bytes,
+            ..Default::default()
+        };
+        assert!(multipart(None).validate().is_ok());
+        assert!(multipart(Some(MINIMUM_PART_SIZE)).validate().is_ok());
+        assert!(multipart(Some(MINIMUM_PART_SIZE - 1)).validate().is_err());
+        assert!(multipart(Some(u64::MAX)).validate().is_err());
     }
 }

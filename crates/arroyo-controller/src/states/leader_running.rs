@@ -1,14 +1,16 @@
-use super::{JobContext, State, Transition, controller_job_failure};
+use super::{JobContext, State, Transition, controller_job_failure, stop_workers_for_missing_job};
 use crate::JobMessage;
 use crate::states::leader_finishing::LeaderFinishing;
 use crate::states::leader_rescaling::LeaderRescaling;
 use crate::states::leader_restarting::LeaderRestarting;
 use crate::states::leader_stop_if_desired_running;
 use crate::states::{StateError, fatal};
+use crate::types::public::RestartMode;
 use anyhow::anyhow;
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
-use arroyo_rpc::grpc::rpc::{ErrorDomain, JobFailure, RetryHint};
+use arroyo_rpc::grpc::rpc::ErrorDomain;
 use arroyo_rpc::log_event;
 use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
@@ -26,7 +28,7 @@ impl State for LeaderRunning {
     }
 
     async fn next(mut self: Box<Self>, ctx: &mut JobContext) -> Result<Transition, StateError> {
-        let pipeline_config = &config().clone().pipeline;
+        let pipeline_config = ctx.config.pipeline_config()?;
 
         let mut log_interval = tokio::time::interval(Duration::from_secs(60));
         log_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -64,7 +66,7 @@ impl State for LeaderRunning {
                 .await;
         }
 
-        let operator_parallelism = ctx.program.tasks_per_node();
+        let operator_parallelism = ctx.program.decoded.tasks_per_node();
 
         loop {
             if ctx.leader_manager().last_heartbeat.elapsed()
@@ -111,19 +113,36 @@ impl State for LeaderRunning {
                                 ));
                             }
 
-                            for (node_id, p) in &c.parallelism_overrides {
-                                if let Some(actual) = operator_parallelism.get(node_id)
-                                    && *actual != *p {
-                                    return Ok(Transition::next(
-                                        *self,
-                                        LeaderRescaling {},
-                                    ));
-                                }
+                            // env_vars, scheduler_config, and pipeline_config are applied when workers are
+                            // (re)scheduled, so a change to either while the job is running
+                            // requires a restart to take effect.
+                            if c.scheduler_config != ctx.config.scheduler_config
+                                || c.env_vars != ctx.config.env_vars
+                                || c.pipeline_config()?.worker
+                                    != ctx.config.pipeline_config()?.worker
+                            {
+                                return Ok(Transition::next(
+                                    *self,
+                                    LeaderRestarting {
+                                        mode: RestartMode::safe,
+                                    },
+                                ));
+                            }
+
+                            let desired = ctx.program.decoded.effective_parallelism(&c.parallelism_overrides)
+                                .map_err(|e| fatal(format!("invalid parallelism overrides: {e}"), e))?;
+                            if desired != operator_parallelism {
+                                return Ok(Transition::next(*self, LeaderRescaling {}));
                             }
 
                         }
                         Some(msg) => {
-                            warn!(job_id = *ctx.config.id, msg =? msg, "unexpected job message in leader mode");
+                            warn!(
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                                msg =? msg,
+                                "unexpected job message while monitoring worker leader"
+                            );
                         }
                         None => {
                             panic!("job queue shut down");
@@ -134,10 +153,22 @@ impl State for LeaderRunning {
                     if ctx.status.restarts > 0 && self.started.elapsed() > *pipeline_config.healthy_duration {
                         let restarts = ctx.status.restarts;
                         ctx.status.restarts = 0;
-                        if let Err(e) = ctx.status.update_db(&ctx.db).await {
-                            error!(message = "Failed to update status", error = format!("{:?}", e),
-                                job_id = *ctx.config.id);
-                            ctx.status.restarts = restarts;
+                        match ctx.status.update_db(&ctx.db).await {
+                            Ok(crate::JobStatusUpdate::Updated) => {}
+                            Ok(crate::JobStatusUpdate::Missing) => {
+                                ctx.rx.close();
+                                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                                return Ok(Transition::Stop);
+                            }
+                            Err(err) => {
+                                error!(
+                                    message = "Failed to update status",
+                                    error = format!("{:?}", err),
+                                    job_id = %ctx.config.id,
+                                    pipeline_id = *ctx.pipeline_info.pipeline_id
+                                );
+                                ctx.status.restarts = restarts;
+                            }
                         }
                     }
 
@@ -156,24 +187,21 @@ impl State for LeaderRunning {
                             };
                             match state {
                                 rpc::JobState::JobInitializing => {
-                                    return ctx.handle_job_failure(*self, JobFailure {
-                                        operator_id: None,
-                                        task_id: None,
-                                        subtask_index: None,
-                                        message: "job unexpectedly in Initializing state, should be running".to_string(),
-                                        error_domain: ErrorDomain::Internal as i32,
-                                        retry_hint: RetryHint::WithBackoff as i32,
-                                    }).await;
+                                    return ctx.handle_job_failure(*self, controller_job_failure(
+                                        "job unexpectedly in Initializing state, should be running",
+                                        ErrorDomain::Internal,
+                                        RetryHint::WithBackoff,
+                                    )).await;
                                 }
                                 rpc::JobState::JobRunning => {
                                     // in progress
                                 }
                                 rpc::JobState::JobStopping | rpc::JobState::JobStopped => {
-                                    // the job somehow is stopping without us telling it to
-                                    // we may want to automatically handle this in the future, but
-                                    // initially I'm being conservative about automation
-                                    return Err(fatal("job unexpectedly stopped",
-                                        anyhow!("job unexpectedly entered {:?} state", state)));
+                                    return ctx.handle_job_failure(*self, controller_job_failure(
+                                        format!("job unexpectedly in {:?} state, should be running", state),
+                                        rpc::ErrorDomain::Internal,
+                                        RetryHint::WithBackoff,
+                                    )).await;
                                 }
                                 rpc::JobState::JobFinishing | rpc::JobState::JobFinished => {
                                     // finishing is initiated by the workers themselves (via the
@@ -206,7 +234,12 @@ impl State for LeaderRunning {
                             }
                         }
                         Err(err) => {
-                            warn!(message = "error while polling leader status", error = format!("{:?}", err), job_id = *ctx.config.id);
+                            warn!(
+                                message = "error while polling leader status",
+                                error = format!("{:?}", err),
+                                job_id = %ctx.config.id,
+                                pipeline_id = *ctx.pipeline_info.pipeline_id
+                            );
                             tokio::time::sleep(Duration::from_secs(2)).await;
                         }
                     }

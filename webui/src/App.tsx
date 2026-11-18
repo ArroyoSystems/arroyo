@@ -24,7 +24,7 @@ import { getTourContextValue, TourContext } from './tour';
 import { getLocalUdfsContextValue, LocalUdfsContext } from './udf_state';
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons';
 import { motion } from 'framer-motion';
-import useLocalStorage from 'use-local-storage';
+import { useLocalStorage } from 'usehooks-ts';
 import { IconType } from 'react-icons';
 
 function logout() {

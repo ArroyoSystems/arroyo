@@ -35,8 +35,12 @@ pub enum StoreError {
         path: CheckpointRef,
         source: prost::DecodeError,
     },
+    #[error("protobuf at path at {path} is invalid: {msg}")]
+    InvalidProtobuf { path: CheckpointRef, msg: String },
     #[error("conditional create for {path} reported an existing object, but it could not be read")]
     ExistingObjectMissing { path: CheckpointRef },
+    #[error("expected {path} to exist but it was missing")]
+    ExpectedObjectMissing { path: CheckpointRef },
     #[error("protocol error: {0}")]
     Protocol(#[from] ProtocolError),
 }
@@ -68,6 +72,13 @@ pub trait ProtocolStore: Send + Sync {
         path: &CheckpointRef,
         bytes: Vec<u8>,
     ) -> Result<CreateResult<Vec<u8>>, StoreError>;
+
+    /// Deletes raw object bytes, succeeding if the object is already absent.
+    async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError>;
+
+    /// Attempts to delete the specified directory, which must be empty; this is a no-op for
+    /// object stores.
+    async fn delete_directory(&self, path: &str);
 }
 
 /// Reads and JSON-decodes an optional protocol object.
@@ -232,6 +243,16 @@ impl ProtocolStore for StorageProvider {
             Err(error) => Err(StoreError::Storage(error)),
         }
     }
+
+    async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError> {
+        self.delete_if_present(path.as_str())
+            .await
+            .map_err(StoreError::from)
+    }
+
+    async fn delete_directory(&self, path: &str) {
+        let _ = self.delete_directory(path).await;
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +265,18 @@ pub(crate) mod tests {
     #[derive(Debug, Default, Clone)]
     pub(crate) struct MemoryProtocolStore {
         objects: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+        deleted_objects: Arc<Mutex<Vec<String>>>,
+        deleted_directories: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl MemoryProtocolStore {
+        pub(crate) fn deleted_objects(&self) -> Vec<String> {
+            self.deleted_objects.lock().unwrap().clone()
+        }
+
+        pub(crate) fn deleted_directories(&self) -> Vec<String> {
+            self.deleted_directories.lock().unwrap().clone()
+        }
     }
 
     #[async_trait]
@@ -272,6 +305,22 @@ pub(crate) mod tests {
 
             objects.insert(path.as_str().to_string(), bytes);
             Ok(CreateResult::Created)
+        }
+
+        async fn delete_object(&self, path: &CheckpointRef) -> Result<(), StoreError> {
+            self.deleted_objects
+                .lock()
+                .unwrap()
+                .push(path.as_str().to_string());
+            self.objects.lock().unwrap().remove(path.as_str());
+            Ok(())
+        }
+
+        async fn delete_directory(&self, path: &str) {
+            self.deleted_directories
+                .lock()
+                .unwrap()
+                .push(path.to_string());
         }
     }
 }

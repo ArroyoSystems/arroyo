@@ -29,7 +29,8 @@ use datafusion::execution::FunctionRegistry;
 use datafusion::logical_expr::expr_rewriter::FunctionRewrite;
 use datafusion::logical_expr::planner::ExprPlanner;
 use datafusion::logical_expr::{
-    AggregateUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF, create_udaf,
+    AggregateUDF, HigherOrderUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
+    create_udaf,
 };
 use datafusion::physical_plan::{ExecutionPlan, displayable};
 use dlopen2::wrapper::Container;
@@ -161,7 +162,10 @@ impl OperatorNode {
                     &source_context.task_info,
                 );
 
-                s.operator.on_start(&mut source_context).await?;
+                s.operator
+                    .on_start(&mut source_context)
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 ready.wait().await;
                 info!(
@@ -179,11 +183,16 @@ impl OperatorNode {
                     .await
                     .unwrap();
 
-                let result = s.operator.run(&mut source_context, &mut collector).await?;
+                let result = s
+                    .operator
+                    .run(&mut source_context, &mut collector)
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 s.operator
                     .on_close(&mut source_context, &mut collector)
-                    .await?;
+                    .await
+                    .map_err(|e| e.with_operator(source_context.task_info.operator_id.clone()))?;
 
                 if let Some(final_message) = result.into() {
                     collector.broadcast(final_message).await;
@@ -676,7 +685,7 @@ impl ChainedOperator {
                 if counter.all_clear() {
                     control_tx
                         .send(ControlResp::CheckpointEvent(arroyo_rpc::CheckpointEvent {
-                            checkpoint_epoch: t.epoch,
+                            checkpoint_epoch: t.epoch as u64,
                             operator_idx: chain_info.task_id,
                             operator_id: self.context.task_info.operator_id.clone(),
                             subtask_idx: chain_info.task_index,
@@ -1451,6 +1460,24 @@ impl Registry {
 impl FunctionRegistry for Registry {
     fn udfs(&self) -> HashSet<String> {
         self.udfs.keys().cloned().collect()
+    }
+
+    fn udafs(&self) -> HashSet<String> {
+        self.udafs.keys().cloned().collect()
+    }
+
+    fn udwfs(&self) -> HashSet<String> {
+        self.udwfs.keys().cloned().collect()
+    }
+
+    fn higher_order_function_names(&self) -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn higher_order_function(&self, name: &str) -> DFResult<Arc<HigherOrderUDF>> {
+        Err(DataFusionError::Execution(format!(
+            "Higher order function {name} not found"
+        )))
     }
 
     fn udf(&self, name: &str) -> DFResult<Arc<ScalarUDF>> {

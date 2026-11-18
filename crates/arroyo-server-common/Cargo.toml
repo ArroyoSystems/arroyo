@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-server-common"
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 edition = "2024"
 
 [dependencies]
@@ -53,3 +53,5 @@ serde = { workspace = true }
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }
 
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }

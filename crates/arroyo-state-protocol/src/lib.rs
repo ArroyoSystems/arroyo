@@ -4,6 +4,7 @@
 //! passes the observed facts into pure decision functions, and then executes the
 //! returned decision.
 
+pub mod gc;
 pub mod resolve;
 pub mod state;
 pub mod store;
@@ -92,6 +93,7 @@ impl ProtocolPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gc::cleanup_leader_checkpoints;
     use crate::resolve::{
         EpochClaimOutcome, ParentCheckpointStatus, ResolveDecision, ResolveFailure,
         resolve_candidate,
@@ -99,8 +101,8 @@ mod tests {
     use crate::state::{CheckpointState, derive_checkpoint_state};
     use crate::store::tests::MemoryProtocolStore;
     use crate::store::{
-        CreateResult, StoreError, create_json_if_not_exist, put_json, put_protobuf, read_json,
-        read_protobuf,
+        CreateResult, ProtocolStore, StoreError, create_json_if_not_exist, put_json, put_protobuf,
+        read_json, read_protobuf,
     };
     use crate::types::{
         CommittedMarker, CurrentGeneration, EpochRecord, GenerationManifest, ProtocolError,
@@ -112,8 +114,13 @@ mod tests {
         initialize_generation, mark_committed, prepare_commit, publish_checkpoint,
         resolve_generation_manifest,
     };
-    use arroyo_rpc::grpc::rpc::CheckpointManifest;
+    use arroyo_rpc::grpc::rpc::{
+        CheckpointManifest, ExpiringKeyedTimeTableCheckpointMetadata,
+        GlobalKeyedTableTaskCheckpointMetadata, OperatorCheckpointMetadata, OperatorMetadata,
+        ParquetTimeFile, TableCheckpointMetadata, TableEnum,
+    };
     use arroyo_types::{JobId, PipelineId, from_micros};
+    use prost::Message;
     use std::time::SystemTime;
 
     fn checkpoint_ref(path: &str) -> CheckpointRef {
@@ -243,6 +250,500 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    fn data_ref(paths: &ProtocolPaths, epoch: u64) -> CheckpointRef {
+        checkpoint_ref(&format!(
+            "{}/operator-op/table-table-000",
+            paths.checkpoint_dir(Generation(1), Epoch(epoch))
+        ))
+    }
+
+    fn global_operator(files: Vec<CheckpointRef>) -> OperatorCheckpointMetadata {
+        OperatorCheckpointMetadata {
+            operator_metadata: Some(OperatorMetadata {
+                job_id: "J".to_string(),
+                operator_id: "op".to_string(),
+                epoch: 0,
+                min_watermark: None,
+                max_watermark: None,
+                parallelism: 1,
+            }),
+            start_time: 0,
+            finish_time: 0,
+            table_checkpoint_metadata: [(
+                "table".to_string(),
+                TableCheckpointMetadata {
+                    table_type: TableEnum::GlobalKeyValue.into(),
+                    data: GlobalKeyedTableTaskCheckpointMetadata {
+                        files: files.into_iter().map(|file| file.to_string()).collect(),
+                        commit_data_by_subtask: Default::default(),
+                    }
+                    .encode_to_vec(),
+                },
+            )]
+            .into(),
+            table_configs: Default::default(),
+        }
+    }
+
+    fn expiring_operator(
+        operator_id: &str,
+        files: Vec<CheckpointRef>,
+    ) -> OperatorCheckpointMetadata {
+        OperatorCheckpointMetadata {
+            operator_metadata: Some(OperatorMetadata {
+                job_id: "J".to_string(),
+                operator_id: operator_id.to_string(),
+                epoch: 0,
+                min_watermark: None,
+                max_watermark: None,
+                parallelism: 1,
+            }),
+            start_time: 0,
+            finish_time: 0,
+            table_checkpoint_metadata: [(
+                "expiring-table".to_string(),
+                TableCheckpointMetadata {
+                    table_type: TableEnum::ExpiringKeyedTimeTable.into(),
+                    data: ExpiringKeyedTimeTableCheckpointMetadata {
+                        files: files
+                            .into_iter()
+                            .map(|file| ParquetTimeFile {
+                                file: file.to_string(),
+                                ..Default::default()
+                            })
+                            .collect(),
+                    }
+                    .encode_to_vec(),
+                },
+            )]
+            .into(),
+            table_configs: Default::default(),
+        }
+    }
+
+    async fn write_gc_checkpoint(
+        store: &MemoryProtocolStore,
+        paths: &ProtocolPaths,
+        epoch: u64,
+        parent_epoch: Option<u64>,
+        operators: Vec<OperatorCheckpointMetadata>,
+    ) {
+        let checkpoint_ref = paths.checkpoint_manifest(Generation(1), Epoch(epoch));
+        let parent_checkpoint_ref =
+            parent_epoch.map(|epoch| paths.checkpoint_manifest(Generation(1), Epoch(epoch)));
+        let mut checkpoint =
+            checkpoint_for_generation(Generation(1), epoch, parent_checkpoint_ref, false);
+        checkpoint.operators = operators;
+        write_canonical_checkpoint(store, paths, &checkpoint_ref, &checkpoint).await;
+        put_json(
+            store,
+            &paths.committed_marker(Generation(1), Epoch(epoch)),
+            &committed_marker(checkpoint_ref, epoch),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn exists(store: &MemoryProtocolStore, path: &CheckpointRef) -> bool {
+        store.read_bytes(path).await.unwrap().is_some()
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_only_checkpoints_below_new_min_epoch() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let file1 = data_ref(&paths, 1);
+        let file2 = data_ref(&paths, 2);
+        let file3 = data_ref(&paths, 3);
+        let checkpoint1_ref = paths.checkpoint_manifest(Generation(1), Epoch(1));
+        let checkpoint2_ref = paths.checkpoint_manifest(Generation(1), Epoch(2));
+        let checkpoint3_ref = paths.checkpoint_manifest(Generation(1), Epoch(3));
+
+        store.put_bytes(&file1, b"1".to_vec()).await.unwrap();
+        store.put_bytes(&file2, b"2".to_vec()).await.unwrap();
+        store.put_bytes(&file3, b"3".to_vec()).await.unwrap();
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            1,
+            None,
+            vec![global_operator(vec![file1.clone()])],
+        )
+        .await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            2,
+            Some(1),
+            vec![global_operator(vec![file2.clone()])],
+        )
+        .await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            3,
+            Some(2),
+            vec![global_operator(vec![file3.clone()])],
+        )
+        .await;
+
+        cleanup_leader_checkpoints(&store, &paths, checkpoint3_ref.clone(), Epoch(2))
+            .await
+            .unwrap();
+
+        assert!(!exists(&store, &file1).await);
+        assert!(!exists(&store, &paths.epoch_record(Epoch(1))).await);
+        assert!(!exists(&store, &paths.committed_marker(Generation(1), Epoch(1))).await);
+        assert!(
+            read_protobuf::<_, CheckpointManifest>(&store, &checkpoint1_ref)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(exists(&store, &file2).await);
+        assert!(exists(&store, &file3).await);
+        assert!(
+            read_protobuf::<_, CheckpointManifest>(&store, &checkpoint2_ref)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            read_protobuf::<_, CheckpointManifest>(&store, &checkpoint3_ref)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_preserves_expiring_files_referenced_by_retained_checkpoint() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let shared_file = checkpoint_ref(&format!(
+            "{}/operator-expiring-op/table-expiring-shared",
+            paths.checkpoint_dir(Generation(1), Epoch(1))
+        ));
+        let expired_file = checkpoint_ref(&format!(
+            "{}/operator-expiring-op/table-expiring-expired",
+            paths.checkpoint_dir(Generation(1), Epoch(1))
+        ));
+        let checkpoint2_ref = paths.checkpoint_manifest(Generation(1), Epoch(2));
+
+        store
+            .put_bytes(&shared_file, b"shared".to_vec())
+            .await
+            .unwrap();
+        store
+            .put_bytes(&expired_file, b"expired".to_vec())
+            .await
+            .unwrap();
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            1,
+            None,
+            vec![expiring_operator(
+                "expiring-op",
+                vec![shared_file.clone(), expired_file.clone()],
+            )],
+        )
+        .await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            2,
+            Some(1),
+            vec![expiring_operator("expiring-op", vec![shared_file.clone()])],
+        )
+        .await;
+
+        cleanup_leader_checkpoints(&store, &paths, checkpoint2_ref.clone(), Epoch(2))
+            .await
+            .unwrap();
+
+        assert!(exists(&store, &shared_file).await);
+        assert!(!exists(&store, &expired_file).await);
+
+        let deleted_count = store.deleted_objects().len();
+        cleanup_leader_checkpoints(&store, &paths, checkpoint2_ref, Epoch(2))
+            .await
+            .unwrap();
+        assert_eq!(deleted_count, store.deleted_objects().len());
+        assert!(exists(&store, &shared_file).await);
+    }
+
+    #[tokio::test]
+    async fn cleanup_retries_checkpoint_directory_when_carried_file_expires() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let checkpoint1_dir = paths.checkpoint_dir(Generation(1), Epoch(1));
+        let carried_file = checkpoint_ref(&format!(
+            "{checkpoint1_dir}/operator-expiring-op/table-expiring-carried"
+        ));
+
+        store
+            .put_bytes(&carried_file, b"carried".to_vec())
+            .await
+            .unwrap();
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            1,
+            None,
+            vec![expiring_operator("expiring-op", vec![carried_file.clone()])],
+        )
+        .await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            2,
+            Some(1),
+            vec![expiring_operator("expiring-op", vec![carried_file.clone()])],
+        )
+        .await;
+
+        cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(2)),
+            Epoch(2),
+        )
+        .await
+        .unwrap();
+
+        assert!(exists(&store, &carried_file).await);
+        assert_eq!(
+            1,
+            store
+                .deleted_directories()
+                .iter()
+                .filter(|directory| *directory == checkpoint1_dir.as_str())
+                .count()
+        );
+
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            3,
+            Some(2),
+            vec![expiring_operator("expiring-op", vec![])],
+        )
+        .await;
+        cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(3)),
+            Epoch(3),
+        )
+        .await
+        .unwrap();
+
+        assert!(!exists(&store, &carried_file).await);
+        assert_eq!(
+            2,
+            store
+                .deleted_directories()
+                .iter()
+                .filter(|directory| *directory == checkpoint1_dir.as_str())
+                .count(),
+            "the old checkpoint directory should be retried when its carried file expires"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_classifies_mixed_global_and_expiring_metadata() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let global_old = checkpoint_ref(&format!(
+            "{}/operator-op/table-global-old",
+            paths.checkpoint_dir(Generation(1), Epoch(1))
+        ));
+        let global_retained = data_ref(&paths, 2);
+        let expiring_old = checkpoint_ref(&format!(
+            "{}/operator-expiring-op/table-expiring-old",
+            paths.checkpoint_dir(Generation(1), Epoch(1))
+        ));
+        let expiring_shared = checkpoint_ref(&format!(
+            "{}/operator-expiring-op/table-expiring-shared",
+            paths.checkpoint_dir(Generation(1), Epoch(1))
+        ));
+
+        for file in [
+            &global_old,
+            &global_retained,
+            &expiring_old,
+            &expiring_shared,
+        ] {
+            store.put_bytes(file, b"data".to_vec()).await.unwrap();
+        }
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            1,
+            None,
+            vec![
+                global_operator(vec![global_old.clone()]),
+                expiring_operator(
+                    "expiring-op",
+                    vec![expiring_old.clone(), expiring_shared.clone()],
+                ),
+            ],
+        )
+        .await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            2,
+            Some(1),
+            vec![
+                global_operator(vec![global_retained.clone()]),
+                expiring_operator("expiring-op", vec![expiring_shared.clone()]),
+            ],
+        )
+        .await;
+
+        cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(2)),
+            Epoch(2),
+        )
+        .await
+        .unwrap();
+
+        assert!(!exists(&store, &global_old).await);
+        assert!(!exists(&store, &expiring_old).await);
+        assert!(exists(&store, &global_retained).await);
+        assert!(exists(&store, &expiring_shared).await);
+    }
+
+    #[tokio::test]
+    async fn cleanup_malformed_expiring_metadata_is_fail_closed() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let old_file = data_ref(&paths, 2);
+        let mut malformed_operator = expiring_operator("expiring-op", vec![]);
+        malformed_operator
+            .table_checkpoint_metadata
+            .get_mut("expiring-table")
+            .unwrap()
+            .data = vec![0x0a];
+
+        store.put_bytes(&old_file, b"old".to_vec()).await.unwrap();
+        write_gc_checkpoint(&store, &paths, 1, None, vec![malformed_operator]).await;
+        write_gc_checkpoint(
+            &store,
+            &paths,
+            2,
+            Some(1),
+            vec![global_operator(vec![old_file.clone()])],
+        )
+        .await;
+        write_gc_checkpoint(&store, &paths, 3, Some(2), vec![global_operator(vec![])]).await;
+
+        let err = cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(3)),
+            Epoch(3),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, StoreError::DecodeProtobuf { .. }));
+        assert!(store.deleted_objects().is_empty());
+        assert!(exists(&store, &old_file).await);
+    }
+
+    #[tokio::test]
+    async fn cleanup_deletes_checkpoint_manifests_oldest_first() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_gc_checkpoint(&store, &paths, 1, None, vec![global_operator(vec![])]).await;
+        write_gc_checkpoint(&store, &paths, 2, Some(1), vec![global_operator(vec![])]).await;
+        write_gc_checkpoint(&store, &paths, 3, Some(2), vec![global_operator(vec![])]).await;
+
+        cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(3)),
+            Epoch(3),
+        )
+        .await
+        .unwrap();
+
+        let deleted = store.deleted_objects();
+        let manifest1 = paths
+            .checkpoint_manifest(Generation(1), Epoch(1))
+            .to_string();
+        let manifest2 = paths
+            .checkpoint_manifest(Generation(1), Epoch(2))
+            .to_string();
+        let manifest3 = paths
+            .checkpoint_manifest(Generation(1), Epoch(3))
+            .to_string();
+        let manifest1_pos = deleted
+            .iter()
+            .position(|path| path == &manifest1)
+            .expect("epoch 1 manifest should be deleted");
+        let manifest2_pos = deleted
+            .iter()
+            .position(|path| path == &manifest2)
+            .expect("epoch 2 manifest should be deleted");
+
+        assert!(manifest1_pos < manifest2_pos);
+        assert!(!deleted.contains(&manifest3));
+    }
+
+    #[tokio::test]
+    async fn cleanup_detects_checkpoint_parent_cycles() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        write_gc_checkpoint(&store, &paths, 1, Some(2), vec![global_operator(vec![])]).await;
+        write_gc_checkpoint(&store, &paths, 2, Some(1), vec![global_operator(vec![])]).await;
+
+        let err = cleanup_leader_checkpoints(
+            &store,
+            &paths,
+            paths.checkpoint_manifest(Generation(1), Epoch(2)),
+            Epoch(2),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Protocol(ProtocolError::CheckpointCycle {
+                generation: Generation(1),
+                epoch: Epoch(2)
+            })
+        ));
+        assert!(store.deleted_objects().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cleanup_rejects_min_epoch_newer_than_head() {
+        let store = MemoryProtocolStore::default();
+        let paths = ProtocolPaths::new(PipelineId::new("P"), JobId::new("J"));
+        let head = paths.checkpoint_manifest(Generation(1), Epoch(2));
+        write_gc_checkpoint(&store, &paths, 2, None, vec![global_operator(vec![])]).await;
+
+        let err = cleanup_leader_checkpoints(&store, &paths, head, Epoch(3))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            StoreError::Protocol(ProtocolError::CheckpointGcMinEpochBeyondHead {
+                head_epoch: Epoch(2),
+                new_min_epoch: Epoch(3),
+            })
+        ));
+        assert!(store.deleted_objects().is_empty());
     }
 
     #[tokio::test]

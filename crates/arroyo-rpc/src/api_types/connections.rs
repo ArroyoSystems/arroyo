@@ -2,11 +2,10 @@ use crate::MetadataField;
 use crate::df::{ArroyoSchema, ArroyoSchemaRef};
 use crate::formats::{BadData, Format, Framing};
 use ahash::HashSet;
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use arrow_schema::{DataType, Field, Fields, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use serde::__private::ser::FlatMapSerializer;
-use serde::ser::SerializeMap;
+use datafusion::common::DFSchema;
 use serde::{Deserialize, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
@@ -240,12 +239,21 @@ impl Serialize for ListFieldItem {
     where
         S: Serializer,
     {
-        let mut f = Serializer::serialize_map(s, None)?;
-        f.serialize_entry("name", &self.name)?;
-        self.field_type.serialize(FlatMapSerializer(&mut f))?;
-        f.serialize_entry("required", &self.required)?;
-        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
-        f.end()
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            name: &'a str,
+            #[serde(flatten)]
+            field_type: &'a FieldType,
+            required: bool,
+            sql_name: String,
+        }
+        Wire {
+            name: &self.name,
+            field_type: &self.field_type,
+            required: self.required,
+            sql_name: self.field_type.sql_type(),
+        }
+        .serialize(s)
     }
 }
 
@@ -283,15 +291,24 @@ impl Serialize for SourceField {
     where
         S: Serializer,
     {
-        let mut f = Serializer::serialize_map(s, None)?;
-        f.serialize_entry("name", &self.name)?;
-        self.field_type.serialize(FlatMapSerializer(&mut f))?;
-        f.serialize_entry("required", &self.required)?;
-        if let Some(metadata_key) = &self.metadata_key {
-            f.serialize_entry("metadata_key", metadata_key)?;
+        #[derive(Serialize)]
+        struct Wire<'a> {
+            name: &'a str,
+            #[serde(flatten)]
+            field_type: &'a FieldType,
+            required: bool,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            metadata_key: Option<&'a String>,
+            sql_name: String,
         }
-        f.serialize_entry("sql_name", &self.field_type.sql_type())?;
-        f.end()
+        Wire {
+            name: &self.name,
+            field_type: &self.field_type,
+            required: self.required,
+            metadata_key: self.metadata_key.as_ref(),
+            sql_name: self.field_type.sql_type(),
+        }
+        .serialize(s)
     }
 }
 
@@ -404,6 +421,33 @@ impl TryFrom<Field> for SourceField {
     }
 }
 
+fn validate_unique_field_names(fields: &[SourceField], path: &str) -> anyhow::Result<()> {
+    let arrow_fields = fields
+        .iter()
+        .cloned()
+        .map(Field::from)
+        .collect::<Vec<_>>()
+        .into();
+    DFSchema::from_unqualified_fields(arrow_fields, HashMap::new())
+        .map_err(|e| anyhow!("invalid field names in {path}: {e}"))?;
+
+    for field in fields {
+        validate_unique_nested_field_names(&field.field_type, &format!("{path}.{}", field.name))?;
+    }
+
+    Ok(())
+}
+
+fn validate_unique_nested_field_names(field_type: &FieldType, path: &str) -> anyhow::Result<()> {
+    match field_type {
+        FieldType::Struct(StructField { fields }) => validate_unique_field_names(fields, path),
+        FieldType::List(ListField { items }) => {
+            validate_unique_nested_field_names(&items.field_type, &format!("{path}[]"))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, ToSchema, PartialEq)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum SchemaDefinition {
@@ -462,6 +506,8 @@ impl ConnectionSchema {
     }
 
     pub fn validate(self) -> anyhow::Result<Self> {
+        validate_unique_field_names(&self.fields, "schema")?;
+
         let non_metadata_fields: Vec<_> = self
             .fields
             .iter()
@@ -469,29 +515,30 @@ impl ConnectionSchema {
             .collect();
 
         match &self.format {
-            Some(Format::RawString(_)) => {
-                if non_metadata_fields.len() != 1
+            Some(Format::RawString(_))
+                if (non_metadata_fields.len() != 1
                     || non_metadata_fields.first().unwrap().field_type != FieldType::String
-                    || non_metadata_fields.first().unwrap().name != "value"
-                {
-                    bail!(
-                        "raw_string format requires a schema with a single field called `value` of type TEXT"
-                    );
-                }
+                    || non_metadata_fields.first().unwrap().name != "value") =>
+            {
+                bail!(
+                    "raw_string format requires a schema with a single field called `value` of type TEXT"
+                );
             }
-            Some(Format::Json(json_format)) => {
+            Some(Format::Json(json_format))
                 if json_format.unstructured
                     && (non_metadata_fields.len() != 1
                         || non_metadata_fields.first().unwrap().field_type != FieldType::Json
-                        || non_metadata_fields.first().unwrap().name != "value")
-                {
-                    bail!(
-                        "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
-                    );
-                }
+                        || non_metadata_fields.first().unwrap().name != "value") =>
+            {
+                bail!(
+                    "json format with unstructured flag enabled requires a schema with a single field called `value` of type JSON"
+                );
+            }
+            Some(Format::Parquet(parquet_format)) => {
+                parquet_format.validate()?;
             }
             _ => {
-                // Right now only RawString has checks, but we may add checks for other formats in the future
+                // Other formats don't have checks yet, but we may add them in the future
             }
         }
 
@@ -531,6 +578,8 @@ pub struct ConnectionTable {
     #[serde(rename = "id")]
     pub pub_id: String,
     pub name: String,
+    pub version: i32,
+    pub latest: i32,
     pub created_at: u64,
     pub connector: String,
     pub connection_profile: Option<ConnectionProfile>,
@@ -613,12 +662,78 @@ pub struct ConfluentSchemaQueryParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::formats::ParquetFormat;
     use arrow_schema::{DataType, Field as ArrowField, TimeUnit};
     use serde_json::{Value as J, json};
     use std::sync::Arc;
 
     fn af(name: &str, dt: DataType, nullable: bool) -> ArrowField {
         ArrowField::new(name, dt, nullable)
+    }
+
+    fn source_field(name: &str, field_type: FieldType) -> SourceField {
+        SourceField {
+            name: name.to_string(),
+            field_type,
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        }
+    }
+
+    #[test]
+    fn connection_schema_rejects_duplicate_field_names_in_list_structs() {
+        let schema = ConnectionSchema {
+            format: None,
+            bad_data: None,
+            framing: None,
+            fields: vec![source_field(
+                "events",
+                FieldType::List(ListField {
+                    items: Box::new(ListFieldItem {
+                        name: "item".to_string(),
+                        field_type: FieldType::Struct(StructField {
+                            fields: vec![
+                                source_field("id", FieldType::Int64),
+                                source_field("id", FieldType::String),
+                            ],
+                        }),
+                        required: false,
+                        sql_name: None,
+                    }),
+                }),
+            )],
+            definition: None,
+            inferred: None,
+            primary_keys: HashSet::default(),
+        };
+
+        let err = schema.validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid field names in schema.events[]: Schema error: Schema contains duplicate unqualified field name id"
+        );
+    }
+
+    #[test]
+    fn validate_parquet_row_group_bytes() {
+        let schema = |row_group_bytes| ConnectionSchema {
+            format: Some(Format::Parquet(ParquetFormat {
+                compression: Default::default(),
+                row_group_bytes,
+            })),
+            bad_data: None,
+            framing: None,
+            fields: vec![source_field("id", FieldType::Int64)],
+            definition: None,
+            inferred: None,
+            primary_keys: HashSet::default(),
+        };
+
+        assert!(schema(None).validate().is_ok());
+        assert!(schema(Some(128 * 1024 * 1024)).validate().is_ok());
+        assert!(schema(Some(0)).validate().is_err());
+        assert!(schema(Some(u64::MAX)).validate().is_err());
     }
 
     #[test]
@@ -902,5 +1017,196 @@ mod tests {
             let back: SourceField = a.try_into().unwrap();
             assert_eq!(back, sf);
         }
+    }
+
+    #[test]
+    fn source_field_serializes_with_flattened_type_and_sql_name() {
+        let sf = SourceField {
+            name: "count".into(),
+            field_type: FieldType::Int64,
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "count",
+                "type": "int64",
+                "required": true,
+                "sql_name": "BIGINT",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_serializes_payload_variant_with_sibling_fields() {
+        let sf = SourceField {
+            name: "ts".into(),
+            field_type: FieldType::Timestamp(TimestampField {
+                unit: TimestampUnit::Millisecond,
+            }),
+            required: false,
+            sql_name: None,
+            metadata_key: Some("kafka_ts".into()),
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "ts",
+                "type": "timestamp",
+                "unit": "millisecond",
+                "required": false,
+                "metadata_key": "kafka_ts",
+                "sql_name": "TIMESTAMP(3)",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_metadata_key_omitted_when_none() {
+        let sf = SourceField {
+            name: "x".into(),
+            field_type: FieldType::String,
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let s = serde_json::to_string(&sf).unwrap();
+        assert!(!s.contains("metadata_key"), "got: {s}");
+    }
+
+    #[test]
+    fn list_field_item_serializes_with_flattened_type_and_sql_name() {
+        let item = ListFieldItem {
+            name: "item".into(),
+            field_type: FieldType::Int32,
+            required: true,
+            sql_name: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&item).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "item",
+                "type": "int32",
+                "required": true,
+                "sql_name": "INTEGER",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_struct_payload_serializes_recursively() {
+        let sf = SourceField {
+            name: "obj".into(),
+            field_type: FieldType::Struct(StructField {
+                fields: vec![
+                    SourceField {
+                        name: "a".into(),
+                        field_type: FieldType::Int32,
+                        required: true,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                    SourceField {
+                        name: "b".into(),
+                        field_type: FieldType::String,
+                        required: false,
+                        sql_name: None,
+                        metadata_key: None,
+                    },
+                ],
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "obj",
+                "type": "struct",
+                "fields": [
+                    {
+                        "name": "a",
+                        "type": "int32",
+                        "required": true,
+                        "sql_name": "INTEGER",
+                    },
+                    {
+                        "name": "b",
+                        "type": "string",
+                        "required": false,
+                        "sql_name": "TEXT",
+                    },
+                ],
+                "required": true,
+                "sql_name": "STRUCT <a INTEGER, b TEXT>",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_list_payload_recurses_through_list_field_item() {
+        let sf = SourceField {
+            name: "arr".into(),
+            field_type: FieldType::List(ListField {
+                items: Box::new(ListFieldItem {
+                    name: "item".into(),
+                    field_type: FieldType::Int64,
+                    required: true,
+                    sql_name: None,
+                }),
+            }),
+            required: false,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "arr",
+                "type": "list",
+                "items": {
+                    "name": "item",
+                    "type": "int64",
+                    "required": true,
+                    "sql_name": "BIGINT",
+                },
+                "required": false,
+                "sql_name": "BIGINT[]",
+            })
+        );
+    }
+
+    #[test]
+    fn source_field_with_decimal_payload() {
+        let sf = SourceField {
+            name: "price".into(),
+            field_type: FieldType::Decimal128(DecimalField {
+                precision: 10,
+                scale: 2,
+            }),
+            required: true,
+            sql_name: None,
+            metadata_key: None,
+        };
+        let j: J = serde_json::from_str(&serde_json::to_string(&sf).unwrap()).unwrap();
+        assert_eq!(
+            j,
+            json!({
+                "name": "price",
+                "type": "decimal128",
+                "precision": 10,
+                "scale": 2,
+                "required": true,
+                "sql_name": "DECIMAL(10, 2)",
+            })
+        );
     }
 }

@@ -393,7 +393,7 @@ impl OutNetworkLink {
                             ArrowMessage::Data(data) => {
                                 let (_, encoded_message) = {
                                     let mut dictionary_tracker = dictionary_tracker.lock().await;
-                                    IpcDataGenerator {}.encoded_batch(&data, &mut dictionary_tracker, &write_options)
+                                    IpcDataGenerator {}.encode(&data, &mut dictionary_tracker, &write_options, &mut Default::default())
                                       .expect("failed to encode batch")
                                 };
                                 write_message_and_header(&mut Pin::new(&mut self.stream), quad, encoded_message).await.unwrap();

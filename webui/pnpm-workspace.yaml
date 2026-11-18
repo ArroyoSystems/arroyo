@@ -1,0 +1,4 @@
+strictPeerDependencies: true
+
+allowBuilds:
+  esbuild: true

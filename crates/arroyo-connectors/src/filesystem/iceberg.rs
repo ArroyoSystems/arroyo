@@ -120,10 +120,11 @@ impl IcebergConnector {
         // try to connect to the catalog
 
         let IcebergTable::Sink(sink) = table;
-        let table = sink::iceberg::IcebergTable::new(&profile.catalog, sink)?;
+        let mut table = sink::iceberg::IcebergTable::new(&profile.catalog, sink)?;
+        table.initialize_catalog().await?;
 
         table
-            .catalog
+            .catalog()
             .namespace_exists(table.table_ident.namespace())
             .await?;
 
@@ -209,6 +210,8 @@ impl Connector for IcebergConnector {
             .ok_or_else(|| anyhow!("no schema defined for Iceberg connection"))?;
 
         let IcebergTable::Sink(sink) = &table;
+        sink.rolling_policy.validate()?;
+        sink.multipart.validate()?;
 
         let arrow_schema = schema.arroyo_schema().schema.clone();
 
@@ -235,10 +238,7 @@ impl Connector for IcebergConnector {
             bail!("'format' must be parquet for Iceberg sink")
         };
 
-        let description = format!(
-            "IcebergSink{:?}<{}.{}>",
-            sink.version, sink.namespace, sink.table_name
-        );
+        let description = format!("IcebergSink<{}.{}>", sink.namespace, sink.table_name);
 
         let config = OperatorConfig {
             connection: serde_json::to_value(config).unwrap(),
@@ -302,7 +302,7 @@ impl Connector for IcebergConnector {
                         file_naming: sink.file_naming,
                         partitioning: PartitioningConfig::default(),
                         multipart: sink.multipart,
-                        version: sink.version,
+                        version: None,
                     },
                     config,
                     TableFormat::Iceberg(Box::new(tf)),

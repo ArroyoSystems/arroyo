@@ -1,0 +1,3 @@
+{"after":{"avg":null,"bucket":0,"max":null,"min":null,"row_count":34,"sum":null,"value_count":0},"before":null,"op":"c"}
+{"after":{"avg":49.0,"bucket":1,"max":97,"min":1,"row_count":33,"sum":833,"value_count":17},"before":null,"op":"c"}
+{"after":{"avg":50.0,"bucket":2,"max":98,"min":2,"row_count":33,"sum":1650,"value_count":33},"before":null,"op":"c"}

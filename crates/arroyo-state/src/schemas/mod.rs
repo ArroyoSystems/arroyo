@@ -13,7 +13,7 @@ use arroyo_rpc::errors::StateError;
 use arroyo_rpc::get_hasher;
 use arroyo_types::from_nanos;
 use bincode::config;
-use datafusion::common::{ScalarValue, hash_utils::create_hashes};
+use datafusion::common::{ScalarValue, hash_utils::create_hashes_with_hasher};
 use tracing::warn;
 
 use crate::{DataOperation, parquet::ParquetStats};
@@ -171,12 +171,11 @@ impl SchemaWithHashAndOperation {
 
         let mut hash_buffer = vec![0u64; key_batch.num_rows()];
         let _hashes =
-            create_hashes(key_batch.columns(), &get_hasher(), &mut hash_buffer).map_err(|e| {
-                StateError::Other {
+            create_hashes_with_hasher(key_batch.columns(), &get_hasher(), &mut hash_buffer)
+                .map_err(|e| StateError::Other {
                     table: "".to_string(),
                     error: format!("failed to compute hashes: {e:?}"),
-                }
-            })?;
+                })?;
         let hash_array = PrimitiveArray::<UInt64Type>::from(hash_buffer);
 
         let hash_min = min(&hash_array).unwrap();

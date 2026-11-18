@@ -1,13 +1,15 @@
+use crate::job_controller::job_metrics::JobMetrics;
 use crate::job_controller::model::{
     CheckpointingOrCommittingState, JobState, RunningJobModel, TaskState, TaskStatus, WorkerState,
     WorkerStatus,
 };
 use crate::job_controller::{
-    JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent, WorkerContext,
-    connect_to_worker,
+    CheckpointHistory, JobControllerStatus, RetireWorkerLeader, RunningMessage, TaskFailedEvent,
+    WorkerContext, connect_to_worker, job_metrics,
 };
 use anyhow::{anyhow, bail};
 use arroyo_datastream::logical::LogicalProgram;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::{
     CheckpointManifest, CommitReq, GetWorkerPhaseReq, JobControllerInitReq, JobFailure, JobStatus,
@@ -21,7 +23,8 @@ use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
 use arroyo_state::{StorageProviderFor, get_storage_provider};
 use arroyo_state_protocol::ProtocolPaths;
-use arroyo_state_protocol::types::{CheckpointRef, Generation};
+use arroyo_state_protocol::gc::cleanup_leader_checkpoints;
+use arroyo_state_protocol::types::{CheckpointRef, Epoch, Generation};
 use arroyo_state_protocol::workflow::{
     CommitPermit, CommittedMarkerOutcome, GenerationInitialization, GenerationRecovery,
     InitializeGenerationRequest, complete_commit, initialize_generation,
@@ -45,15 +48,21 @@ pub struct WorkerJobController {
     checkpoint_interval: Duration,
     status: JobControllerStatus,
     model: RunningJobModel,
-    cleanup_task: Option<JoinHandle<anyhow::Result<u32>>>,
+    cleanup_task: Option<JoinHandle<anyhow::Result<Epoch>>>,
+    cleanup_backoff: Option<SystemTime>,
     rx: Receiver<RunningMessage>,
     stopping: bool,
+    checkpoint_stopping: bool,
     failing: bool,
     final_checkpoint_started: bool,
     replay_commits: Option<(CommitReq, CommitPermit)>,
 }
 
 const FAILURE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(60);
+/// How many historical checkpoints to keep around
+const CHECKPOINTS_TO_KEEP: u64 = 10;
+/// Don't clean unless we're cleaning at least this many checkpoints
+const CLEAN_AT_LEAST: u64 = 3;
 
 impl std::fmt::Debug for WorkerJobController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -78,12 +87,14 @@ impl WorkerJobController {
         worker_context: WorkerContext,
         program: Arc<LogicalProgram>,
         tasks: &[TaskAssignment],
-        epoch: u64,
-        min_epoch: u64,
+        epoch: Epoch,
+        min_epoch: Epoch,
         rx: Receiver<RunningMessage>,
         job_status: Arc<Mutex<JobStatus>>,
+        checkpoint_history: Arc<Mutex<CheckpointHistory>>,
         checkpoint_interval: Duration,
         parent_ref: Option<(CheckpointRef, CheckpointManifest)>,
+        metrics: Option<JobMetrics>,
     ) -> anyhow::Result<Self> {
         info!(job_id =? worker_context.job_id,
             restore_from =? parent_ref.as_ref().map(|p| &p.0),
@@ -133,7 +144,10 @@ impl WorkerJobController {
             })
             .collect();
 
-        let status = JobControllerStatus { job_status };
+        let status = JobControllerStatus {
+            job_status,
+            checkpoint_history,
+        };
         status.transition(rpc::JobState::JobRunning)?;
 
         // this is also happening on the controller, so the generation manifest should already have
@@ -181,7 +195,7 @@ impl WorkerJobController {
 
         // Note: There are panics in some of these branches because they indicate a bug in the controller
         // or worker, not just inconsistent state. We are working around some limitations in adapting
-        // the existing worker lifecycle to the worker leader mode, such that we need the controller
+        // the existing worker lifecycle to the worker-leader architecture, such that we need the controller
         // to look up the checkpoint information to initialize the workers. If on the leader side
         // we end up with a different view of the checkpoint state, that indicates something has
         // gone very wrong and our best choice is to panic and have the controller clean us up.
@@ -237,15 +251,16 @@ impl WorkerJobController {
             model: RunningJobModel {
                 pipeline_id: worker_context.pipeline_id.clone(),
                 job_id: worker_context.job_id.clone(),
-                generation: worker_context.generation,
+                generation: Generation(worker_context.generation),
                 state: JobState::Running,
                 checkpoint_state: None,
-                epoch: epoch as u32,
-                min_epoch: min_epoch as u32,
+                epoch,
+                min_epoch,
                 last_checkpoint: Instant::now(),
                 workers,
                 tasks,
                 operator_parallelism: program.tasks_per_node(),
+                job_metrics: metrics,
                 program,
                 metric_update_task: None,
                 last_updated_metrics: Instant::now(),
@@ -255,16 +270,16 @@ impl WorkerJobController {
                 ),
                 checkpoint_parent_ref: parent_ref,
                 checkpoint_spans: vec![],
-                worker_leader_mode: true,
-                storage_role: StorageProviderFor::Worker,
                 finished_operators: vec![],
                 generation_manifest: Some(generation_manifest),
             },
             status,
             worker_context,
             cleanup_task: None,
+            cleanup_backoff: None,
             rx,
             stopping: false,
+            checkpoint_stopping: false,
             failing: false,
             final_checkpoint_started: false,
             replay_commits,
@@ -306,10 +321,8 @@ impl WorkerJobController {
 
                 // TODO: this really should happen after we've replayed the initial commit, but
                 //  that requires a significant reworking on the worker lifecycle. However, Committing
-                //  concurrently with startup is how the existing controller has always worked, so in
-                //  practice it doesn't seem to be likely that workers outrun the commit, but it is
-                //  possible and we should look at fixing this at some point in the future when we
-                //  remove the legacy code paths.
+                //  Workers currently begin running concurrently with the commit, so it is possible
+                //  for them to outrun it. Fixing this requires reworking the worker lifecycle.
                 status.connect.job_controller_init(JobControllerInitReq {}).await?;
 
                 Ok(())
@@ -328,21 +341,25 @@ impl WorkerJobController {
 
             try_join_all(futures).await?;
 
-            let mut subtasks_to_commit = HashSet::new();
-
-            for (op, data) in &commit_req.committing_data {
-                for t in data.committing_data.values() {
-                    for subtask in t.commit_data_by_subtask.keys() {
-                        subtasks_to_commit.insert((op.clone(), *subtask));
-                    }
-                }
-            }
+            let mut subtasks_to_commit =
+                replay_commit_acks(&commit_req, &self.model.program.tasks_per_operator())?;
 
             // now wait for ack's
-            info!(job_id =? self.worker_context.job_id, "waiting for subtasks to commit...");
+            info!(job_id =? self.worker_context.job_id, subtasks = subtasks_to_commit.len(),
+                "waiting for subtasks to commit...");
             // no timeout here, we rely on the controller to kill us if we take too long to initialize
+            let mut progress_log = interval(Duration::from_secs(30));
+            // the first tick completes immediately
+            progress_log.tick().await;
             while !subtasks_to_commit.is_empty() {
                 tokio::select! {
+                    _ = progress_log.tick() => {
+                        let mut outstanding: Vec<_> = subtasks_to_commit.iter().collect();
+                        outstanding.sort();
+                        warn!(job_id = *self.worker_context.job_id, generation =? self.worker_context.generation,
+                            remaining = outstanding.len(), outstanding =? outstanding,
+                            "still waiting for subtasks to finish replaying the initial commit");
+                    }
                     msg = self.rx.recv() => {
                         match msg {
                             Some(RunningMessage::TaskCheckpointEvent(event))
@@ -414,6 +431,13 @@ impl WorkerJobController {
             }
         }
 
+        // Reset `last_heartbeat` before worker timeout monitoring starts, so that slow worker
+        // initialisation does not result in immediate timeout detection
+        let now = Instant::now();
+        for worker in self.model.workers.values_mut() {
+            worker.last_heartbeat = now;
+        }
+
         let mut interval = interval(Duration::from_millis(200));
         loop {
             tokio::select! {
@@ -449,7 +473,7 @@ impl WorkerJobController {
                             self.status.transition(rpc::JobState::JobFinished)?;
                         }
                         Ok(ControllerProgress::Stopped) => {
-                            self.status.transition(rpc::JobState::JobStopped)?;
+                            self.status.stopped(self.checkpoint_stopping)?;
                             return Ok(());
                         }
                         Ok(ControllerProgress::TaskFailed(event)) => {
@@ -484,7 +508,8 @@ impl WorkerJobController {
                                 subtask_index: None,
                                 message: err.to_string(),
                                 error_domain: rpc::ErrorDomain::Internal.into(),
-                                retry_hint: rpc::RetryHint::WithBackoff.into(),
+                                details: String::new(),
+                                retry_policy: Some(RetryHint::WithBackoff.into()),
                             })
                             .await?;
                             return Ok(());
@@ -509,12 +534,14 @@ impl WorkerJobController {
 
         if self.stopping {
             if stop_mode == JobStopMode::JobStopImmediate {
+                self.checkpoint_stopping = false;
                 self.stop_job(StopMode::Immediate).await?;
             }
             return Ok(());
         }
 
         self.stopping = true;
+        self.checkpoint_stopping = stop_mode == JobStopMode::JobStopCheckpoint;
         self.status.transition(rpc::JobState::JobStopping)?;
 
         match stop_mode {
@@ -545,18 +572,22 @@ impl WorkerJobController {
             return Ok(ControllerProgress::TaskFailed(event));
         }
 
-        // if we're stopping and all tasks have finished, we're done
-        if self.stopping && self.model.all_tasks_finished() {
-            return Ok(ControllerProgress::Stopped);
+        if !self.stopping && self.model.all_tasks_finished() {
+            let state = self.status.job_status.lock().unwrap().job_state();
+            return Ok(match state {
+                rpc::JobState::JobFinishing | rpc::JobState::JobFinished => {
+                    ControllerProgress::Finished
+                }
+                rpc::JobState::JobFailing | rpc::JobState::JobFailed => {
+                    ControllerProgress::Continue
+                }
+                _ => ControllerProgress::Finishing,
+            });
         }
 
         // have any of our tasks finished?
         if !self.stopping && self.model.any_finished_sources() {
             return Ok(ControllerProgress::Finishing);
-        }
-
-        if !self.stopping && self.model.all_tasks_finished() {
-            return Ok(ControllerProgress::Finished);
         }
 
         if matches!(
@@ -574,7 +605,7 @@ impl WorkerJobController {
                 Ok(Ok(min_epoch)) => {
                     info!(
                         message = "setting new min epoch",
-                        min_epoch,
+                        min_epoch = *min_epoch,
                         job_id = *self.worker_context.job_id
                     );
                     self.model.min_epoch = min_epoch;
@@ -586,8 +617,7 @@ impl WorkerJobController {
                         error = format!("{:?}", e)
                     );
 
-                    // wait a bit before trying again
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    self.cleanup_backoff = Some(SystemTime::now() + Duration::from_secs(10));
                 }
                 Err(e) => {
                     error!(
@@ -595,23 +625,14 @@ impl WorkerJobController {
                         job_id = *self.worker_context.job_id,
                         error = format!("{:?}", e)
                     );
-
-                    // wait a bit before trying again
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    self.cleanup_backoff = Some(SystemTime::now() + Duration::from_secs(10));
                 }
             }
         }
 
-        // TODO: cleaning
-        // if !self.stopping
-        //     && let Some(new_epoch) = self.model.cleanup_needed()
-        //     && self.cleanup_task.is_none()
-        //     && self.model.checkpoint_state.is_none()
-        // {
-        //     self.cleanup_task = Some(self.start_cleanup(new_epoch));
-        // }
-
-        if self.stopping && !self.final_checkpoint_started && self.model.checkpoint_state.is_none()
+        if self.checkpoint_stopping
+            && !self.final_checkpoint_started
+            && self.model.checkpoint_state.is_none()
         {
             info!(
                 message = "retrying deferred final checkpoint",
@@ -630,6 +651,32 @@ impl WorkerJobController {
         {
             // or do we need to start checkpointing?
             self.checkpoint(false).await?;
+        }
+
+        // on final checkpoint we have to wait until we've written the metadata before shutting
+        // down the job controller
+        if self.stopping
+            && self.model.all_tasks_finished()
+            && (!self.checkpoint_stopping
+                || (self.final_checkpoint_started && self.model.checkpoint_state.is_none()))
+        {
+            return Ok(ControllerProgress::Stopped);
+        }
+
+        // do we need to start cleaning?
+        let now = SystemTime::now();
+        if !self.stopping
+            && self.cleanup_task.is_none()
+            && self.model.checkpoint_state.is_none()
+            && self.cleanup_backoff.unwrap_or(now) <= now
+        {
+            self.cleanup_task = self.start_cleanup();
+        }
+
+        // update metrics
+        if self.model.last_updated_metrics.elapsed() > job_metrics::COLLECTION_RATE {
+            self.model.update_metrics().await;
+            self.model.last_updated_metrics = Instant::now();
         }
 
         Ok(ControllerProgress::Continue)
@@ -753,7 +800,7 @@ impl WorkerJobController {
             worker
                 .connect
                 .commit(CommitReq {
-                    epoch: self.model.epoch,
+                    epoch: *self.model.epoch,
                     committing_data: committing.committing_data(),
                 })
                 .await?;
@@ -793,6 +840,41 @@ impl WorkerJobController {
 
     pub fn operator_parallelism(&self, node_id: u32) -> Option<usize> {
         self.model.operator_parallelism.get(&node_id).cloned()
+    }
+
+    fn start_cleanup(&mut self) -> Option<JoinHandle<anyhow::Result<Epoch>>> {
+        let job_id = self.worker_context.job_id.clone();
+        let paths = self.model.protocol_paths.clone();
+
+        let new_min = Epoch((*self.model.epoch).saturating_sub(CHECKPOINTS_TO_KEEP));
+
+        if (*new_min).saturating_sub(*self.model.min_epoch) < CLEAN_AT_LEAST {
+            return None;
+        }
+
+        let last_checkpoint = self.model.checkpoint_parent_ref.as_ref()?.clone();
+
+        info!(
+            message = "Starting cleaning",
+            job_id = *job_id,
+            min_epoch = *self.model.min_epoch,
+            new_min = *new_min,
+        );
+
+        let start = Instant::now();
+        Some(tokio::spawn(async move {
+            let storage = get_storage_provider(&StorageProviderFor::Worker).await?;
+            cleanup_leader_checkpoints(storage.as_ref(), &paths, last_checkpoint, new_min).await?;
+
+            info!(
+                message = "Finished cleaning",
+                job_id = *job_id,
+                new_min = *new_min,
+                duration = start.elapsed().as_secs_f32()
+            );
+
+            Ok(new_min)
+        }))
     }
 }
 
@@ -842,7 +924,151 @@ fn manifest_into_commit_req(manifest: CheckpointManifest) -> anyhow::Result<Comm
     }
 
     Ok(CommitReq {
-        epoch: manifest.epoch as u32,
+        epoch: manifest.epoch,
         committing_data,
     })
+}
+
+/// Computes the `(operator_id, subtask_index)` acks the leader must wait for when replaying the
+/// commit of a recovery checkpoint.
+///
+/// The commit data in `commit_req` is keyed by the subtask indices of the run that *took* the
+/// checkpoint, but the acks come from the subtasks of the *current* run: every running subtask of a
+/// committing operator receives the commit and acknowledges it with its own subtask index. The two
+/// can differ when the job is restarted at a different parallelism after a checkpoint whose commit
+/// never completed (e.g., a stop-with-checkpoint or rescale whose final commit failed). Waiting for
+/// the checkpoint's indices would hang forever when the parallelism was reduced, so we wait for
+/// every subtask of the current run instead.
+///
+/// Operators whose commit data is empty for every subtask are skipped; they have nothing to replay
+/// (and may not ack a replayed commit at all).
+fn replay_commit_acks(
+    commit_req: &CommitReq,
+    tasks_per_operator: &HashMap<String, usize>,
+) -> anyhow::Result<HashSet<(String, u32)>> {
+    let mut acks = HashSet::new();
+
+    for (operator_id, data) in &commit_req.committing_data {
+        let has_commit_data = data
+            .committing_data
+            .values()
+            .any(|t| !t.commit_data_by_subtask.is_empty());
+
+        if !has_commit_data {
+            continue;
+        }
+
+        let parallelism = *tasks_per_operator.get(operator_id).ok_or_else(|| {
+            anyhow!(
+                "recovery checkpoint has commit data for operator {operator_id}, which is not \
+                part of the current program"
+            )
+        })?;
+
+        for subtask_index in 0..parallelism {
+            acks.insert((operator_id.clone(), subtask_index as u32));
+        }
+    }
+
+    Ok(acks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn commit_req(operators: &[(&str, &[(&str, &[u32])])]) -> CommitReq {
+        CommitReq {
+            epoch: 5,
+            committing_data: operators
+                .iter()
+                .map(|(op, tables)| {
+                    (
+                        op.to_string(),
+                        OperatorCommitData {
+                            committing_data: tables
+                                .iter()
+                                .map(|(table, subtasks)| {
+                                    (
+                                        table.to_string(),
+                                        TableCommitData {
+                                            commit_data_by_subtask: subtasks
+                                                .iter()
+                                                .map(|i| (*i, vec![*i as u8]))
+                                                .collect(),
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    fn parallelism(ops: &[(&str, usize)]) -> HashMap<String, usize> {
+        ops.iter().map(|(op, p)| (op.to_string(), *p)).collect()
+    }
+
+    fn expected(ops: &[(&str, u32)]) -> HashSet<(String, u32)> {
+        ops.iter()
+            .flat_map(|(op, p)| (0..*p).map(|i| (op.to_string(), i)))
+            .collect()
+    }
+
+    // checkpoint taken at parallelism 4 for both a sink and a source
+    const CHECKPOINT: &[(&str, &[(&str, &[u32])])] = &[
+        ("sink_1", &[("p", &[0, 1, 2, 3])]),
+        ("source_0", &[("offsets", &[0, 1, 2, 3])]),
+    ];
+
+    #[test]
+    fn replay_at_same_parallelism_waits_for_all_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 4), ("sink_1", 4), ("map_2", 4)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 4), ("source_0", 4)]));
+    }
+
+    #[test]
+    fn replay_at_lower_parallelism_only_waits_for_running_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 2), ("sink_1", 2)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 2), ("source_0", 2)]));
+    }
+
+    #[test]
+    fn replay_at_higher_parallelism_waits_for_new_subtasks() {
+        let acks = replay_commit_acks(
+            &commit_req(CHECKPOINT),
+            &parallelism(&[("source_0", 8), ("sink_1", 8)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 8), ("source_0", 8)]));
+    }
+
+    #[test]
+    fn operators_with_empty_commit_data_are_not_waited_on() {
+        // e.g., the exactly-once kafka sink has a two-phase-commit table but never writes commit
+        // data, and does not ack replayed commits
+        let acks = replay_commit_acks(
+            &commit_req(&[
+                ("sink_1", &[("p", &[0, 1])]),
+                ("kafka_sink_3", &[("i", &[])]),
+            ]),
+            &parallelism(&[("sink_1", 2), ("kafka_sink_3", 2)]),
+        )
+        .unwrap();
+
+        assert_eq!(acks, expected(&[("sink_1", 2)]));
+    }
 }

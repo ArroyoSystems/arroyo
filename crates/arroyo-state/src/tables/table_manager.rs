@@ -181,7 +181,7 @@ impl BackendFlusher {
         };
         self.control_tx
             .send(ControlResp::CheckpointCompleted(CheckpointCompleted {
-                checkpoint_epoch: cp.epoch,
+                checkpoint_epoch: cp.epoch as u64,
                 operator_idx: self.task_info.operator_idx,
                 operator_id: self.task_info.operator_id.clone(),
                 subtask_metadata,

@@ -8,9 +8,9 @@ pub mod tls;
 use anyhow::anyhow;
 use arroyo_types::TELEMETRY_KEY;
 use axum::Router;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use lazy_static::lazy_static;
@@ -33,7 +33,7 @@ use tower::layer::util::Stack;
 use tower::{Layer, Service};
 use tower_http::classify::{GrpcCode, GrpcErrorsAsFailures, SharedClassifier};
 use tower_http::trace::{DefaultOnFailure, TraceLayer};
-use tower_http::validate_request::ValidateRequestHeaderLayer;
+use tower_http::validate_request::{ValidateRequest, ValidateRequestHeaderLayer};
 use tracing::metadata::LevelFilter;
 use tracing::{Level, debug, info, span};
 use tracing_subscriber::EnvFilter;
@@ -50,13 +50,14 @@ use uuid::Uuid;
 
 pub const BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 pub const GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-pub const VERSION: &str = "0.16.0-dev";
+pub const VERSION: &str = "0.17.0-dev";
 
 static CLUSTER_ID: OnceCell<String> = OnceCell::new();
 
-pub fn init_logging(name: &str) -> Option<WorkerGuard> {
+pub fn init_logging(name: &str, tags: &[(&str, &str)]) -> Option<WorkerGuard> {
     init_logging_with_filter(
         name,
+        tags,
         EnvFilter::builder()
             .with_default_directive(LevelFilter::INFO.into())
             .from_env_lossy(),
@@ -80,7 +81,11 @@ macro_rules! register_log {
     }};
 }
 
-pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<WorkerGuard> {
+pub fn init_logging_with_filter(
+    name: &str,
+    tags: &[(&str, &str)],
+    filter: EnvFilter,
+) -> Option<WorkerGuard> {
     init_event_logger(Arc::new(AnalyticsEventLogger::new()));
 
     if let Err(e) = LogTracer::init() {
@@ -139,6 +144,15 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
                 layer.with_file("filename");
             }
 
+            layer.add_static_field("arroyo_service", serde_json::json!(name));
+            if let Ok(pipeline_id) = env::var(arroyo_types::PIPELINE_ID_ENV) {
+                layer.add_static_field("pipeline_id", serde_json::json!(pipeline_id));
+            }
+
+            for (k, v) in tags {
+                layer.add_static_field(*k, json!(*v));
+            }
+
             // add static fields
             for (key, value) in &config().logging.static_fields {
                 layer.add_static_field(key, serde_json::json!(value));
@@ -160,6 +174,12 @@ pub fn init_logging_with_filter(_name: &str, filter: EnvFilter) -> Option<Worker
             tracing::error!(message = %panic);
         }
     }));
+
+    let max_message_size = arroyo_rpc::grpc_max_message_size();
+    tracing::info!(
+        max_message_size,
+        "gRPC max message size: {max_message_size} bytes"
+    );
 
     guard
 }
@@ -254,7 +274,7 @@ impl EventLogger for AnalyticsEventLogger {
                     .send()
                     .await
                 {
-                    debug!("Failed to record event: {}", e);
+                    debug!("Failed to record event: {:#}", anyhow::Error::new(e));
                 }
             });
         }
@@ -330,17 +350,42 @@ fn require_profiling_activated(
     }
 }
 
-pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
-    let config = config();
-    let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
+#[derive(Clone)]
+pub struct StaticApiKeyValidator {
+    expected: HeaderValue,
+}
 
+impl ValidateRequest<Body> for StaticApiKeyValidator {
+    type ResponseBody = Body;
+
+    fn validate(&mut self, request: &mut http::Request<Body>) -> Result<(), http::Response<Body>> {
+        if request.headers().get(header::AUTHORIZATION) == Some(&self.expected) {
+            Ok(())
+        } else {
+            let mut response = http::Response::new(Body::empty());
+            *response.status_mut() = StatusCode::UNAUTHORIZED;
+            Err(response)
+        }
+    }
+}
+
+pub fn static_api_key_layer(api_key: &str) -> ValidateRequestHeaderLayer<StaticApiKeyValidator> {
+    let expected = format!("Bearer {api_key}")
+        .parse()
+        .expect("token is not a valid header value");
+    ValidateRequestHeaderLayer::custom(StaticApiKeyValidator { expected })
+}
+
+fn admin_router(
+    service: &str,
+    auth_mode: &ApiAuthMode,
+    allow_unauthenticated_metrics: bool,
+) -> Router {
     let state = Arc::new(AdminState {
         name: format!("arroyo-{service}"),
     });
-    let mut app = Router::new()
-        .route("/status", get(status))
+    let mut protected = Router::new()
         .route("/name", get(root))
-        .route("/metrics", get(metrics))
         .route("/metrics.pb", get(metrics_proto))
         .route("/details", get(details))
         .route("/config", get(config_route))
@@ -348,9 +393,30 @@ pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
         .route("/debug/pprof/profile", get(handle_get_profile))
         .with_state(state);
 
-    if let ApiAuthMode::StaticApiKey { api_key } = &config.admin.auth_mode {
-        app = app.layer(ValidateRequestHeaderLayer::bearer(api_key));
+    if !allow_unauthenticated_metrics {
+        protected = protected.route("/metrics", get(metrics));
+    }
+
+    if let ApiAuthMode::StaticApiKey { api_key } = auth_mode {
+        protected = protected.layer(static_api_key_layer(api_key));
     };
+
+    // /status is always reachable without auth (e.g. for liveness probes).
+    let mut public = Router::new().route("/status", get(status));
+    if allow_unauthenticated_metrics {
+        public = public.route("/metrics", get(metrics));
+    }
+    public.merge(protected)
+}
+
+pub async fn start_admin_server(service: &str) -> anyhow::Result<()> {
+    let config = config();
+    let addr = SocketAddr::new(config.admin.bind_address, config.admin.http_port);
+    let app = admin_router(
+        service,
+        &config.admin.auth_mode,
+        config.admin.allow_unauthenticated_metrics,
+    );
 
     let tls_config =
         tls::create_http_tls_config(&config.admin.auth_mode, &config.admin.tls).await?;
@@ -520,4 +586,81 @@ pub async fn wrap_start(
                 .unwrap_or_else(|| e.to_string())
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    fn static_auth() -> ApiAuthMode {
+        toml::from_str(
+            r#"
+                type = "static-api-key"
+                api-key = "secret"
+            "#,
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unauthenticated_metrics_are_configurable() {
+        let response = admin_router("test", &static_auth(), false)
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let app = admin_router("test", &static_auth(), true);
+        let response = app
+            .clone()
+            .oneshot(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let response = app
+            .oneshot(Request::get("/details").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn static_api_key_auth_preserves_bearer_responses() {
+        let app = admin_router("test", &static_auth(), false);
+
+        for authorization in [None, Some("Bearer wrong"), Some("Basic secret")] {
+            let mut request = Request::get("/details");
+            if let Some(value) = authorization {
+                request = request.header(header::AUTHORIZATION, value);
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            assert!(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+
+        let response = app
+            .oneshot(
+                Request::get("/details")
+                    .header(header::AUTHORIZATION, "Bearer secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }

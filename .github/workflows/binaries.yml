@@ -15,7 +15,7 @@ env:
 jobs:
   linux:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
@@ -37,20 +37,27 @@ jobs:
           - 5432:5432
     steps:
       - name: Check out
-        uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Install system dependencies
+        # librdkafka 2.12 includes curl/curl.h under `#ifdef WITH_OAUTHBEARER_OIDC`, which is
+        # always defined by its CMake config (as 0), so the header is needed even with curl
+        # disabled. Only the header is used; nothing links against libcurl.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.7.1
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install protoc compiler
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
-      - name: Update rust
-        run: |
-          rustup update
+      - name: Install Rust
+        run: rustup toolchain install
       - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           architecture: ${{ matrix.config.python_arch }}
@@ -59,14 +66,15 @@ jobs:
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
-        run: cd webui && pnpm install && pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Create output directory
         run: mkdir artifacts
       - name: Build Arroyo with Python
         run: PYO3_PYTHON="$pythonLocation/bin/python3" LD_LIBRARY_PATH="$pythonLocation/lib:${LD_LIBRARY_PATH:-}" cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
       - name: Build Arroyo without Python
         run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arroyo-${{ matrix.config.artifact }}
           path: artifacts/*
@@ -76,20 +84,23 @@ jobs:
     env:
       CMAKE_ARGS: -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # see https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
         config:
-          - { runner: macos-14-large, protoc: osx-x86_64, artifact: macos-x86_64 }
-          - { runner: macos-14-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
+          - { runner: macos-15-large, protoc: osx-x86_64, artifact: macos-x86_64 }
+          - { runner: macos-15-xlarge, protoc: osx-aarch_64, artifact: macos-m1 }
     runs-on: ${{ matrix.config.runner }}
     steps:
       - name: Check out
-        uses: actions/checkout@v4
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: actions/checkout@v7
+      - name: Setup pnpm and Node.js
+        uses: pnpm/setup@v3
         with:
-          version: 9.7.1
+          working-directory: webui
+          runtime: node@22
+          cache: true
+          require-lockfile: true
       - name: Install Python 3.12 via homebrew
         run: |
           set -euxo pipefail
@@ -112,24 +123,32 @@ jobs:
         run: |
           wget https://github.com/protocolbuffers/protobuf/releases/download/v$PROTOC_VERSION/protoc-$PROTOC_VERSION-${{ matrix.config.protoc }}.zip
           unzip protoc*.zip && sudo mv bin/protoc /usr/local/bin
+      - name: Install Rust
+        run: rustup toolchain install
       - name: Install Postgres and prepare DB
         run: |
-          brew install postgresql@14 && brew services start postgresql && sleep 10
-          psql postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
-          createdb arroyo
+          set -euxo pipefail
+          brew install postgresql@14
+          # use the versioned name: unversioned `postgresql` now resolves to a newer formula
+          brew services start postgresql@14
+          PG_BIN="$(brew --prefix postgresql@14)/bin"
+          for i in $(seq 1 30); do "$PG_BIN/pg_isready" -q && break; sleep 1; done
+          "$PG_BIN/psql" postgres -c "CREATE USER arroyo WITH PASSWORD 'arroyo' SUPERUSER;"
+          "$PG_BIN/createdb" arroyo
       - name: Run DB migrations
         run: |
           cargo install --debug refinery_cli --version $REFINERY_VERSION
           refinery migrate -e REFINERY_CONFIG -p crates/arroyo-api/migrations
       - name: Run frontend build
-        run: cd webui && pnpm install && pnpm build
+        working-directory: webui
+        run: pnpm build
       - name: Create output directory
         run: mkdir artifacts
       - name: Build Arroyo with Python
         run: PYO3_PYTHON=$(brew --prefix python@3.12)/Frameworks/Python.framework/Versions/3.12/bin/python3.12 cargo build --features python --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo-python
       - name: Build Arroyo without Python
         run: cargo build --release --package arroyo && strip target/release/arroyo && mv target/release/arroyo artifacts/arroyo
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arroyo-${{ matrix.config.artifact }}
           path: artifacts/*

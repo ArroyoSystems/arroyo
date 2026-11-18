@@ -1,15 +1,14 @@
-use std::{sync::Arc, time::SystemTime};
-
 use arrow::datatypes::{DataType, Field};
-use datafusion::common::{Result, plan_datafusion_err, plan_err};
-
 use arrow_schema::{DECIMAL_DEFAULT_SCALE, DECIMAL128_MAX_PRECISION, IntervalUnit, TimeUnit};
 use arroyo_types::ArroyoExtensionType;
-use datafusion::error::DataFusionError;
+use datafusion::common::{
+    DataFusionError, Diagnostic, Result, Span, plan_datafusion_err, plan_err,
+};
 use datafusion::sql::sqlparser::ast::{
-    ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, TimezoneInfo,
+    ArrayElemTypeDef, DataType as SQLDataType, ExactNumberInfo, Spanned, TimezoneInfo,
 };
 use itertools::Itertools;
+use std::{sync::Arc, time::SystemTime};
 // Pulled from DataFusion
 
 pub(crate) fn convert_data_type(
@@ -80,15 +79,11 @@ fn convert_simple_data_type(
             }
         },
         SQLDataType::Date => Ok(DataType::Date32),
-        SQLDataType::Time(None, tz_info) => {
-            if matches!(tz_info, TimezoneInfo::None)
-                || matches!(tz_info, TimezoneInfo::WithoutTimeZone)
-            {
-                Ok(DataType::Time64(TimeUnit::Nanosecond))
-            } else {
-                // We don't support TIMETZ and TIME WITH TIME ZONE for now
-                return plan_err!("Unsupported SQL type {sql_type:?}");
-            }
+        SQLDataType::Time(None, tz_info)
+            if (matches!(tz_info, TimezoneInfo::None)
+                || matches!(tz_info, TimezoneInfo::WithoutTimeZone)) =>
+        {
+            Ok(DataType::Time64(TimeUnit::Nanosecond))
         }
         SQLDataType::Numeric(exact_number_info) | SQLDataType::Decimal(exact_number_info) => {
             let (precision, scale) = match *exact_number_info {
@@ -101,7 +96,7 @@ fn convert_simple_data_type(
             make_decimal_type(precision, scale)
         }
         SQLDataType::Bytea => Ok(DataType::Binary),
-        SQLDataType::Interval => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
+        SQLDataType::Interval { .. } => Ok(DataType::Interval(IntervalUnit::MonthDayNano)),
         SQLDataType::Struct(fields, _) => {
             let fields: Vec<_> = fields
                 .iter()
@@ -121,7 +116,13 @@ fn convert_simple_data_type(
 
             Ok(DataType::Struct(fields.into()))
         }
-        _ => return plan_err!("Unsupported SQL type {sql_type:?}"),
+        SQLDataType::Custom(name, _) => {
+            let message = format!("Unsupported SQL type '{name}'");
+            let diagnostic =
+                Diagnostic::new_error(message.clone(), Span::try_from_sqlparser_span(name.span()));
+            return plan_err!("{message}"; diagnostic = diagnostic);
+        }
+        _ => return plan_err!("Unsupported SQL type '{sql_type}'"),
     };
 
     Ok((dt?, None))
@@ -129,22 +130,29 @@ fn convert_simple_data_type(
 
 /// Returns a validated `DataType` for the specified precision and
 /// scale
-pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<u64>) -> Result<DataType> {
+pub(crate) fn make_decimal_type(precision: Option<u64>, scale: Option<i64>) -> Result<DataType> {
     // postgres like behavior
     let (precision, scale) = match (precision, scale) {
-        (Some(p), Some(s)) => (p as u8, s as i8),
-        (Some(p), None) => (p as u8, 0),
+        (Some(p), Some(s)) => (p, s),
+        (Some(p), None) => (p, 0),
         (None, Some(_)) => return plan_err!("Cannot specify only scale for decimal data type"),
-        (None, None) => (DECIMAL128_MAX_PRECISION, DECIMAL_DEFAULT_SCALE),
+        (None, None) => (
+            u64::from(DECIMAL128_MAX_PRECISION),
+            i64::from(DECIMAL_DEFAULT_SCALE),
+        ),
     };
 
     // Arrow decimal is i128 meaning 38 maximum decimal digits
-    if precision == 0 || precision > DECIMAL128_MAX_PRECISION || scale.unsigned_abs() > precision {
+    if precision == 0
+        || precision > u64::from(DECIMAL128_MAX_PRECISION)
+        || scale < 0
+        || scale as u64 > precision
+    {
         plan_err!(
-            "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `scale <= precision`."
+            "Decimal(precision = {precision}, scale = {scale}) should satisfy `0 < precision <= 38`, and `0 <= scale <= precision`."
         )
     } else {
-        Ok(DataType::Decimal128(precision, scale))
+        Ok(DataType::Decimal128(precision as u8, scale as i8))
     }
 }
 

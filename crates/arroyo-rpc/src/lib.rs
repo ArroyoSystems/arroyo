@@ -1,6 +1,7 @@
 pub mod api_types;
 pub mod checkpoints;
 pub mod formats;
+pub mod program;
 pub mod public_ids;
 pub mod schema_resolver;
 pub mod var_str;
@@ -20,8 +21,8 @@ use anyhow::{Context, Result, anyhow};
 use arrow::compute::kernels::cast_utils::parse_interval_day_time;
 use arrow::row::{OwnedRow, RowConverter, RowParser, Rows, SortField};
 use arrow_array::{Array, ArrayRef, BooleanArray};
-use arrow_schema::{ArrowError, DataType, Field, Fields};
-use arroyo_types::{CheckpointBarrier, HASH_SEEDS, WorkerId};
+use arrow_schema::{ArrowError, DataType, Field, Fields, Schema};
+use arroyo_types::{CheckpointBarrier, WorkerId};
 use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::{DecodeError, EncodeError};
@@ -33,7 +34,7 @@ use datafusion::common::{
 use datafusion::config::ConfigOptions;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::sqlparser::ast::ValueWithSpan;
-use datafusion::logical_expr::{AggregateUDF, ScalarUDF, TableSource, WindowUDF};
+use datafusion::logical_expr::{AggregateUDF, HigherOrderUDF, ScalarUDF, TableSource, WindowUDF};
 use datafusion::sql::planner::{ContextProvider, PlannerContext, SqlToRel};
 use datafusion::sql::sqlparser::ast::{Expr, SqlOption, Value as SqlValue};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
@@ -49,6 +50,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::{NonZero, NonZeroU64};
+use std::ops::RangeInclusive;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::Duration;
@@ -209,7 +211,7 @@ impl From<LoadCompactedDataReq> for CompactionResult {
 
 #[derive(Debug, Clone)]
 pub struct CheckpointCompleted {
-    pub checkpoint_epoch: u32,
+    pub checkpoint_epoch: u64,
     pub operator_idx: u32,
     pub operator_id: String,
     pub subtask_metadata: SubtaskCheckpointMetadata,
@@ -217,7 +219,7 @@ pub struct CheckpointCompleted {
 
 #[derive(Debug, Clone)]
 pub struct CheckpointEvent {
-    pub checkpoint_epoch: u32,
+    pub checkpoint_epoch: u64,
     pub operator_idx: u32,
     pub operator_id: String,
     pub subtask_idx: u32,
@@ -327,7 +329,30 @@ pub fn error_chain(e: anyhow::Error) -> String {
         .join(": ")
 }
 
-pub const TIMESTAMP_FIELD: &str = "_timestamp";
+/// Prefix reserved for columns that Arroyo adds to schemas internally
+pub const INTERNAL_FIELD_PREFIX: &str = "__arroyo";
+
+/// Whether `name` falls in the reserved internal namespace. Case-insensitive, as unquoted
+/// identifiers are lowercased during planning and could otherwise resolve to internal columns.
+pub fn is_internal_field_name(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with(INTERNAL_FIELD_PREFIX)
+}
+
+pub const TIMESTAMP_FIELD: &str = "__arroyo_internal_ts";
+/// Name of the timestamp field before it was renamed to [`TIMESTAMP_FIELD`]
+// TODO: remove LEGACY_TIMESTAMP_FIELD and the fallback in timestamp_field_index once all
+// pipelines compiled before the rename have been recompiled
+pub const LEGACY_TIMESTAMP_FIELD: &str = "_timestamp";
+
+/// Returns the index of the timestamp field, falling back to [`LEGACY_TIMESTAMP_FIELD`] for
+/// programs compiled before the rename
+pub fn timestamp_field_index(schema: &Schema) -> Option<usize> {
+    schema
+        .index_of(TIMESTAMP_FIELD)
+        .or_else(|_| schema.index_of(LEGACY_TIMESTAMP_FIELD))
+        .ok()
+}
+
 pub const UPDATING_META_FIELD: &str = "_updating_meta";
 
 pub fn updating_meta_fields() -> Fields {
@@ -435,8 +460,10 @@ impl Converter {
     }
 }
 
-pub fn get_hasher() -> ahash::RandomState {
-    ahash::RandomState::with_seeds(HASH_SEEDS[0], HASH_SEEDS[1], HASH_SEEDS[2], HASH_SEEDS[3])
+pub fn get_hasher() -> xxhash_rust::xxh3::Xxh3Builder {
+    // Changing this seed breaks existing checkpoint state.
+    const HASH_SEED: u64 = 5093852630788334730;
+    xxhash_rust::xxh3::Xxh3Builder::new().with_seed(HASH_SEED)
 }
 
 #[derive(Default)]
@@ -460,6 +487,10 @@ impl ContextProvider for EmptyContextProvider {
         None
     }
 
+    fn get_higher_order_meta(&self, _: &str) -> Option<Arc<HigherOrderUDF>> {
+        None
+    }
+
     fn get_variable_type(&self, _: &[String]) -> Option<DataType> {
         None
     }
@@ -477,6 +508,10 @@ impl ContextProvider for EmptyContextProvider {
     }
 
     fn udwf_names(&self) -> Vec<String> {
+        vec![]
+    }
+
+    fn higher_order_function_names(&self) -> Vec<String> {
         vec![]
     }
 }
@@ -583,7 +618,12 @@ impl DataSizeUnit {
         let captures = regex
             .captures(s)
             .ok_or_else(|| plan_datafusion_err!("invalid data size {}", s))?;
-        let quantity: u64 = captures.get(1).unwrap().as_str().parse().unwrap();
+        let quantity: u64 = captures
+            .get(1)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| plan_datafusion_err!("data size {} is too large", s))?;
         let unit = captures.get(2).unwrap().as_str();
         Ok((DataSizeUnit::from_str(unit)?, quantity))
     }
@@ -600,8 +640,23 @@ impl DataSizeUnit {
         }
     }
 
-    pub fn as_bytes(&self, value: u64) -> u64 {
-        value * self.multiplier()
+    pub fn as_bytes(&self, value: u64) -> DFResult<u64> {
+        value
+            .checked_mul(self.multiplier())
+            .ok_or_else(|| plan_datafusion_err!("data size {value}{self:?} is too large"))
+    }
+}
+
+/// Checks that a user-provided data size (in bytes) for the option `name` is within `bounds`.
+pub fn check_data_size(name: &str, bytes: u64, bounds: RangeInclusive<u64>) -> DFResult<()> {
+    if bounds.contains(&bytes) {
+        Ok(())
+    } else {
+        plan_err!(
+            "{name} must be between {} and {} bytes, got {bytes}",
+            bounds.start(),
+            bounds.end()
+        )
     }
 }
 
@@ -731,7 +786,7 @@ impl ConnectorOptions {
         self.pull_opt_str(name)?
             .map(|s| {
                 let (unit, q) = DataSizeUnit::parse(&s)?;
-                Ok(unit.as_bytes(q))
+                unit.as_bytes(q)
             })
             .transpose()
     }
@@ -1002,9 +1057,10 @@ pub async fn grpc_channel_builder(
     endpoint: String,
     our_tls: &Option<TlsConfig>,
     target_tls: &Option<TlsConfig>,
+    connect_timeout: Option<Duration>,
 ) -> Result<Endpoint> {
     let config = config();
-    if let Some(target_tls) = config.get_tls_config(target_tls) {
+    let endpoint = if let Some(target_tls) = config.get_tls_config(target_tls) {
         let mut endpoint = Url::parse(&endpoint)?;
         endpoint
             .set_scheme("https")
@@ -1031,11 +1087,17 @@ pub async fn grpc_channel_builder(
             config_builder = config_builder.identity(Identity::from_pem(our_tls.cert, our_tls.key));
         }
 
-        Ok(b.tls_config(config_builder).context("configuring TLS")?)
+        b.tls_config(config_builder).context("configuring TLS")?
     } else {
         debug!("connecting to grpc endpoint {endpoint}");
-        Ok(Channel::from_shared(endpoint.to_string())?)
-    }
+        Channel::from_shared(endpoint.to_string())?
+    };
+
+    Ok(if let Some(connect_timeout) = connect_timeout {
+        endpoint.connect_timeout(connect_timeout)
+    } else {
+        endpoint
+    })
 }
 
 /// Connect to a gRPC service with optional TLS
@@ -1044,17 +1106,25 @@ pub async fn connect_grpc(
     endpoint: String,
     our_tls: &Option<TlsConfig>,
     tls: &Option<TlsConfig>,
+    connect_timeout: Option<Duration>,
 ) -> Result<Channel> {
-    Ok(grpc_channel_builder(our_name, endpoint, our_tls, tls)
-        .await?
-        .connect()
-        .await?)
+    Ok(
+        grpc_channel_builder(our_name, endpoint, our_tls, tls, connect_timeout)
+            .await?
+            .connect()
+            .await?,
+    )
 }
 
 /// Connect a raw gRPC channel to the controller endpoint.
 pub async fn connect_controller(our_name: &str, our_tls: &Option<TlsConfig>) -> Result<Channel> {
     let endpoint = config().controller_endpoint();
-    connect_grpc(our_name, endpoint, our_tls, &config().controller.tls).await
+    connect_grpc(our_name, endpoint, our_tls, &config().controller.tls, None).await
+}
+
+/// Maximum message size accepted by this process's gRPC servers and clients.
+pub fn grpc_max_message_size() -> usize {
+    config().grpc.max_message_size
 }
 
 pub async fn controller_client(
@@ -1062,25 +1132,19 @@ pub async fn controller_client(
     our_tls: &Option<TlsConfig>,
 ) -> Result<ControllerGrpcClient<Channel>> {
     let channel = connect_controller(our_name, our_tls).await?;
-    Ok(ControllerGrpcClient::new(channel))
+    Ok(ControllerGrpcClient::new(channel).max_decoding_message_size(grpc_max_message_size()))
 }
 
 pub async fn job_controller_client(
     our_name: &str,
     our_tls: &Option<TlsConfig>,
     addr: String,
-    is_worker_job_controller: bool,
 ) -> Result<job_controller_grpc_client::JobControllerGrpcClient<Channel>> {
-    let their_tls = if is_worker_job_controller {
-        &config().worker.tls
-    } else {
-        &config().controller.tls
-    };
-
-    let channel = connect_grpc(our_name, addr, our_tls, their_tls).await?;
-    Ok(job_controller_grpc_client::JobControllerGrpcClient::new(
-        channel,
-    ))
+    let channel = connect_grpc(our_name, addr, our_tls, &config().worker.tls, None).await?;
+    Ok(
+        job_controller_grpc_client::JobControllerGrpcClient::new(channel)
+            .max_decoding_message_size(grpc_max_message_size()),
+    )
 }
 
 pub async fn job_status_client(
@@ -1088,14 +1152,23 @@ pub async fn job_status_client(
     our_tls: &Option<TlsConfig>,
     worker_id: WorkerId,
     addr: String,
+    connect_timeout: Option<Duration>,
 ) -> Result<job_status_grpc_client::JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>>
 {
-    let channel = connect_grpc(our_name, addr, our_tls, &config().worker.tls).await?;
+    let channel = connect_grpc(
+        our_name,
+        addr,
+        our_tls,
+        &config().worker.tls,
+        connect_timeout,
+    )
+    .await?;
     Ok(
         job_status_grpc_client::JobStatusGrpcClient::with_interceptor(
             channel,
             InjectWorkerId::new(worker_id),
-        ),
+        )
+        .max_decoding_message_size(grpc_max_message_size()),
     )
 }
 
@@ -1258,9 +1331,109 @@ pub struct StateContext {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DataSizeUnit, SerializableBytes, parse_expr};
+    use crate::grpc::rpc::StartExecutionReq;
+    use crate::{
+        DataSizeUnit, LEGACY_TIMESTAMP_FIELD, SerializableBytes, TIMESTAMP_FIELD, get_hasher,
+        is_internal_field_name, parse_expr, timestamp_field_index,
+    };
+    use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray, StringViewArray};
+    use arrow_schema::{DataType, Field, Schema};
     use bincode::{Decode, Encode, config};
     use bytes::Bytes;
+    use datafusion::common::hash_utils::create_hashes_with_hasher;
+    use prost::Message;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_start_execution_legacy_checkpoint_interval() {
+        // The fields an older worker reads, without the new JSON config field.
+        #[derive(Clone, PartialEq, Message)]
+        struct LegacyStartExecutionReq {
+            #[prost(bool, tag = "8")]
+            wait_for_leader: bool,
+            #[prost(uint64, tag = "9")]
+            checkpoint_interval_micros: u64,
+        }
+
+        let request = StartExecutionReq {
+            wait_for_leader: true,
+            checkpoint_interval_micros: 7_123_456,
+            pipeline_worker_config_json: r#"{"checkpoint":{"interval":"7123456micros"}}"#
+                .to_string(),
+            ..Default::default()
+        };
+
+        let legacy = LegacyStartExecutionReq::decode(request.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(legacy.checkpoint_interval_micros, 7_123_456);
+        assert!(legacy.wait_for_leader);
+    }
+
+    #[test]
+    fn state_hashes_are_stable() {
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(Int64Array::from(vec![Some(1), Some(-2), None])),
+            Arc::new(StringArray::from(vec![Some("one"), None, Some("three")])),
+        ];
+        let mut hashes = vec![0; 3];
+
+        create_hashes_with_hasher(&arrays, &get_hasher(), &mut hashes).unwrap();
+
+        assert_eq!(
+            hashes,
+            [
+                5092311861472499808,
+                7071289902786260134,
+                3655623068756176794,
+            ]
+        );
+
+        let mut float_hashes = vec![0; 2];
+        create_hashes_with_hasher(
+            [Arc::new(Float64Array::from(vec![0.0, -0.0])) as ArrayRef],
+            &get_hasher(),
+            &mut float_hashes,
+        )
+        .unwrap();
+        assert_eq!(float_hashes, [10047217818046557741, 17817844013210015546]);
+        assert_ne!(float_hashes[0], float_hashes[1]);
+
+        let values = vec![Some("short"), None, Some("longer than twelve bytes")];
+        let mut string_hashes = vec![0; values.len()];
+        create_hashes_with_hasher(
+            [Arc::new(StringArray::from(values.clone())) as ArrayRef],
+            &get_hasher(),
+            &mut string_hashes,
+        )
+        .unwrap();
+        assert_eq!(string_hashes, [9392568220474000271, 0, 9560082321094713409]);
+        let mut view_hashes = vec![0; values.len()];
+        create_hashes_with_hasher(
+            [Arc::new(StringViewArray::from(values)) as ArrayRef],
+            &get_hasher(),
+            &mut view_hashes,
+        )
+        .unwrap();
+        assert_eq!(string_hashes, view_hashes);
+
+        // Long inputs use XXH3's seeded secret, a different path from short keys.
+        let long_value = "a".repeat(256);
+        let mut long_hashes = vec![0];
+        create_hashes_with_hasher(
+            [Arc::new(StringArray::from(vec![long_value.as_str()])) as ArrayRef],
+            &get_hasher(),
+            &mut long_hashes,
+        )
+        .unwrap();
+        assert_eq!(long_hashes, [13499894044953796130]);
+        let mut long_view_hashes = vec![0];
+        create_hashes_with_hasher(
+            [Arc::new(StringViewArray::from(vec![long_value.as_str()])) as ArrayRef],
+            &get_hasher(),
+            &mut long_view_hashes,
+        )
+        .unwrap();
+        assert_eq!(long_view_hashes, long_hashes);
+    }
 
     #[test]
     fn test_parse_expr() {
@@ -1286,6 +1459,10 @@ mod tests {
 
         assert!(DataSizeUnit::parse("-14G").is_err());
         assert!(DataSizeUnit::parse("G").is_err());
+        assert!(DataSizeUnit::parse("99999999999999999999").is_err());
+
+        assert_eq!(Some(1 << 47), DataSizeUnit::Terabytes.as_bytes(128).ok());
+        assert!(DataSizeUnit::Exabytes.as_bytes(20).is_err());
     }
 
     #[derive(Debug, Eq, PartialEq, Encode, Decode)]
@@ -1311,5 +1488,29 @@ mod tests {
             .0;
 
         assert_eq!(s, decoded);
+    }
+
+    #[test]
+    fn test_timestamp_field_index_prefers_current_name() {
+        let field = |name| Field::new(name, DataType::Int64, false);
+
+        let legacy = Schema::new(vec![field("a"), field(LEGACY_TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&legacy), Some(1));
+
+        // a user column named like the legacy field must not shadow the real one
+        let both = Schema::new(vec![field(LEGACY_TIMESTAMP_FIELD), field(TIMESTAMP_FIELD)]);
+        assert_eq!(timestamp_field_index(&both), Some(1));
+
+        assert_eq!(timestamp_field_index(&Schema::new(vec![field("a")])), None);
+    }
+
+    #[test]
+    fn test_is_internal_field_name_ignores_case() {
+        assert!(is_internal_field_name(TIMESTAMP_FIELD));
+        assert!(is_internal_field_name("__ARROYO_INTERNAL_TS"));
+        assert!(is_internal_field_name("__Arroyo_custom"));
+        assert!(!is_internal_field_name("__arroy"));
+        assert!(!is_internal_field_name("_arroyo"));
+        assert!(!is_internal_field_name(LEGACY_TIMESTAMP_FIELD));
     }
 }

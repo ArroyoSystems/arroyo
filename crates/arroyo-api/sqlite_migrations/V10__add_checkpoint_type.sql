@@ -1,0 +1,1 @@
+ALTER TABLE checkpoints ADD COLUMN is_stopping INTEGER DEFAULT 0 NOT NULL;

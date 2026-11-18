@@ -1,6 +1,7 @@
 use crate::DFField;
 use arrow::datatypes::{DataType, TimeUnit};
 use arrow_schema::{Field, Schema, SchemaRef};
+use arroyo_rpc::TIMESTAMP_FIELD;
 use datafusion::common::{DFSchema, DFSchemaRef, Result as DFResult, TableReference};
 use std::{collections::HashMap, sync::Arc};
 
@@ -32,7 +33,7 @@ pub(crate) fn add_timestamp_field(
 
     let timestamp_field = DFField::new(
         qualifier,
-        "_timestamp",
+        TIMESTAMP_FIELD,
         DataType::Timestamp(TimeUnit::Nanosecond, None),
         false,
     );
@@ -46,13 +47,13 @@ pub(crate) fn has_timestamp_field(schema: &DFSchemaRef) -> bool {
     schema
         .fields()
         .iter()
-        .any(|field| field.name() == "_timestamp")
+        .any(|field| field.name() == TIMESTAMP_FIELD)
 }
 
 pub fn add_timestamp_field_arrow(schema: Schema) -> SchemaRef {
     let mut fields = schema.fields().to_vec();
     fields.push(Arc::new(Field::new(
-        "_timestamp",
+        TIMESTAMP_FIELD,
         DataType::Timestamp(TimeUnit::Nanosecond, None),
         false,
     )));

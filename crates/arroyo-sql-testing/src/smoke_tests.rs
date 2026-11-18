@@ -22,6 +22,7 @@ use arroyo_rpc::grpc::rpc::{
 };
 use arroyo_rpc::{CompactionResult, ControlMessage, ControlResp};
 use arroyo_state::{BackingStore, StateBackend, StorageProviderFor};
+use arroyo_state_protocol::types::Epoch;
 use arroyo_types::{CheckpointBarrier, to_micros};
 use arroyo_udf_host::LocalUdf;
 use arroyo_worker::engine::Engine;
@@ -49,7 +50,7 @@ async fn run_smoketest(path: &Path) {
     config::config();
     config::update(|c| {
         // reduce the batch size to increase consistency
-        c.pipeline.source_batch_size = 32;
+        c.pipeline.worker.source_batch_size = 32;
     });
 
     // read text at path
@@ -123,8 +124,8 @@ async fn checkpoint(ctx: &mut SmokeTestContext<'_>, epoch: u32) {
     let mut checkpoint_state = CheckpointState::new(
         ctx.job_id.clone(),
         checkpoint_id.to_string(),
-        epoch,
-        0,
+        Epoch(epoch as u64),
+        Epoch(0),
         ctx.program.clone(),
     );
 
@@ -597,15 +598,52 @@ fn check_debezium(
         primary_keys,
     );
 
-    similar_asserts::assert_eq!(
-        output_merged,
-        golden_output_merged,
-        "Incorrect outputs for updating ({}) for\noutput: {}\ngolden: {}",
-        name,
-        output_location,
-        golden_output_location
+    // Weighted t-digest estimates vary with retained-row order. Keep all other fields exact.
+    let approximate_column = Path::new(&golden_output_location)
+        .ends_with("every_aggregate.json")
+        .then_some(("approx_percentile_cont_weighted_driver", 0.1));
+
+    assert_rows_match(
+        &output_merged,
+        &golden_output_merged,
+        approximate_column,
+        &format!(
+            "Incorrect outputs for updating ({name}) for\noutput: {output_location}\ngolden: {golden_output_location}"
+        ),
     );
 }
+
+fn assert_rows_match(
+    actual: &[Value],
+    expected: &[Value],
+    approximate_column: Option<(&str, f64)>,
+    context: &str,
+) {
+    let Some((column, tolerance)) = approximate_column else {
+        similar_asserts::assert_eq!(actual, expected, "{context}");
+        return;
+    };
+
+    similar_asserts::assert_eq!(actual.len(), expected.len(), "{context}");
+    for (actual, expected) in actual.iter().zip(expected) {
+        let actual_value = actual[column].as_f64().expect("missing numeric estimate");
+        let expected_value = expected[column].as_f64().expect("missing numeric estimate");
+        assert!(
+            (actual_value - expected_value).abs() <= tolerance,
+            "{context}: {column} differs by more than {tolerance}: actual={actual_value}, expected={expected_value}"
+        );
+
+        let actual = actual.as_object().expect("expected object row");
+        let expected = expected.as_object().expect("expected object row");
+        similar_asserts::assert_eq!(actual.len(), expected.len(), "{context}");
+        for (name, value) in actual {
+            if name != column {
+                similar_asserts::assert_eq!(Some(value), expected.get(name), "{context}: {name}");
+            }
+        }
+    }
+}
+
 fn roundtrip(v: &Value) -> Value {
     if v.is_null() {
         return Value::Null;
@@ -675,7 +713,7 @@ async fn check_output_files(
     golden_output_lines.sort_by_cached_key(|v| roundtrip(v).to_string());
     output_lines
         .into_iter()
-        .zip(golden_output_lines.into_iter())
+        .zip(golden_output_lines)
         .enumerate()
         .for_each(|(i, (output_line, golden_output_line))| {
             similar_asserts::assert_eq!(
@@ -753,9 +791,7 @@ async fn get_graph(query_string: String, udfs: &[LocalUdf]) -> Result<LogicalPro
     let program = parse_and_get_arrow_program(
         query_string,
         schema_provider,
-        SqlConfig {
-            default_parallelism: 1,
-        },
+        SqlConfig::new(1, &config::config().pipeline.compiler),
     )
     .await?
     .program;

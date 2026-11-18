@@ -1,3 +1,4 @@
+use super::new_task_context;
 use anyhow::anyhow;
 use arrow::row::{OwnedRow, RowConverter, SortField};
 use arrow_array::{Array, RecordBatch, UInt64Array, make_array};
@@ -192,6 +193,7 @@ impl ArrowOperator for AsyncUdfOperator {
         let input_schema = Arc::new(Schema::new(input_fields));
         let post_udf_schema = Arc::new(Schema::new(post_udf_fields));
 
+        let task_context = new_task_context(self.registry.as_ref())?;
         self.input_exprs = self
             .config
             .arg_exprs
@@ -199,7 +201,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &task_context,
                     &input_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )
@@ -214,7 +216,7 @@ impl ArrowOperator for AsyncUdfOperator {
             .map(|expr| {
                 parse_physical_expr(
                     &PhysicalExprNode::decode(&mut expr.as_slice()).unwrap(),
-                    &*self.registry,
+                    &task_context,
                     &post_udf_schema,
                     &DefaultPhysicalExtensionCodec {},
                 )
@@ -258,13 +260,19 @@ impl ArrowOperator for AsyncUdfOperator {
 
         // start futures for the recovered input data
         for (id, row) in &self.inputs {
+            let batch = RecordBatch::try_new(
+                ctx.in_schemas[0].schema.clone(),
+                self.input_row_converter.convert_rows([row.row()])?,
+            )?;
             let args = self
-                .input_row_converter
-                .convert_rows([row.row()].into_iter())
-                .unwrap()
-                .into_iter()
-                .map(|t| t.to_data())
-                .collect();
+                .input_exprs
+                .iter()
+                .map(|expr| {
+                    expr.evaluate(&batch)?
+                        .into_array(batch.num_rows())
+                        .map(|array| array.to_data())
+                })
+                .try_collect()?;
             self.udf.send(*id, args).await?;
         }
 
@@ -336,11 +344,7 @@ impl ArrowOperator for AsyncUdfOperator {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let Some((ids, results)) = self
-            .udf
-            .drain_results()
-            .expect("failed to get results from async UDF executor")
-        else {
+        let Some((ids, results)) = self.udf.drain_results()? else {
             return Ok(());
         };
 
@@ -422,10 +426,11 @@ impl ArrowOperator for AsyncUdfOperator {
         collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
         if let Some(SignalMessage::EndOfData) = final_message {
-            while !self.inputs.is_empty() && !self.outputs.is_empty() {
+            while !self.inputs.is_empty() {
                 self.handle_tick(0, ctx, collector).await?;
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
+            self.flush_output(ctx, collector).await?;
         }
 
         Ok(())
@@ -457,11 +462,7 @@ impl AsyncUdfOperator {
                 .unwrap_or((u64::MAX, None));
 
             let mut rows = vec![];
-            loop {
-                let Some((id, row)) = self.outputs.pop_first() else {
-                    break;
-                };
-
+            while let Some((id, row)) = self.outputs.pop_first() {
                 if id >= watermark_id {
                     self.outputs.insert(id, row);
                     break;

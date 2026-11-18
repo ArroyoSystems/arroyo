@@ -8,6 +8,7 @@
 //! unique across jobs, runs, and clusters.
 
 use crate::grpc::rpc::worker_grpc_client::WorkerGrpcClient;
+use crate::grpc_max_message_size;
 use arroyo_types::WorkerId;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
@@ -25,6 +26,7 @@ pub type WorkerClient = WorkerGrpcClient<InterceptedService<Channel, InjectWorke
 /// Construct a worker client that injects `target` as `x-target-worker-id`.
 pub fn worker_client(channel: Channel, target: WorkerId) -> WorkerClient {
     WorkerGrpcClient::with_interceptor(channel, InjectWorkerId::new(target))
+        .max_decoding_message_size(grpc_max_message_size())
 }
 
 /// Client interceptor: injects target worker_id into request metadata.
@@ -53,11 +55,19 @@ impl Interceptor for InjectWorkerId {
 /// Server interceptor: rejects requests whose `x-target-worker-id` header
 /// does not match the server's own worker_id.
 #[derive(Clone, Debug)]
-pub struct VerifyWorkerId(pub u64);
+pub struct VerifyWorkerId {
+    pub service: &'static str,
+    pub worker_id: WorkerId,
+}
 
 impl Interceptor for VerifyWorkerId {
     fn call(&mut self, req: Request<()>) -> Result<Request<()>, Status> {
         let Some(header) = req.metadata().get(WORKER_ID_HEADER) else {
+            warn!(
+                service = self.service,
+                caller =? req.remote_addr(),
+                "x-target-worker-id header is missing"
+            );
             return Ok(req);
         };
 
@@ -67,9 +77,11 @@ impl Interceptor for VerifyWorkerId {
             .parse()
             .map_err(|_| Status::permission_denied("x-target-worker-id mismatch"))?;
 
-        if received != self.0 {
+        if received != *self.worker_id {
             warn!(
-                expected = self.0,
+                service = self.service,
+                caller =? req.remote_addr(),
+                expected = *self.worker_id,
                 received, "rejecting request with mismatched target worker_id"
             );
             return Err(Status::permission_denied("x-target-worker-id mismatch"));
@@ -121,7 +133,11 @@ mod tests {
                 req.metadata_mut()
                     .insert(WORKER_ID_HEADER, h.parse().unwrap());
             }
-            let result = VerifyWorkerId(expected).call(req);
+            let result = VerifyWorkerId {
+                service: "test",
+                worker_id: WorkerId(expected),
+            }
+            .call(req);
             assert_eq!(
                 result.is_ok(),
                 should_pass,
@@ -138,6 +154,11 @@ mod tests {
         let req = InjectWorkerId::new(WorkerId(1234567890))
             .call(Request::new(()))
             .unwrap();
-        VerifyWorkerId(1234567890).call(req).unwrap();
+        VerifyWorkerId {
+            service: "test",
+            worker_id: WorkerId(1234567890),
+        }
+        .call(req)
+        .unwrap();
     }
 }

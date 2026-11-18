@@ -36,5 +36,5 @@ create table events_sink (
     'rolling_policy.interval' = interval '6000 seconds'
 );
 
-INSERT INTO events
+INSERT INTO events_sink
 SELECT * from events;

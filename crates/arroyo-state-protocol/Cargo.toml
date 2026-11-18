@@ -1,6 +1,6 @@
 [package]
 name = "arroyo-state-protocol"
-version = "0.16.0-dev"
+version = "0.17.0-dev"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -13,6 +13,8 @@ prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace =  true }
 
 [dev-dependencies]
 tokio = { workspace = true }

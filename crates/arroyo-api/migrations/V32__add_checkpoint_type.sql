@@ -1,0 +1,1 @@
+ALTER TABLE checkpoints ADD COLUMN is_stopping BOOLEAN DEFAULT false NOT NULL;

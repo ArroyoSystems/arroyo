@@ -131,7 +131,7 @@ impl Partitioner {
 
         let mut out = Vec::with_capacity(order.len());
         let mut offset = 0;
-        for (k, len) in order.into_iter().zip(lens.into_iter()) {
+        for (k, len) in order.into_iter().zip(lens) {
             let rb = permuted.slice(offset, len);
             out.push((k, rb));
             offset += len;

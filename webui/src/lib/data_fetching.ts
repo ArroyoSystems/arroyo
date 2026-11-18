@@ -33,17 +33,21 @@ export type SubtaskCheckpointGroup = schemas['SubtaskCheckpointGroup'];
 export type GlobalUdf = schemas['GlobalUdf'];
 export type PipelineLocalUdf = schemas['Udf'];
 export type UdfValidationResult = schemas['UdfValidationResult'];
+export type SqlDiagnostic = schemas['SqlDiagnostic'];
 
 const base = window.__ARROYO_BASENAME.replace(/\/$/, '') || '';
 const BASE_URL = `${base}/api`;
 
 export const { get, post, patch, del } = createClient<paths>({ baseUrl: BASE_URL });
 
-const processResponse = (data: any | undefined, error: any | undefined) => {
+const processResponse = (data: any | undefined, error: any | undefined, response?: Response) => {
   // SWR expects fetchers to throw errors, but openapi-fetch returns the error as a named field,
   // so this function throws the error if it exists
   if (error) {
-    throw error;
+    if (typeof error === 'object' && error != null) {
+      throw { ...error, status: response?.status };
+    }
+    throw { error: String(error), status: response?.status };
   }
   return data;
 };
@@ -56,6 +60,10 @@ const connectorsKey = () => {
 
 const connectionProfilesKey = () => {
   return { key: 'Connections' };
+};
+
+const controllerConfigKey = () => {
+  return { key: 'ControllerConfig' };
 };
 
 const connectionProfileAutocompleteKey = (id: string) => {
@@ -162,6 +170,27 @@ export const usePing = () => {
     ping: data,
     pingLoading: isLoading,
     pingError: error,
+  };
+};
+
+// Controller config
+
+const controllerConfigFetcher = async () => {
+  const { data, error } = await get('/v1/configs', {});
+  return processResponse(data, error);
+};
+
+export const useControllerConfig = () => {
+  const { data, error, isLoading } = useSWR<unknown>(
+    controllerConfigKey(),
+    controllerConfigFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  return {
+    controllerConfig: data,
+    controllerConfigError: error,
+    controllerConfigLoading: isLoading,
   };
 };
 
@@ -318,21 +347,24 @@ export const useJobMetrics = (pipelineId?: string, jobId?: string) => {
 
 const jobCheckpointsFetcher = () => {
   return async (params: { key: string; pipelineId: string; jobId: string }) => {
-    const { data, error } = await get('/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints', {
-      params: {
-        path: {
-          pipeline_id: params.pipelineId,
-          job_id: params.jobId,
+    const { data, error, response } = await get(
+      '/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints',
+      {
+        params: {
+          path: {
+            pipeline_id: params.pipelineId,
+            job_id: params.jobId,
+          },
         },
-      },
-    });
+      }
+    );
 
-    return processResponse(data, error);
+    return processResponse(data, error, response);
   };
 };
 
 export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
-  const { data } = useSWR<schemas['CheckpointCollection']>(
+  const { data, error } = useSWR<schemas['CheckpointCollection']>(
     jobCheckpointsKey(pipelineId, jobId),
     jobCheckpointsFetcher(),
     {
@@ -342,6 +374,7 @@ export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
 
   return {
     checkpoints: data?.data,
+    checkpointsError: error,
   };
 };
 
@@ -349,7 +382,7 @@ export const useJobCheckpoints = (pipelineId?: string, jobId?: string) => {
 
 const checkpointDetailsFetcher = () => {
   return async (params: { key: string; pipelineId: string; jobId: string; epoch: number }) => {
-    const { data, error } = await get(
+    const { data, error, response } = await get(
       '/v1/pipelines/{pipeline_id}/jobs/{job_id}/checkpoints/{epoch}/operator_checkpoint_groups',
       {
         params: {
@@ -357,20 +390,21 @@ const checkpointDetailsFetcher = () => {
         },
       }
     );
-    return processResponse(data, error);
+    return processResponse(data, error, response);
   };
 };
 
 export const useCheckpointDetails = (pipelineId?: string, jobId?: string, epoch?: number) => {
-  const { data, isLoading } = useSWR<schemas['OperatorCheckpointGroupCollection']>(
+  const { data, isLoading, error } = useSWR<schemas['OperatorCheckpointGroupCollection']>(
     checkpointDetailsKey(pipelineId, jobId, epoch),
     checkpointDetailsFetcher(),
-    {}
+    { revalidateOnFocus: false, shouldRetryOnError: false }
   );
 
   return {
     checkpointDetails: data?.data,
     checkpointLoading: isLoading,
+    checkpointDetailsError: error,
   };
 };
 
@@ -495,16 +529,29 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
     options
   );
 
-  const updatePipeline = async (params: { stop?: StopType; parallelism?: number }) => {
+  const updatePipeline = async (params: {
+    stop?: StopType;
+    parallelism?: number;
+    pipelineConfig?: unknown;
+  }) => {
     if (!pipelineId) {
       return;
     }
 
-    await patch('/v1/pipelines/{id}', {
+    const {
+      data: updatedPipeline,
+      error: updateError,
+      response,
+    } = await patch('/v1/pipelines/{id}', {
       params: { path: { id: pipelineId } },
-      body: { stop: params.stop, parallelism: params.parallelism },
+      body: {
+        stop: params.stop,
+        parallelism: params.parallelism,
+        pipeline_config: params.pipelineConfig,
+      },
     });
-    await mutate();
+    processResponse(updatedPipeline, updateError, response);
+    await Promise.all([mutate(), globalMutate(pipelineJobsKey(pipelineId))]);
   };
 
   const restartPipeline = async (ignoreState?: boolean) => {
@@ -516,7 +563,7 @@ export const usePipeline = (pipelineId?: string, refresh: boolean = false) => {
       params: { path: { id: pipelineId } },
       body: { ignore_state: ignoreState ?? false },
     });
-    await mutate();
+    await Promise.all([mutate(), globalMutate(pipelineJobsKey(pipelineId))]);
   };
 
   const deletePipeline = async () => {

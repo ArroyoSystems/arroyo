@@ -11,13 +11,11 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 use tracing::{debug, error, info, warn};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use cornucopia_async::DatabaseSource;
 
-use self::checkpoint_stopping::CheckpointStopping;
 use self::compiling::Compiling;
 use self::failing::Failing;
-use self::finishing::Finishing;
 use self::leader_checkpoint_stopping::LeaderCheckpointStopping;
 use self::leader_finishing::LeaderFinishing;
 use self::leader_rescaling::LeaderRescaling;
@@ -25,30 +23,25 @@ use self::leader_restarting::LeaderRestarting;
 use self::leader_running::LeaderRunning;
 use self::leader_stopping::LeaderStopping;
 use self::recovering::Recovering;
-use self::rescaling::Rescaling;
-use self::running::Running;
 use self::scheduling::Scheduling;
 use self::stopping::Stopping;
-use crate::job_controller::JobController;
 use crate::queries::controller_queries;
 use crate::types::public::{LogLevel, StopMode};
-use crate::{JobConfig, JobMessage, JobStatus, PipelineInfo, queries, schedulers::Scheduler};
-use arroyo_datastream::logical::LogicalProgram;
-use arroyo_rpc::config::{JobControllerMode, config};
+use crate::{
+    JobConfig, JobMessage, JobStatus, JobStatusUpdate, PipelineInfo, queries, schedulers::Scheduler,
+};
+use arroyo_rpc::config::config;
 use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::JobFailure;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::worker_types::{RunningMessage, TaskFailedEvent};
 use arroyo_rpc::{errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
 use prost::Message;
 
-pub(crate) mod checkpoint_stopping;
 pub(crate) mod compiling;
 pub(crate) mod failing;
-pub(crate) mod finishing;
 pub(crate) mod leader_checkpoint_stopping;
 pub(crate) mod leader_finishing;
 pub(crate) mod leader_rescaling;
@@ -56,9 +49,6 @@ pub(crate) mod leader_restarting;
 pub(crate) mod leader_running;
 pub(crate) mod leader_stopping;
 pub(crate) mod recovering;
-pub(crate) mod rescaling;
-pub(crate) mod restarting;
-pub(crate) mod running;
 pub(crate) mod scheduling;
 pub(crate) mod stopping;
 
@@ -116,8 +106,18 @@ async fn handle_terminal<'a>(ctx: &mut JobContext<'a>) {
         warn!(
             message = "Failed to clean up cluster",
             error = format!("{:?}", e),
-            job_id = *ctx.config.id
+            job_id = %ctx.config.id,
+            pipeline_id = *ctx.pipeline_info.pipeline_id
         );
+    }
+}
+
+async fn stop_workers_for_missing_job(scheduler: &dyn Scheduler, job_id: &str) {
+    // No later database poll will find this job. Clean up every generation and
+    // keep retrying failures; a replacement job has a different ID.
+    while let Err(err) = scheduler.stop_workers(job_id, None, true).await {
+        warn!(job_id, error = ?err, "Failed to stop workers for missing job; retrying");
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
@@ -194,52 +194,19 @@ impl TransitionTo<Compiling> for Stopped {}
 
 impl TransitionTo<Compiling> for Scheduling {}
 
-impl TransitionTo<Scheduling> for Compiling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
-
-impl TransitionTo<Running> for Scheduling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            // set the start time and clear the finish time, but only if this is an initial start
-            // and not a recovery
-            if ctx.status.start_time.is_none() || ctx.status.finish_time.is_some() {
-                ctx.status.start_time = Some(OffsetDateTime::now_utc());
-                ctx.status.finish_time = None;
-            }
-        })
-    }
-}
+impl TransitionTo<Scheduling> for Compiling {}
 
 impl TransitionTo<LeaderRunning> for Scheduling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
-            if ctx.status.start_time.is_none() || ctx.status.finish_time.is_some() {
-                ctx.status.start_time = Some(OffsetDateTime::now_utc());
-                ctx.status.finish_time = None;
-            }
+            ctx.status.start_time = Some(OffsetDateTime::now_utc());
+            ctx.status.finish_time = None;
         })
     }
 }
 
-impl TransitionTo<CheckpointStopping> for Running {}
-impl TransitionTo<Stopping> for Running {}
-impl TransitionTo<Stopping> for LeaderRunning {}
 impl TransitionTo<Stopping> for Scheduling {}
 impl TransitionTo<Stopping> for Compiling {}
-impl TransitionTo<Stopping> for Rescaling {}
-impl TransitionTo<Finishing> for Running {}
-impl TransitionTo<Recovering> for Running {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.restarts += 1;
-        })
-    }
-}
 impl TransitionTo<Recovering> for LeaderRunning {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -255,16 +222,6 @@ impl TransitionTo<Recovering> for Scheduling {
     }
 }
 
-impl TransitionTo<Rescaling> for Running {}
-
-impl TransitionTo<Scheduling> for Rescaling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
-
 impl TransitionTo<Compiling> for Recovering {}
 impl TransitionTo<Compiling> for Failed {
     fn update_status(&self) -> TransitionFn {
@@ -276,13 +233,13 @@ impl TransitionTo<Compiling> for Failed {
     }
 }
 
-impl TransitionTo<Failing> for Running {}
 impl TransitionTo<Failing> for Scheduling {}
 impl TransitionTo<Failed> for Failing {}
 
 fn done_transition(ctx: &mut JobContext) {
     ctx.status.finish_time = Some(OffsetDateTime::now_utc());
-    ctx.job_controller = None;
+    ctx.leader_manager = None;
+    ctx.status.state_context.leader = None;
 }
 
 impl TransitionTo<Stopped> for Stopping {
@@ -311,7 +268,6 @@ impl TransitionTo<Stopped> for LeaderStopping {
 
 impl TransitionTo<LeaderStopping> for LeaderStopping {}
 
-impl TransitionTo<Stopping> for LeaderStopping {}
 impl TransitionTo<Recovering> for LeaderStopping {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -321,7 +277,6 @@ impl TransitionTo<Recovering> for LeaderStopping {
 }
 
 impl TransitionTo<LeaderStopping> for LeaderCheckpointStopping {}
-impl TransitionTo<Stopping> for LeaderCheckpointStopping {}
 impl TransitionTo<Stopped> for LeaderCheckpointStopping {
     fn update_status(&self) -> TransitionFn {
         Box::new(done_transition)
@@ -348,17 +303,10 @@ impl TransitionTo<Recovering> for LeaderFinishing {
     }
 }
 impl TransitionTo<LeaderStopping> for LeaderFinishing {}
-impl TransitionTo<Stopping> for LeaderFinishing {}
 
 impl TransitionTo<LeaderCheckpointStopping> for LeaderRestarting {}
 impl TransitionTo<LeaderRestarting> for LeaderRestarting {}
-impl TransitionTo<Scheduling> for LeaderRestarting {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for LeaderRestarting {}
 
 impl TransitionTo<Recovering> for LeaderRestarting {
     fn update_status(&self) -> TransitionFn {
@@ -369,13 +317,8 @@ impl TransitionTo<Recovering> for LeaderRestarting {
 }
 impl TransitionTo<LeaderStopping> for LeaderRestarting {}
 
-impl TransitionTo<Scheduling> for LeaderRescaling {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
+impl TransitionTo<Scheduling> for LeaderRescaling {}
+
 impl TransitionTo<Recovering> for LeaderRescaling {
     fn update_status(&self) -> TransitionFn {
         Box::new(|ctx| {
@@ -385,106 +328,16 @@ impl TransitionTo<Recovering> for LeaderRescaling {
 }
 impl TransitionTo<LeaderStopping> for LeaderRescaling {}
 
-impl TransitionTo<Stopping> for CheckpointStopping {}
-impl TransitionTo<Stopped> for CheckpointStopping {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(done_transition)
-    }
-}
-
-impl TransitionTo<Finished> for Finishing {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(done_transition)
-    }
-}
-
-impl TransitionTo<Restarting> for Running {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.restart_nonce = ctx.config.restart_nonce;
-        })
-    }
-}
-impl TransitionTo<Restarting> for Restarting {}
-impl TransitionTo<Scheduling> for Restarting {
-    fn update_status(&self) -> TransitionFn {
-        Box::new(|ctx| {
-            ctx.status.generation += 1;
-        })
-    }
-}
-impl TransitionTo<Stopping> for Restarting {}
-impl TransitionTo<CheckpointStopping> for Restarting {}
-
-// Macro to handle stopping behavior from a running state, where we want to
-// support checkpoint stopping
-macro_rules! stop_if_desired_running {
-    ($self: ident, $config: expr) => {
-        use crate::states::checkpoint_stopping::CheckpointStopping;
-        use crate::states::stopping::StopBehavior;
-        use crate::states::stopping::Stopping;
-        use crate::types::public::StopMode;
-        use arroyo_rpc::grpc::rpc;
-        match $config.stop_mode {
-            StopMode::checkpoint => {
-                return Ok(Transition::next(*$self, CheckpointStopping {}));
-            }
-            StopMode::graceful => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Graceful),
-                    },
-                ));
-            }
-            StopMode::immediate => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(rpc::StopMode::Immediate),
-                    },
-                ));
-            }
-            StopMode::force => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopWorkers,
-                    },
-                ));
-            }
-            StopMode::none => {
-                // do nothing
-            }
-        }
-    };
-}
-
 // macro to handle stopping behavior from a state where the job is not current running
 // (like compiling / scheduling / etc.). in this case, there's nothing active to checkpoint
 // so we just move to stopping all cases
 macro_rules! stop_if_desired_non_running {
     ($self: ident, $config: expr) => {
-        use crate::states::stopping::StopBehavior;
         use crate::states::stopping::Stopping;
         use crate::types::public::StopMode;
-        use arroyo_rpc::grpc;
         match $config.stop_mode {
-            StopMode::checkpoint | StopMode::graceful | StopMode::immediate => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopJob(grpc::rpc::StopMode::Immediate),
-                    },
-                ));
-            }
-            StopMode::force => {
-                return Ok(Transition::next(
-                    *$self,
-                    Stopping {
-                        stop_mode: StopBehavior::StopWorkers,
-                    },
-                ));
+            StopMode::checkpoint | StopMode::graceful | StopMode::immediate | StopMode::force => {
+                return Ok(Transition::next(*$self, Stopping {}));
             }
             StopMode::none => {
                 // do nothing
@@ -538,7 +391,7 @@ macro_rules! leader_stop_if_desired_running {
 pub fn controller_job_failure(
     message: impl Into<String>,
     error_domain: rpc::ErrorDomain,
-    retry_hint: rpc::RetryHint,
+    retry_hint: errors::RetryHint,
 ) -> JobFailure {
     JobFailure {
         operator_id: None,
@@ -546,40 +399,57 @@ pub fn controller_job_failure(
         subtask_index: None,
         message: message.into(),
         error_domain: error_domain as i32,
-        retry_hint: retry_hint as i32,
+        details: String::new(),
+        retry_policy: Some(retry_hint.into()),
     }
 }
 
-use crate::job_controller::job_metrics::JobMetrics;
-use crate::job_controller::leader_manager::LeaderManager;
-use crate::states::restarting::Restarting;
+use crate::leader_manager::LeaderManager;
 pub(crate) use leader_stop_if_desired_running;
 pub(crate) use stop_if_desired_non_running;
-pub(crate) use stop_if_desired_running;
+
+/// The persisted program's protobuf scheduling view and serialization version.
+/// Runtime payloads remain opaque to the controller.
+/// Scheduling updates the decoded program's parallelism in memory.
+#[derive(Debug)]
+pub struct ControllerProgram {
+    pub decoded: ArrowProgram,
+    pub program_version: u32,
+}
+
+impl ControllerProgram {
+    pub fn from_bytes(program_version: i32, program_bytes: &[u8]) -> Result<Self> {
+        let program_version = u32::try_from(program_version).context("negative program version")?;
+        ensure!(program_version > 0, "program version must be non-zero");
+        let decoded = ArrowProgram::decode(program_bytes).context("decoding program topology")?;
+        Ok(Self {
+            decoded,
+            program_version,
+        })
+    }
+}
 
 pub struct JobContext<'a> {
     pub config: JobConfig,
     pub pipeline_info: Arc<PipelineInfo>,
     pub status: &'a mut JobStatus,
-    pub program: &'a mut LogicalProgram,
+    pub program: &'a mut ControllerProgram,
     pub db: DatabaseSource,
     pub scheduler: Arc<dyn Scheduler>,
     pub rx: &'a mut Receiver<JobMessage>,
     pub retries_attempted: usize,
-    pub job_controller: Option<JobController>,
     pub leader_manager: Option<LeaderManager>,
     pub last_transitioned_at: Instant,
-    pub metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 }
 
 impl JobContext<'_> {
     pub fn handle(&mut self, msg: JobMessage) -> Result<(), StateError> {
-        if !matches!(
-            msg,
-            JobMessage::RunningMessage(RunningMessage::WorkerHeartbeat { .. })
-        ) {
-            warn!("unhandled job message {:?}", msg);
-        }
+        warn!(
+            job_id = %self.config.id,
+            pipeline_id = *self.pipeline_info.pipeline_id,
+            "unhandled job message {:?}",
+            msg
+        );
         Ok(())
     }
 
@@ -599,64 +469,13 @@ impl JobContext<'_> {
         }
     }
 
-    pub async fn handle_task_error<T: State + TransitionTo<Recovering>>(
-        &self,
-        state: Box<T>,
-        event: TaskFailedEvent,
-    ) -> Result<Transition, StateError> {
-        error!(
-            job_id = self.config.id.as_str(),
-            task_id = event.task_id,
-            operator_subtask = event.subtask_idx,
-            operator_id = event.operator_id,
-            error_domain = event.error_domain.as_str(),
-            retry_hint = event.retry_hint.as_str(),
-            message = "task failed",
-            reason = event.reason,
-        );
-
-        let client = self.db.client().await.unwrap();
-        if let Err(db_err) = queries::controller_queries::execute_create_job_log_message(
-            &client,
-            &generate_id(IdTypes::JobLogMessage),
-            &self.config.id.as_str(),
-            &event.operator_id,
-            &(event.subtask_idx as i64),
-            &LogLevel::error,
-            &"task failed",
-            &event.reason,
-            &event.error_domain.as_str(),
-            &event.retry_hint.as_str(),
-        )
-        .await
-        {
-            warn!("Failed to log task failure to database: {:?}", db_err);
-        }
-
-        match event.retry_hint {
-            errors::RetryHint::NoRetry => Err(StateError::FatalError {
-                source: anyhow!("task failed: {}", event.reason),
-                message: event.reason,
-                domain: event.error_domain,
-            }),
-            errors::RetryHint::WithBackoff => Ok(Transition::next(
-                *state,
-                Recovering {
-                    source: anyhow!("task failed: {}", event.reason),
-                    reason: event.reason,
-                    domain: event.error_domain,
-                },
-            )),
-        }
-    }
-
     pub async fn handle_job_failure<T: State + TransitionTo<Recovering>>(
         &self,
         state: T,
         failure: arroyo_rpc::grpc::rpc::JobFailure,
     ) -> Result<Transition, StateError> {
         let error_domain = errors::ErrorDomain::from(failure.error_domain());
-        let retry_hint = errors::RetryHint::from(failure.retry_hint());
+        let retry_hint = errors::RetryHint::from_rpc(failure.retry_policy.as_ref());
         let operator_id = failure
             .operator_id
             .clone()
@@ -665,12 +484,15 @@ impl JobContext<'_> {
         let reason = failure.message.clone();
 
         error!(
-            job_id = self.config.id.as_str(),
+            job_id = %self.config.id.as_str(),
+            pipeline_id = *self.pipeline_info.pipeline_id,
             task_id = format!("{:?}", failure.task_id),
             operator_subtask = subtask_index,
             operator_id,
             error_domain = error_domain.as_str(),
             retry_hint = retry_hint.as_str(),
+            retry_policy = ?failure.retry_policy,
+            restarts = self.status.restarts,
             message = "job failed",
             reason,
         );
@@ -686,31 +508,37 @@ impl JobContext<'_> {
                 operator_id,
                 &(subtask_index as i64),
                 &LogLevel::error,
-                &"job failed",
                 &failure.message,
+                &failure.details,
                 &error_domain.as_str(),
                 &retry_hint.as_str(),
             )
             .await
             {
-                warn!("Failed to log job failure to database: {:?}", db_err);
+                warn!(
+                    job_id = %self.config.id,
+                    pipeline_id = *self.pipeline_info.pipeline_id,
+                    "Failed to log job failure to database: {:?}",
+                    db_err
+                );
             }
         }
 
-        match retry_hint {
-            errors::RetryHint::NoRetry => Err(StateError::FatalError {
-                source: anyhow!("job failed: {}", failure.message),
-                message: failure.message,
-                domain: error_domain,
-            }),
-            errors::RetryHint::WithBackoff => Ok(Transition::next(
+        if retry_hint.should_retry(self.status.restarts) {
+            Ok(Transition::next(
                 state,
                 Recovering {
                     source: anyhow!("job failed: {}", failure.message),
                     reason: failure.message,
                     domain: error_domain,
                 },
-            )),
+            ))
+        } else {
+            Err(StateError::FatalError {
+                source: anyhow!("job failed: {}", failure.message),
+                message: failure.message,
+                domain: error_domain,
+            })
         }
     }
 
@@ -768,7 +596,8 @@ async fn execute_state<'a>(
 
     debug!(
         message = "executing state",
-        job_id = *ctx.config.id,
+        job_id = %ctx.config.id,
+        pipeline_id = *ctx.pipeline_info.pipeline_id,
         state = state_name,
         config = format!("{:?}", ctx.config)
     );
@@ -777,7 +606,8 @@ async fn execute_state<'a>(
         Ok(Transition::Advance(s)) => {
             info!(
                 message = "state transition",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 from = state_name,
                 to = s.state.name(),
                 duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
@@ -806,24 +636,11 @@ async fn execute_state<'a>(
             message,
             source,
             domain,
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 1,
-            ..
-        })
-        | Err(StateError::RetryableError {
-            message,
-            source,
-            domain,
-            retries: 0,
-            ..
         }) => {
             error!(
                 message = "fatal state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source)
@@ -848,6 +665,30 @@ async fn execute_state<'a>(
             Some(s)
         }
         Err(StateError::RetryableError {
+            message,
+            source,
+            domain,
+            retries: 0 | 1,
+            ..
+        }) => {
+            error!(
+                message = "exhausted in-state retries, moving to recovering",
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
+                state = state_name,
+                error_message = message,
+                error = format!("{:?}", source)
+            );
+            ctx.status.restarts += 1;
+            ctx.retries_attempted = 0;
+            let s: Box<dyn State> = Box::new(Recovering {
+                source,
+                reason: message,
+                domain,
+            });
+            Some(s)
+        }
+        Err(StateError::RetryableError {
             state,
             message,
             source,
@@ -856,7 +697,8 @@ async fn execute_state<'a>(
         }) => {
             error!(
                 message = "retryable state error",
-                job_id = *ctx.config.id,
+                job_id = %ctx.config.id,
+                pipeline_id = *ctx.pipeline_info.pipeline_id,
                 state = state_name,
                 error_message = message,
                 error = format!("{:?}", source),
@@ -875,7 +717,12 @@ async fn execute_state<'a>(
                 ["retries" => retries]
             );
 
-            state_backoff(ctx.retries_attempted).await;
+            state_backoff(
+                ctx.retries_attempted,
+                &ctx.config.id,
+                &ctx.pipeline_info.pipeline_id,
+            )
+            .await;
 
             ctx.retries_attempted += 1;
             Some(state)
@@ -885,16 +732,26 @@ async fn execute_state<'a>(
     if let Some(s) = &next {
         ctx.status.state = s.name().to_string();
 
-        ctx.status
+        match ctx
+            .status
             .update_db(&ctx.db)
             .await
-            .expect("Failed to update status");
+            .expect("Failed to update status")
+        {
+            JobStatusUpdate::Updated => {}
+            JobStatusUpdate::Missing => {
+                // Reject stale config updates while cleanup retries, releasing the updater's lock.
+                ctx.rx.close();
+                stop_workers_for_missing_job(ctx.scheduler.as_ref(), &ctx.config.id).await;
+                return (None, ctx);
+            }
+        }
     }
 
     (next, ctx)
 }
 
-pub(crate) async fn state_backoff(retries_attempted: usize) {
+pub(crate) async fn state_backoff(retries_attempted: usize, job_id: &str, pipeline_id: &str) {
     let pipeline_config = &config().pipeline;
     let base = *pipeline_config.state_initial_backoff;
     let max = *pipeline_config.state_max_backoff;
@@ -906,35 +763,41 @@ pub(crate) async fn state_backoff(retries_attempted: usize) {
             0..exp_backoff.as_micros() as u64 / 2,
         ));
 
-    debug!("waiting {}ms to retry", backoff.as_millis());
+    debug!(
+        %job_id,
+        pipeline_id,
+        "waiting {}ms to retry",
+        backoff.as_millis()
+    );
     tokio::time::sleep(backoff).await;
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn run_to_completion(
-    config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
+    job_config_and_status: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pipeline_info: Arc<PipelineInfo>,
-    mut program: LogicalProgram,
+    mut program: ControllerProgram,
     mut status: JobStatus,
     mut state: Box<dyn State>,
     db: DatabaseSource,
     mut rx: Receiver<JobMessage>,
     scheduler: Arc<dyn Scheduler>,
-    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
 ) {
-    let job_config = config.read().unwrap().0.clone();
+    let job_config = job_config_and_status.read().unwrap().0.clone();
 
     let leader_manager = if let Some(ctx) = &status.state_context.leader {
         LeaderManager::connect(
             JobId(job_config.id.clone()),
+            pipeline_info.pipeline_id.clone(),
             ctx.generation,
             ctx.worker_id,
             ctx.rpc_address.clone(),
+            config().controller.connect_timeout.as_deref().copied(),
         )
         .await
         .map(Some)
         .unwrap_or_else(|e| {
-            warn!(job_id = *job_config.id,
+            warn!(job_id = %job_config.id,
                     pipeline_id = *pipeline_info.pipeline_id,
                     leader_ctx =? ctx,
                     error =? e,
@@ -954,14 +817,12 @@ async fn run_to_completion(
         scheduler,
         rx: &mut rx,
         retries_attempted: 0,
-        job_controller: None,
         leader_manager,
         last_transitioned_at: Instant::now(),
-        metrics,
     };
 
     loop {
-        config.write().unwrap().1 = AppliedStatus::Applied;
+        job_config_and_status.write().unwrap().1 = AppliedStatus::Applied;
         match execute_state(state, ctx).await {
             (Some(new_state), new_ctx) => {
                 state = new_state;
@@ -970,7 +831,7 @@ async fn run_to_completion(
             (None, _) => break,
         }
 
-        ctx.config = config.read().unwrap().0.clone();
+        ctx.config = job_config_and_status.read().unwrap().0.clone();
     }
 }
 
@@ -984,7 +845,6 @@ pub struct StateMachine {
     tx: Option<Sender<JobMessage>>,
     config: Arc<RwLock<(JobConfig, AppliedStatus)>>,
     pub(crate) state: Arc<RwLock<String>>,
-    metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     db: DatabaseSource,
     scheduler: Arc<dyn Scheduler>,
 }
@@ -996,13 +856,11 @@ impl StateMachine {
         db: DatabaseSource,
         scheduler: Arc<dyn Scheduler>,
         shutdown_guard: ShutdownGuard,
-        metrics: Arc<tokio::sync::RwLock<HashMap<Arc<String>, JobMetrics>>>,
     ) -> Self {
         let mut this = Self {
             tx: None,
             config: Arc::new(RwLock::new((config, AppliedStatus::NotApplied))),
             state: Arc::new(RwLock::new(status.state.clone())),
-            metrics,
             db,
             scheduler,
         };
@@ -1012,18 +870,11 @@ impl StateMachine {
         this
     }
 
-    fn decode_program(bs: &[u8]) -> anyhow::Result<LogicalProgram> {
-        ArrowProgram::decode(bs)
-            .map_err(|e| anyhow!("Failed to decode program: {:?}", e))?
-            .try_into()
-            .map_err(|e| anyhow!("Failed to construct graph from program: {:?}", e))
-    }
-
     async fn get_program(
         db: &DatabaseSource,
         job_id: &str,
         id: i64,
-    ) -> anyhow::Result<Option<(LogicalProgram, PipelineInfo)>> {
+    ) -> anyhow::Result<Option<(ControllerProgram, PipelineInfo)>> {
         let res = controller_queries::fetch_get_program(&db.client().await?, &id)
             .await
             .map_err(|e| anyhow!("Failed to fetch program from database: {:?}", e))?
@@ -1044,17 +895,20 @@ impl StateMachine {
             tags,
         };
 
-        Ok(if res.proto_version == 2 {
-            match Self::decode_program(&res.program) {
-                Ok(p) => Some((p, info)),
+        Ok(
+            match ControllerProgram::from_bytes(res.proto_version, &res.program) {
+                Ok(program) => Some((program, info)),
                 Err(e) => {
-                    warn!("Failed to start {}: {}", job_id, e);
+                    warn!(
+                        %job_id,
+                        pipeline_id = *info.pipeline_id,
+                        "Failed to start job: {}",
+                        e
+                    );
                     None
                 }
-            }
-        } else {
-            None
-        })
+            },
+        )
     }
 
     async fn start(&mut self, mut status: JobStatus, shutdown_guard: ShutdownGuard) {
@@ -1063,18 +917,16 @@ impl StateMachine {
             return;
         }
 
-        let leader_mode = matches!(config().job_controller, JobControllerMode::Worker);
-
         // TODO: This seems pretty error-prone and easy to miss adding when we add states
         let initial_state: Option<Box<dyn State>> = match status.state.as_str() {
             "Created" => Some(Box::new(Created {})),
             "Stopped" => Some(Box::new(Stopped {})),
             "Finished" => Some(Box::new(Finished {})),
             "Failed" => Some(Box::new(Failed {})),
-            "Running" if leader_mode => Some(Box::new(LeaderRunning {
+            "Running" => Some(Box::new(LeaderRunning {
                 started: Instant::now(),
             })),
-            "Compiling" | "Scheduling" | "Running" | "Recovering" | "Rescaling" | "Restarting" => {
+            "Compiling" | "Scheduling" | "Recovering" | "Rescaling" | "Restarting" => {
                 Some(Box::new(Compiling {}))
             }
             "Failing" => {
@@ -1102,20 +954,39 @@ impl StateMachine {
 
         if let Some(initial_state) = initial_state {
             status.state = initial_state.name().to_string();
-            status.update_db(&self.db).await.unwrap();
+            match status
+                .update_db(&self.db)
+                .await
+                .expect("Failed to update initial job status")
+            {
+                JobStatusUpdate::Updated => {}
+                JobStatusUpdate::Missing => {
+                    // The updater holds the jobs lock here, so retry cleanup in a separate task.
+                    let scheduler = self.scheduler.clone();
+                    shutdown_guard.into_spawn_task(async move {
+                        stop_workers_for_missing_job(scheduler.as_ref(), &status.id).await;
+                        Ok(())
+                    });
+                    return;
+                }
+            }
             let (tx, rx) = channel(1024);
             {
                 let config = self.config.clone();
                 let db = self.db.clone();
                 let scheduler = self.scheduler.clone();
-                let metrics = self.metrics.clone();
                 let pipeline_id = config.read().unwrap().0.pipeline_id;
                 match Self::get_program(&db, &status.id, pipeline_id).await {
                     Ok(Some((program, pipeline_info))) => {
                         let pipeline_info = Arc::new(pipeline_info);
+                        let pipeline_id = pipeline_info.pipeline_id.clone();
                         shutdown_guard.into_spawn_task(async move {
                             let id = { config.read().unwrap().0.id.clone() };
-                            info!(message = "starting state machine", job_id = *id);
+                            info!(
+                                message = "starting state machine",
+                                job_id = %id,
+                                pipeline_id = *pipeline_id
+                            );
                             run_to_completion(
                                 config,
                                 pipeline_info,
@@ -1125,10 +996,13 @@ impl StateMachine {
                                 db,
                                 rx,
                                 scheduler,
-                                metrics,
                             )
                             .await;
-                            info!(message = "finished state machine", job_id = *id);
+                            info!(
+                                message = "finished state machine",
+                                job_id = %id,
+                                pipeline_id = *pipeline_id
+                            );
                             Ok(())
                         });
                     }
@@ -1137,7 +1011,7 @@ impl StateMachine {
                     }
                     Err(e) => {
                         // something went wrong, we'll retry on the next go around
-                        warn!("Failed to start {}: {:?}", status.id, e);
+                        warn!(job_id = %status.id, "Failed to start job: {:?}", e);
                     }
                 }
             }
@@ -1154,7 +1028,7 @@ impl StateMachine {
     ) {
         *self.state.write().unwrap() = status.state.clone();
         if self.config.read().unwrap().0 != config {
-            let update = JobMessage::ConfigUpdate(config.clone());
+            let update = JobMessage::ConfigUpdate(Box::new(config.clone()));
             {
                 let mut c = self.config.write().unwrap();
                 *c = (config, AppliedStatus::NotApplied);
@@ -1177,6 +1051,10 @@ impl StateMachine {
         }
     }
 
+    pub(crate) fn sender(&self) -> Option<Sender<JobMessage>> {
+        self.tx.clone()
+    }
+
     pub fn done(&self) -> bool {
         if let Some(tx) = &self.tx {
             tx.is_closed()
@@ -1194,13 +1072,12 @@ impl StateMachine {
     ) {
         match (applied, status.state.as_str()) {
             (_, "Running" | "Recovering" | "Rescaling" | "Restarting")
-            | (AppliedStatus::NotApplied, _) => {
+            | (AppliedStatus::NotApplied, _)
                 // done() means there isn't a task running, but these states
                 // need to be advanced.
-                if self.done() {
+                if self.done() => {
                     self.start(status, shutdown_guard.clone_temporary()).await;
                 }
-            }
             _ => {}
         }
     }

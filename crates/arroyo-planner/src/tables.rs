@@ -1,4 +1,5 @@
 use crate::extension::remote_table::RemoteTableExtension;
+use crate::rewriters::ReservedFieldNameChecker;
 use crate::types::convert_data_type;
 use crate::{
     ArroyoSchemaProvider, DFField,
@@ -10,12 +11,13 @@ use arrow_schema::{DataType, Field, FieldRef, Schema};
 use arroyo_connectors::connector_for_type;
 use arroyo_datastream::default_sink;
 use arroyo_operator::connector::Connection;
-use arroyo_rpc::ConnectorOptions;
 use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, SourceField,
 };
+use arroyo_rpc::config::PipelineCompilerConfigs;
 use arroyo_rpc::formats::{BadData, Format, Framing, JsonCompression, JsonFormat};
 use arroyo_rpc::grpc::api::ConnectorOp;
+use arroyo_rpc::{ConnectorOptions, INTERNAL_FIELD_PREFIX, is_internal_field_name};
 use arroyo_types::ArroyoExtensionType;
 use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion, TreeNodeVisitor};
 use datafusion::common::{Column, DataFusionError, plan_err};
@@ -34,21 +36,24 @@ use datafusion::optimizer::eliminate_cross_join::EliminateCrossJoin;
 use datafusion::optimizer::eliminate_duplicated_expr::EliminateDuplicatedExpr;
 use datafusion::optimizer::eliminate_filter::EliminateFilter;
 use datafusion::optimizer::eliminate_group_by_constant::EliminateGroupByConstant;
-use datafusion::optimizer::eliminate_join::EliminateJoin;
 use datafusion::optimizer::eliminate_limit::EliminateLimit;
-use datafusion::optimizer::eliminate_nested_union::EliminateNestedUnion;
-use datafusion::optimizer::eliminate_one_union::EliminateOneUnion;
 use datafusion::optimizer::eliminate_outer_join::EliminateOuterJoin;
 use datafusion::optimizer::extract_equijoin_predicate::ExtractEquijoinPredicate;
+use datafusion::optimizer::extract_leaf_expressions::{
+    ExtractLeafExpressions, PushDownLeafProjections,
+};
 use datafusion::optimizer::filter_null_join_keys::FilterNullJoinKeys;
+use datafusion::optimizer::optimize_unions::OptimizeUnions;
 use datafusion::optimizer::propagate_empty_relation::PropagateEmptyRelation;
 use datafusion::optimizer::push_down_filter::PushDownFilter;
 use datafusion::optimizer::push_down_limit::PushDownLimit;
 use datafusion::optimizer::replace_distinct_aggregate::ReplaceDistinctWithAggregate;
+use datafusion::optimizer::rewrite_set_comparison::RewriteSetComparison;
 use datafusion::optimizer::scalar_subquery_to_join::ScalarSubqueryToJoin;
 use datafusion::optimizer::simplify_expressions::SimplifyExpressions;
+use datafusion::optimizer::unions_to_filter::UnionsToFilter;
 use datafusion::sql::sqlparser;
-use datafusion::sql::sqlparser::ast::{CreateTable, Query};
+use datafusion::sql::sqlparser::ast::{CreateTable, CreateTableOptions, Query};
 use datafusion::{
     optimizer::{OptimizerContext, optimizer::Optimizer},
     sql::{
@@ -57,8 +62,7 @@ use datafusion::{
     },
 };
 use itertools::Itertools;
-use sqlparser::ast;
-use sqlparser::ast::TableConstraint;
+use sqlparser::ast::{self, TableConstraint};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tracing::warn;
@@ -140,9 +144,22 @@ fn produce_optimized_plan(
     statement: &Statement,
     schema_provider: &ArroyoSchemaProvider,
 ) -> Result<LogicalPlan> {
-    let sql_to_rel = SqlToRel::new(schema_provider);
+    let sql_to_rel = SqlToRel::new_with_options(
+        schema_provider,
+        datafusion::sql::planner::ParserOptions::new()
+            .with_collect_spans(true)
+            // Preserve DF48's Utf8 mapping; Arroyo does not support Utf8View.
+            .with_map_string_types_to_utf8view(false),
+    );
 
     let plan = sql_to_rel.sql_statement_to_plan(statement.clone())?;
+
+    // INSERT sources are validated separately by infer_sink_schema, before DataFusion adds
+    // target-column aliases that can include Arroyo's internal timestamp. Check other plans
+    // before optimization can remove user-written aliases.
+    if !matches!(statement, Statement::Insert(_)) {
+        plan.visit_with_subqueries(&mut ReservedFieldNameChecker {})?;
+    }
 
     let analyzed_plan = schema_provider.analyzer.execute_and_check(
         plan,
@@ -151,10 +168,15 @@ fn produce_optimized_plan(
     )?;
 
     let rules: Vec<Arc<dyn OptimizerRule + Send + Sync>> = vec![
-        Arc::new(EliminateNestedUnion::new()),
+        Arc::new(RewriteSetComparison::new()),
+        Arc::new(OptimizeUnions::new()),
+        Arc::new(UnionsToFilter::new()),
         Arc::new(SimplifyExpressions::new()),
         Arc::new(ReplaceDistinctWithAggregate::new()),
-        Arc::new(EliminateJoin::new()),
+        // EliminateJoin can turn inner joins into semi joins or remove
+        // an outer-join input. Arroyo still needs both sides' event timestamps,
+        // which are added after these logical optimizations.
+        // Arc::new(EliminateJoin::new()),
         Arc::new(DecorrelatePredicateSubquery::new()),
         Arc::new(ScalarSubqueryToJoin::new()),
         Arc::new(DecorrelateLateralJoin::new()),
@@ -164,8 +186,6 @@ fn produce_optimized_plan(
         Arc::new(EliminateCrossJoin::new()),
         Arc::new(EliminateLimit::new()),
         Arc::new(PropagateEmptyRelation::new()),
-        // Must be after PropagateEmptyRelation
-        Arc::new(EliminateOneUnion::new()),
         Arc::new(FilterNullJoinKeys::default()),
         Arc::new(EliminateOuterJoin::new()),
         // Filters can't be pushed down past Limits, we should do PushDownFilter after PushDownLimit
@@ -178,6 +198,8 @@ fn produce_optimized_plan(
         // that might benefit from the following rules
         Arc::new(EliminateGroupByConstant::new()),
         Arc::new(CommonSubexprEliminate::new()),
+        Arc::new(ExtractLeafExpressions::new()),
+        Arc::new(PushDownLeafProjections::new()),
         // This rule can drop event time calculation fields if they aren't used elsewhere.
         //Arc::new(OptimizeProjections::new()),
     ];
@@ -395,14 +417,15 @@ impl ConnectorTable {
                     plan_generating_expr(&expr, &table.name, &schema, schema_provider)
                         .map_err(|e| e.context("could not plan watermark expression"))?;
 
-                let (data_type, nullable) = logical_expr.data_type_and_nullable(&schema)?;
+                let (_, field) = logical_expr.to_field(&schema)?;
+                let data_type = field.data_type();
                 if !matches!(data_type, DataType::Timestamp(_, _)) {
                     return plan_err!(
                         "the type of the WATERMARK FOR expression must be TIMESTAMP, but was {}",
                         data_type
                     );
                 }
-                if nullable {
+                if field.is_nullable() {
                     return plan_err!("the type of the WATERMARK FOR expression must be NOT NULL");
                 }
 
@@ -670,6 +693,11 @@ impl Table {
             .iter()
             .map(|column| {
                 let name = column.name.value.to_string();
+                if is_internal_field_name(&name) {
+                    return plan_err!(
+                        "column name '{name}' in table '{table_name}' is invalid; names starting with '{INTERNAL_FIELD_PREFIX}' are reserved"
+                    );
+                }
                 let (data_type, extension) = convert_data_type(&column.data_type)?;
                 let nullable = !column
                     .options
@@ -773,7 +801,7 @@ impl Table {
         if let Statement::CreateTable(CreateTable {
             name,
             columns,
-            with_options,
+            table_options,
             query: None,
             temporary,
             constraints,
@@ -782,6 +810,11 @@ impl Table {
         }) = statement
         {
             let name: String = name.to_string();
+            let with_options = match table_options {
+                CreateTableOptions::None => &[][..],
+                CreateTableOptions::With(options) => options.as_slice(),
+                _ => return plan_err!("Table options must use WITH (...)"),
+            };
             let mut connector_opts = ConnectorOptions::new(with_options, arroyo_partitions)?;
 
             let connector = connector_opts.pull_opt_str("connector")?;
@@ -790,15 +823,9 @@ impl Table {
             let primary_keys = columns
                 .iter()
                 .filter(|c| {
-                    c.options.iter().any(|opt| {
-                        matches!(
-                            opt.option,
-                            ColumnOption::Unique {
-                                is_primary: true,
-                                ..
-                            }
-                        )
-                    })
+                    c.options
+                        .iter()
+                        .any(|opt| matches!(opt.option, ColumnOption::PrimaryKey(_)))
                 })
                 .map(|c| c.name.value.clone())
                 .collect();
@@ -977,12 +1004,12 @@ impl Table {
         }
     }
 
-    pub fn connector_op(&self) -> Result<ConnectorOp> {
+    pub fn connector_op(&self, compiler_config: &PipelineCompilerConfigs) -> Result<ConnectorOp> {
         match self {
             Table::ConnectorTable(c) | Table::LookupTable(c) => Ok(c.connector_op()),
             Table::MemoryTable { .. } => plan_err!("can't write to a memory table"),
             Table::TableFromQuery { .. } => todo!(),
-            Table::PreviewSink { logical_plan: _ } => Ok(default_sink()),
+            Table::PreviewSink { logical_plan: _ } => Ok(default_sink(compiler_config)),
         }
     }
 

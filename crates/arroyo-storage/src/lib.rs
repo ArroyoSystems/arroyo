@@ -9,7 +9,7 @@ use object_store::buffered::BufWriter;
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::multipart::{MultipartStore, PartId};
 use object_store::path::Path;
-use object_store::{Error, ObjectMeta};
+use object_store::{Error, ObjectMeta, ObjectStoreExt};
 use object_store::{
     MultipartId, ObjectStore, PutMode, PutOptions, PutPayload, RetryConfig, aws::AmazonS3Builder,
     local::LocalFileSystem,
@@ -189,7 +189,7 @@ macro_rules! storage_retry {
             10,
             Duration::from_millis(100),
             Duration::from_secs(10),
-            |e| error!("Error: {}. Retrying...", e),
+            |e| error!("Error: {:#}. Retrying...", anyhow::Error::new(e)),
             should_retry
         )
     };
@@ -763,15 +763,9 @@ impl StorageProvider {
 
     pub async fn get(&self, path: impl Into<Path>) -> Result<Bytes, StorageError> {
         let path = path.into();
-        let bytes = self
-            .object_store
-            .get(&self.qualify_path(&path))
+        self.get_with_retry(&path)
             .await
-            .map_err(Into::<StorageError>::into)?
-            .bytes()
-            .await?;
-
-        Ok(bytes)
+            .map_err(Into::<StorageError>::into)
     }
 
     pub async fn get_if_present(
@@ -779,11 +773,8 @@ impl StorageProvider {
         path: impl Into<Path>,
     ) -> Result<Option<Bytes>, StorageError> {
         let path: Path = path.into();
-        match self.object_store.get(&self.qualify_path(&path)).await {
-            Ok(obj) => {
-                let bytes = obj.bytes().await?;
-                Ok(Some(bytes))
-            }
+        match self.get_with_retry(&path).await {
+            Ok(bytes) => Ok(Some(bytes)),
             Err(err) => {
                 if let object_store::Error::NotFound { .. } = &err {
                     return Ok(None);
@@ -795,13 +786,16 @@ impl StorageProvider {
 
     pub async fn exists<P: Into<Path>>(&self, path: P) -> Result<bool, StorageError> {
         let path: Path = path.into();
-        let exists = self.object_store.head(&self.qualify_path(&path)).await;
-
-        match exists {
+        match self.head(path).await {
             Ok(_) => Ok(true),
-            Err(object_store::Error::NotFound { .. }) => Ok(false),
-            Err(e) => Err(e.into()),
+            Err(StorageError::ObjectStore(object_store::Error::NotFound { .. })) => Ok(false),
+            Err(e) => Err(e),
         }
+    }
+
+    async fn get_with_retry(&self, path: &Path) -> Result<Bytes, object_store::Error> {
+        let path = self.qualify_path(path);
+        storage_retry!(async { self.object_store.get(&path).await?.bytes().await }.await)
     }
 
     pub async fn get_as_stream(
@@ -876,11 +870,29 @@ impl StorageProvider {
     pub async fn delete_if_present(&self, path: impl Into<Path>) -> Result<(), StorageError> {
         let path = path.into();
         let path = self.qualify_path(&path);
-        match self.object_store.delete(&path).await {
+        match storage_retry!(self.object_store.delete(&path).await) {
             Ok(_) => Ok(()),
             Err(object_store::Error::NotFound { .. }) => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// Deletes an empty directory, only on local backends
+    pub async fn delete_directory(&self, path: &str) -> Result<(), StorageError> {
+        // only applies to local -- object stores don't have directories
+        let BackendConfig::Local(config) = &self.config else {
+            return Ok(());
+        };
+
+        let path = format!("{}/{}", config.path, path);
+        tokio::fs::remove_dir(&path).await.map_err(|e| {
+            StorageError::ObjectStore(Error::Generic {
+                store: "local",
+                source: e.into(),
+            })
+        })?;
+
+        Ok(())
     }
 
     pub fn as_multipart(&self) -> Option<Arc<dyn MultipartStore>> {

@@ -29,7 +29,7 @@ impl ThreadedUdfInterpreter {
                 let (name, arg_types, ret) = match Self::parse(&interpreter, &body) {
                     Ok(p) => p,
                     Err(e) => {
-                        parse_tx.send(Err(anyhow!("{}", e.to_string()))).unwrap();
+                        parse_tx.send(Err(anyhow!("{e}"))).unwrap();
                         return;
                     }
                 };
@@ -61,10 +61,7 @@ impl ThreadedUdfInterpreter {
             task_tx,
             result_rx: Arc::new(Mutex::new(result_rx)),
             definition: body,
-            signature: Arc::new(Signature {
-                type_signature,
-                volatility: Volatility::Volatile,
-            }),
+            signature: Arc::new(Signature::new(type_signature, Volatility::Volatile)),
             arg_types,
             return_type,
         })
@@ -139,7 +136,7 @@ impl ThreadedUdfInterpreter {
                             function
                                 .call1(args)
                                 .map_err(|e| {
-                                    anyhow!("failed while calling Python UDF '{}': {}", &name, e)
+                                    anyhow!("failed while calling Python UDF '{}': {}", name, e)
                                 })
                                 .map(|r| r.into())
                         }

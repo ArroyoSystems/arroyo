@@ -367,10 +367,8 @@ async fn test_inner(
                     let _payload = String::from_utf8(p.payload.to_vec())?;
                     return Ok("Successfully subscribed".to_string());
                 }
-                MqttEvent::Outgoing(Outgoing::Publish(_p)) => {
-                    if !wait_for_incomming {
-                        return Ok("Successfully published".to_string());
-                    }
+                MqttEvent::Outgoing(Outgoing::Publish(_p)) if !wait_for_incomming => {
+                    return Ok("Successfully published".to_string());
                 }
                 MqttEvent::Incoming(Incoming::Disconnect { .. })
                 | MqttEvent::Outgoing(Outgoing::Disconnect) => {

@@ -62,7 +62,7 @@ pub async fn test_connection_profile(
     bearer_auth: BearerAuth,
     WithRejection(Json(req), _): WithRejection<Json<ConnectionProfilePost>, ApiError>,
 ) -> Result<Json<TestSourceMessage>, ErrorResp> {
-    let _auth_data = authenticate(&state.database, bearer_auth).await.unwrap();
+    let _auth_data = authenticate(&state.database, bearer_auth).await?;
 
     let connector = connector_for_type(&req.connector)
         .ok_or_else(|| bad_request("Unknown connector type".to_string()))?;
@@ -223,7 +223,7 @@ pub(crate) async fn get_connection_profile_autocomplete(
         .map_err(|e| bad_request(format!("Failed to get autocomplete suggestions: {e}")))?;
 
     Ok(Json(ConnectionAutocompleteResp {
-        values: BTreeMap::from_iter(result.into_iter()),
+        values: BTreeMap::from_iter(result),
     }))
 }
 

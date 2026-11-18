@@ -1,24 +1,31 @@
 use crate::JobMessage;
 use crate::states::leader_stopping::{LeaderStopBehavior, LeaderStopping};
 use crate::states::recovering::Recovering;
-use crate::states::{JobContext, State, StateError, Transition, TransitionTo, fatal};
+use crate::states::{
+    JobContext, State, StateError, Transition, TransitionTo, controller_job_failure,
+};
 use crate::types::public::StopMode as SqlStopMode;
-use anyhow::{anyhow, bail};
+use anyhow::{Context, anyhow, bail};
 use arroyo_rpc::config::config;
+use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::job_status_grpc_client::JobStatusGrpcClient;
-use arroyo_rpc::grpc::rpc::{JobFailure, JobState, JobStatusReq, JobStopMode, StopJobReq};
+use arroyo_rpc::grpc::rpc::{JobState, JobStatusReq, JobStopMode, StopJobReq};
 use arroyo_rpc::identity::InjectWorkerId;
 use arroyo_rpc::{job_status_client, retry};
-use arroyo_types::{JobId, WorkerId};
+use arroyo_types::{JobId, PipelineId, WorkerId};
 use std::time::{Duration, Instant};
+use tokio::time::timeout;
 use tonic::codegen::InterceptedService;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
+const LEADER_RPC_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct LeaderManager {
     leader_client: JobStatusGrpcClient<InterceptedService<Channel, InjectWorkerId>>,
     pub job_id: JobId,
+    pub pipeline_id: PipelineId,
     pub generation: u64,
     pub last_heartbeat: Instant,
 }
@@ -26,26 +33,35 @@ pub struct LeaderManager {
 impl LeaderManager {
     pub async fn connect(
         job_id: JobId,
+        pipeline_id: PipelineId,
         generation: u64,
         worker_id: WorkerId,
         address: String,
+        connect_timeout: Option<Duration>,
     ) -> anyhow::Result<Self> {
         let leader_client = retry!(
             job_status_client(
                 "controller",
                 &config().worker.tls,
                 worker_id,
-                address.clone()
+                address.clone(),
+                connect_timeout,
             )
             .await,
             5,
             Duration::from_millis(100),
             Duration::from_secs(2),
-            |e| warn!(job_id = *job_id.0, message = "failed to connect to worker leader", error = ?e)
+            |e| warn!(
+                job_id = %job_id,
+                pipeline_id = *pipeline_id.0,
+                message = "failed to connect to worker leader",
+                error = ?e
+            )
         )?;
 
         Ok(Self {
             job_id,
+            pipeline_id,
             generation,
             leader_client,
             last_heartbeat: Instant::now(),
@@ -53,15 +69,28 @@ impl LeaderManager {
     }
 
     pub async fn poll_leader_status(&mut self) -> anyhow::Result<rpc::JobStatus> {
-        let response = retry!(
-            self.leader_client.get_job_status(JobStatusReq {
-                  job_id: self.job_id.to_string(),
-                }).await,
+        let response = timeout(LEADER_RPC_TIMEOUT, async {
+            retry!(
+                self.leader_client
+                    .get_job_status(JobStatusReq {
+                        job_id: self.job_id.to_string(),
+                        generation: self.generation,
+                    })
+                    .await,
                 5,
                 Duration::from_millis(100),
                 Duration::from_secs(2),
-                |e| warn!(job_id = *self.job_id.0, message = "failed to poll for job status", error = ?e)
-        )?.into_inner();
+                |e| warn!(
+                    job_id = %self.job_id,
+                    pipeline_id = *self.pipeline_id.0,
+                    message = "failed to poll for job status",
+                    error = ?e
+                )
+            )
+        })
+        .await
+        .context("timed out polling leader status")??
+        .into_inner();
 
         if response.job_id != *self.job_id.0 {
             bail!(
@@ -91,20 +120,27 @@ impl LeaderManager {
     pub async fn stop_leader(&mut self, stop_mode: JobStopMode) -> anyhow::Result<()> {
         info!(
             message = "sending stop request to leader",
-            job_id = *self.job_id.0,
+            job_id = %self.job_id,
+            pipeline_id = *self.pipeline_id.0,
             stop_mode = ?stop_mode,
         );
 
-        self.leader_client
-            .stop_job(StopJobReq {
+        timeout(
+            LEADER_RPC_TIMEOUT,
+            self.leader_client.stop_job(StopJobReq {
                 stop_mode: stop_mode as i32,
-            })
-            .await?;
+            }),
+        )
+        .await
+        .context("timed out sending stop request to leader")??;
 
         Ok(())
     }
 
-    pub async fn wait_for_state(&mut self, expected: rpc::JobState) -> anyhow::Result<()> {
+    pub async fn wait_for_state(
+        &mut self,
+        expected: rpc::JobState,
+    ) -> anyhow::Result<rpc::JobStatus> {
         let mut timer = tokio::time::interval(Duration::from_millis(200));
         loop {
             let status = self.poll_leader_status().await?;
@@ -113,7 +149,7 @@ impl LeaderManager {
                 .map_err(|e| anyhow!("received invalid job state from leader: {e}"))?;
 
             if state == expected {
-                return Ok(());
+                return Ok(status);
             }
 
             match state {
@@ -187,7 +223,12 @@ where
                         }
                     }
                     Some(msg) => {
-                        warn!(job_id = *ctx.config.id, ?msg, "unexpected job message in leader leader mode");
+                        warn!(
+                            job_id = %ctx.config.id,
+                            pipeline_id = *ctx.pipeline_info.pipeline_id,
+                            ?msg,
+                            "unexpected job message while controlling worker leader"
+                        );
                     }
                     None => {
                         panic!("job queue shut down");
@@ -195,23 +236,31 @@ where
                 }
             }
             resp = ctx.leader_manager.as_mut().expect("leader manager not initialized").wait_for_state(expected_state) => {
-                if let Err(e) = resp {
-                    return Err(fatal("failed while waiting for final checkpoint", e));
-                }
+                let status = match resp {
+                    Ok(status) => status,
+                    Err(e) => {
+                        return ctx.handle_job_failure(state, controller_job_failure(
+                            format!("failed while taking final checkpoint: {:?}", e),
+                            rpc::ErrorDomain::Internal,
+                            RetryHint::WithBackoff,
+                        )).await;
+                    }
+                };
+                // Persist the leader's explicit completion signal with the state transition.
+                // JobStopped alone also covers immediate stops and retired leaders.
+                ctx.status.checkpoint_stop_generation = status.checkpoint_stop_complete
+                    .then_some(ctx.status.generation as i64);
                 return Ok(Transition::next(
                     state,
                     next,
                 ));
             }
             _ = tokio::time::sleep(timeout) => {
-                return ctx.handle_job_failure(state, JobFailure {
-                    operator_id: None,
-                    task_id: None,
-                    subtask_index: None,
-                    message: "timed out while taking final checkpoint".to_string(),
-                    error_domain: rpc::ErrorDomain::Internal as i32,
-                    retry_hint: rpc::RetryHint::WithBackoff as i32,
-                }).await;
+                return ctx.handle_job_failure(state, controller_job_failure(
+                    "timed out while taking final checkpoint".to_string(),
+                    rpc::ErrorDomain::Internal,
+                    RetryHint::WithBackoff,
+                )).await;
             }
         }
     }

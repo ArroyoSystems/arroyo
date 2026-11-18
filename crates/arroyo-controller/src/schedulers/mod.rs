@@ -1,5 +1,4 @@
 use anyhow::bail;
-use arroyo_datastream::logical::LogicalProgram;
 use arroyo_rpc::config::config;
 use arroyo_rpc::connect_grpc;
 use arroyo_rpc::grpc::rpc::node_grpc_client::NodeGrpcClient;
@@ -71,6 +70,7 @@ pub trait Scheduler: Send + Sync {
 }
 
 pub struct ProcessWorker {
+    pipeline_id: PipelineId,
     job_id: JobId,
     generation: u64,
     shutdown_tx: oneshot::Sender<()>,
@@ -96,15 +96,16 @@ const PROCESS_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct StartPipelineReq {
     pub name: String,
-    pub program: LogicalProgram,
     pub wasm_path: String,
     pub pipeline_id: PipelineId,
+    pub organization_id: String,
     pub job_id: JobId,
-    pub hash: String,
     pub generation: u64,
     pub slots: usize,
     pub env_vars: HashMap<String, String>,
     pub pipeline_tags: HashMap<String, String>,
+    /// Per-job scheduler configuration overlay as raw JSON
+    pub scheduler_config: serde_json::Value,
 }
 
 #[async_trait::async_trait]
@@ -141,6 +142,7 @@ impl Scheduler for ProcessScheduler {
                 workers.insert(
                     WorkerId(worker_id),
                     ProcessWorker {
+                        pipeline_id: start_pipeline_req.pipeline_id.clone(),
                         job_id: start_pipeline_req.job_id.clone(),
                         generation: start_pipeline_req.generation,
                         shutdown_tx: tx,
@@ -197,6 +199,7 @@ impl Scheduler for ProcessScheduler {
                             message = "failed to start process scheduler worker",
                             worker_id,
                             job_id = %job_id,
+                            pipeline_id = %pipeline_id,
                             error = format!("{:?}", e),
                         );
 
@@ -211,16 +214,28 @@ impl Scheduler for ProcessScheduler {
 
                 tokio::select! {
                     status = child.wait() => {
-                        info!("Child ({:?}) exited with status {:?}", path, status);
+                        info!(
+                            job_id = %job_id,
+                            pipeline_id = %pipeline_id,
+                            "Child ({:?}) exited with status {:?}",
+                            path,
+                            status
+                        );
                     }
                     _ = rx => {
                         if config.process_scheduler.shutdown_with_controller {
-                            info!(message = "Killing child", worker_id = worker_id, job_id = *job_id);
+                            info!(
+                                message = "Killing child",
+                                worker_id,
+                                job_id = %job_id,
+                                pipeline_id = *pipeline_id
+                            );
                             if let Err(e) = child.kill().await {
                                 warn!(
                                     message = "failed to kill process scheduler worker",
                                     worker_id,
                                     job_id = %job_id,
+                                    pipeline_id = %pipeline_id,
                                     error = format!("{:?}", e),
                                 );
                             }
@@ -297,17 +312,21 @@ impl Scheduler for ProcessScheduler {
         );
 
         let waiters = workers.into_iter().map(|(worker_id, worker)| async move {
+            let job_id = worker.job_id.clone();
+            let pipeline_id = worker.pipeline_id.clone();
             let _ = worker.shutdown_tx.send(());
-            (worker_id, worker.finished_rx.await)
+            (worker_id, job_id, pipeline_id, worker.finished_rx.await)
         });
 
         match tokio::time::timeout(PROCESS_WORKER_SHUTDOWN_TIMEOUT, join_all(waiters)).await {
             Ok(results) => {
-                for (worker_id, result) in results {
+                for (worker_id, job_id, pipeline_id, result) in results {
                     if result.is_err() {
                         warn!(
                             message = "process scheduler worker exited without completion signal",
                             worker_id = worker_id.0,
+                            job_id = %job_id,
+                            pipeline_id = *pipeline_id,
                         );
                     }
                 }
@@ -320,6 +339,137 @@ impl Scheduler for ProcessScheduler {
                 );
             }
         }
+    }
+}
+
+/// A "manual" scheduler that relies on the user to manage worker processes by executing commands
+/// printed out to the terminal. This is mostly useful for testing scheduling behavior.
+pub struct ManualScheduler {}
+
+impl ManualScheduler {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+#[async_trait::async_trait]
+impl Scheduler for ManualScheduler {
+    async fn start_workers(
+        &self,
+        start_pipeline_req: StartPipelineReq,
+    ) -> Result<(), SchedulerError> {
+        let config = config();
+        let slots_per_process = config.manual_scheduler.slots_per_process as usize;
+
+        let workers = (start_pipeline_req.slots as f32 / slots_per_process as f32).ceil() as usize;
+
+        let exe = current_exe().map_err(|e| {
+            SchedulerError::Other(format!("Could not get path of worker binary: {e:?}"))
+        })?;
+
+        let mut slots_scheduled = 0;
+
+        for _ in 0..workers {
+            let slots_here = (start_pipeline_req.slots - slots_scheduled).min(slots_per_process);
+            slots_scheduled += slots_here;
+
+            let mut envs: Vec<(String, String)> = vec![
+                ("ARROYO__ADMIN__HTTP_PORT".to_string(), "0".to_string()),
+                (
+                    "ARROYO__WORKER__TASK_SLOTS".to_string(),
+                    slots_here.to_string(),
+                ),
+                (
+                    "ARROYO__CONTROLLER_ENDPOINT".to_string(),
+                    config.controller_endpoint(),
+                ),
+                (
+                    PIPELINE_ID_ENV.to_string(),
+                    start_pipeline_req.pipeline_id.to_string(),
+                ),
+                (
+                    JOB_ID_ENV.to_string(),
+                    start_pipeline_req.job_id.to_string(),
+                ),
+                (
+                    GENERATION_ENV.to_string(),
+                    start_pipeline_req.generation.to_string(),
+                ),
+            ];
+
+            for (env, value) in &start_pipeline_req.env_vars {
+                envs.push((env.clone(), value.clone()));
+            }
+
+            // Build the command-line arguments, mirroring the process scheduler.
+            let mut args: Vec<String> = vec![];
+            if let Some(path) = &config.config_path {
+                args.push("-c".to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            if let Some(path) = &config.config_dir {
+                args.push("--config-dir".to_string());
+                args.push(path.to_string_lossy().to_string());
+            }
+            args.push("worker".to_string());
+
+            // Assemble the copy-pasteable command line.
+            let mut cmdline = String::new();
+            for (env, value) in &envs {
+                cmdline.push_str(&format!("{}={} ", env, value));
+            }
+            cmdline.push_str(&exe.to_string_lossy());
+            for arg in &args {
+                cmdline.push(' ');
+                cmdline.push_str(arg);
+            }
+
+            println!();
+            println!(
+                "════════════════════════════════════════════════════════════════════════════════"
+            );
+            println!(
+                "[manual scheduler] Run worker {} of {} (worker id {} slots) for job {} in a \
+                 separate terminal:",
+                slots_scheduled / slots_per_process.max(1),
+                workers,
+                slots_here,
+                start_pipeline_req.job_id,
+            );
+            println!();
+            println!("{cmdline}");
+            println!(
+                "════════════════════════════════════════════════════════════════════════════════"
+            );
+            println!();
+        }
+
+        Ok(())
+    }
+
+    async fn register_node(&self, _: RegisterNodeReq) {}
+    async fn heartbeat_node(&self, _: HeartbeatNodeReq) -> Result<(), Status> {
+        Ok(())
+    }
+    async fn worker_finished(&self, _: WorkerFinishedReq) {}
+
+    async fn workers_for_job(
+        &self,
+        _job_id: &str,
+        _run_id: Option<u64>,
+    ) -> anyhow::Result<Vec<WorkerId>> {
+        Ok(vec![])
+    }
+
+    async fn stop_workers(
+        &self,
+        job_id: &str,
+        _run_id: Option<u64>,
+        _force: bool,
+    ) -> anyhow::Result<()> {
+        println!("[manual scheduler] Stop workers for job {}", job_id);
+
+        Ok(())
     }
 }
 
@@ -380,6 +530,7 @@ impl NodeStatus {
 
 #[derive(Clone)]
 struct NodeWorker {
+    pipeline_id: PipelineId,
     job_id: JobId,
     node_id: MachineId,
     generation: u64,
@@ -416,9 +567,23 @@ pub struct NodeScheduler {
     state: Arc<Mutex<NodeSchedulerState>>,
 }
 
+#[derive(Debug)]
 pub enum SchedulerError {
-    NotEnoughSlots { slots_needed: usize },
+    NotEnoughSlots {
+        slots_needed: usize,
+    },
     Other(String),
+    /// Non-retryable scheduler failure. The state machine treats
+    /// this as fatal and transitions the job to `Failed` without retrying.
+    Fatal(String),
+}
+
+pub fn is_empty_overlay(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(m) => m.is_empty(),
+        _ => false,
+    }
 }
 
 impl NodeScheduler {
@@ -434,9 +599,11 @@ impl NodeScheduler {
             format!("http://{}", node.addr),
             &config().controller.tls,
             &config().node.tls,
+            None,
         )
         .await?;
-        Ok(NodeGrpcClient::new(channel))
+        Ok(NodeGrpcClient::new(channel)
+            .max_decoding_message_size(arroyo_rpc::grpc_max_message_size()))
     }
 
     async fn stop_worker(
@@ -455,7 +622,9 @@ impl NodeScheduler {
         let Some(node) = state.nodes.get(&worker.node_id) else {
             warn!(
                 message = "node not found for stop worker",
-                node_id = *worker.node_id.0
+                node_id = *worker.node_id.0,
+                job_id = %worker.job_id,
+                pipeline_id = *worker.pipeline_id
             );
             return Ok(Some(worker_id));
         };
@@ -466,14 +635,19 @@ impl NodeScheduler {
 
         info!(
             message = "stopping worker",
-            job_id = *worker.job_id,
+            job_id = %worker.job_id,
+            pipeline_id = *worker.pipeline_id,
             node_id = *worker.node_id.0,
             node_addr = node.addr,
             worker_id = worker_id.0
         );
 
         let Ok(mut client) = Self::client(&node).await else {
-            warn!("Failed to connect to worker to stop; this likely means it is dead");
+            warn!(
+                job_id = %worker.job_id,
+                pipeline_id = *worker.pipeline_id,
+                "Failed to connect to worker to stop; this likely means it is dead"
+            );
             return Ok(Some(worker_id));
         };
 
@@ -485,7 +659,11 @@ impl NodeScheduler {
             }))
             .await
         else {
-            warn!("Failed to connect to worker to stop; this likely means it is dead");
+            warn!(
+                job_id = %worker.job_id,
+                pipeline_id = *worker.pipeline_id,
+                "Failed to connect to worker to stop; this likely means it is dead"
+            );
             return Ok(Some(worker_id));
         };
 
@@ -542,21 +720,23 @@ impl Scheduler for NodeScheduler {
         };
 
         let worker_id = WorkerId(worker_context.worker_id);
+        let job_id = worker_context.job_id;
+        let pipeline_id = worker_context.pipeline_id;
         let machine_id = MachineId(Arc::new(worker_context.machine_id));
 
         if let Some(node) = state.nodes.get_mut(&machine_id) {
             node.release_slots(worker_id, req.slots as usize);
         } else {
             warn!(
-                "Got worker finished message for unknown node {}",
-                machine_id
+                %job_id,
+                pipeline_id, "Got worker finished message for unknown node {}", machine_id
             );
         }
 
         if state.workers.remove(&worker_id).is_none() {
             warn!(
-                "Got worker finished message for unknown worker {}",
-                worker_id.0
+                %job_id,
+                pipeline_id, "Got worker finished message for unknown worker {}", worker_id.0
             );
         }
     }
@@ -619,8 +799,11 @@ impl Scheduler for NodeScheduler {
 
             let slots_for_this_one = node.free_slots.min(to_schedule);
             info!(
+                job_id = %start_pipeline_req.job_id,
+                pipeline_id = *start_pipeline_req.pipeline_id,
                 "Scheduling {} slots on node {}",
-                slots_for_this_one, node.addr
+                slots_for_this_one,
+                node.addr
             );
 
             let mut client = Self::client(&node)
@@ -683,6 +866,7 @@ impl Scheduler for NodeScheduler {
             state.workers.insert(
                 WorkerId(res.worker_id),
                 NodeWorker {
+                    pipeline_id: start_pipeline_req.pipeline_id.clone(),
                     job_id: start_pipeline_req.job_id.clone(),
                     generation: start_pipeline_req.generation,
                     node_id: node.id.clone(),
