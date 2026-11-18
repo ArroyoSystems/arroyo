@@ -30,7 +30,8 @@ struct CacheNode {
     next: CacheNodePtr,
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+/// The row-encoded bytes of a key, ordered as the values they encode.
+#[derive(Hash, Eq, PartialEq, Ord, PartialOrd, Clone, Debug)]
 pub struct Key(pub Arc<Vec<u8>>);
 
 impl Borrow<[u8]> for Key {
