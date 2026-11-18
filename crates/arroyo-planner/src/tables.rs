@@ -457,13 +457,6 @@ impl ConnectorTable {
             );
         }
 
-        if table.connection_type == ConnectionType::Source
-            && table.is_updating()
-            && primary_keys.is_empty()
-        {
-            return plan_err!("Debezium source must have at least one PRIMARY KEY field");
-        }
-
         table.primary_keys = Arc::new(primary_keys);
 
         Ok(table)
