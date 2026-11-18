@@ -1,5 +1,6 @@
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::Collector;
+use arroyo_operator::partitioned::PartitionedBatch;
 use arroyo_operator::{context::OperatorContext, operator::ArrowOperator};
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::{
@@ -10,8 +11,10 @@ use arroyo_state::tables::global_keyed_map::GlobalKeyedView;
 use arroyo_types::{Data, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config;
+use datafusion::physical_expr::PhysicalExpr;
 use prost::Message;
 use std::fmt::Debug;
+use std::sync::Arc;
 use std::{collections::HashMap, time::SystemTime};
 use tracing::debug;
 
@@ -48,6 +51,8 @@ pub trait TwoPhaseCommitter: Send + 'static {
         data_recovery: Vec<Self::DataRecovery>,
     ) -> DataflowResult<()>;
     async fn insert_batch(&mut self, batch: RecordBatch) -> DataflowResult<()>;
+    fn partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>>;
+    async fn insert_partitioned(&mut self, batch: PartitionedBatch) -> DataflowResult<()>;
     // TODO: figure out how to have the relevant vectors be of pointers across async boundaries.
     async fn commit(
         &mut self,
@@ -193,11 +198,20 @@ impl<TPC: TwoPhaseCommitter> ArrowOperator for TwoPhaseCommitterOperator<TPC> {
         _ctx: &mut OperatorContext,
         _: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        self.committer
-            .insert_batch(batch)
-            .await
-            .expect("record inserted");
-        Ok(())
+        self.committer.insert_batch(batch).await
+    }
+
+    fn fallback_partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>> {
+        self.committer.partition_exprs()
+    }
+
+    async fn process_partitioned(
+        &mut self,
+        batch: PartitionedBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) -> DataflowResult<()> {
+        self.committer.insert_partitioned(batch).await
     }
 
     async fn handle_commit(

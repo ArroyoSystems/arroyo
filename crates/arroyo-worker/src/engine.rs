@@ -262,7 +262,11 @@ impl Program {
                     LogicalEdgeType::Shuffle
                     | LogicalEdgeType::LeftJoin
                     | LogicalEdgeType::RightJoin => {
-                        logical.node_weight(edge.source()).unwrap().parallelism as u32
+                        let upstream = &logical[edge.source()];
+                        parallelism_map
+                            .get(&upstream.node_id)
+                            .copied()
+                            .unwrap_or(upstream.parallelism) as u32
                     }
                 })
                 .sum();

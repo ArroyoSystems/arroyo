@@ -86,6 +86,11 @@ impl Partitioner {
         !self.exprs.is_empty()
     }
 
+    /// The partition expressions, if this partitioner is partitioned
+    pub fn partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>> {
+        self.is_partitioned().then(|| self.exprs.clone())
+    }
+
     /// Partition the batch by this partitioner
     pub fn partition(
         &self,
@@ -139,14 +144,17 @@ impl Partitioner {
         Ok(out)
     }
 
+    /// `partition` may come from any converter for the same expressions, such as the runtime's
+    /// partitioned input, so it is parsed rather than decoded directly
     pub fn hive_path(&self, partition: &OwnedRow) -> Option<String> {
         if !self.mode.hive_style_paths() {
             return None;
         }
 
+        let parser = self.row_converter.parser();
         let array = self
             .row_converter
-            .convert_rows(vec![partition.row()])
+            .convert_rows([parser.parse(partition.row().data())])
             .unwrap();
 
         assert_eq!(array.len(), 1);

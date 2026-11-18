@@ -16,6 +16,7 @@ use arrow::record_batch::RecordBatch;
 use arrow::row::OwnedRow;
 use arroyo_operator::context::{Collector, OperatorContext};
 use arroyo_operator::operator::ArrowOperator;
+use arroyo_operator::partitioned::PartitionedBatch;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, StateError};
 use arroyo_rpc::grpc::rpc::{GlobalKeyedTableConfig, TableConfig, TableEnum};
 use arroyo_rpc::{CheckpointEvent, connector_err, df::ArroyoSchemaRef, formats::Format};
@@ -24,6 +25,7 @@ use arroyo_storage::StorageProvider;
 use arroyo_types::{CheckpointBarrier, SignalMessage, TaskInfo, Watermark};
 use async_trait::async_trait;
 use bincode::config as bincode_config;
+use datafusion::physical_expr::PhysicalExpr;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use object_store::path::Path;
@@ -445,6 +447,48 @@ impl<BBW: BatchBufferingWriter + Send + 'static> FileSystemSinkV2<BBW> {
             _ => -1,
         }
     }
+
+    async fn write_partitions(
+        &mut self,
+        partitions: Vec<(Option<OwnedRow>, RecordBatch)>,
+    ) -> DataflowResult<()> {
+        let timestamp_index = self.context.as_ref().unwrap().schema.timestamp_index;
+        for (partition_key, sub_batch) in partitions {
+            let representative_timestamp =
+                representitive_timestamp(sub_batch.column(timestamp_index)).map_err(|e| {
+                    connector_err!(
+                        Internal,
+                        NoRetry,
+                        source: e,
+                        "failed to get representative timestamp"
+                    )
+                })?;
+
+            let file = self.active.get_or_create_file(
+                &self.config,
+                self.event_logger.clone(),
+                self.context.as_ref().unwrap(),
+                &partition_key,
+                representative_timestamp,
+            )?;
+            let future = file.add_batch(&sub_batch)?;
+
+            if let Some(future) = future {
+                let futures = self.upload.pending_uploads.lock().await;
+                futures.push(future);
+            }
+
+            if self
+                .upload
+                .roll_file_if_ready(&self.config.rolling_policies, self.watermark, file)
+                .await?
+            {
+                self.active.active_partitions.remove(&partition_key);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -545,7 +589,6 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
         _ctx: &mut OperatorContext,
         _collector: &mut dyn Collector,
     ) -> DataflowResult<()> {
-        let timestamp_index = self.context.as_ref().unwrap().schema.timestamp_index;
         let partitioner = &self.context.as_ref().unwrap().partitioner;
 
         let partitions: Vec<(Option<OwnedRow>, RecordBatch)> = if partitioner.is_partitioned() {
@@ -558,41 +601,28 @@ impl<BBW: BatchBufferingWriter + Send + 'static> ArrowOperator for FileSystemSin
             vec![(None, batch)]
         };
 
-        for (partition_key, sub_batch) in partitions {
-            let representative_timestamp =
-                representitive_timestamp(sub_batch.column(timestamp_index)).map_err(|e| {
-                    connector_err!(
-                        Internal,
-                        NoRetry,
-                        source: e,
-                        "failed to get representative timestamp"
-                    )
-                })?;
+        self.write_partitions(partitions).await
+    }
 
-            let file = self.active.get_or_create_file(
-                &self.config,
-                self.event_logger.clone(),
-                self.context.as_ref().unwrap(),
-                &partition_key,
-                representative_timestamp,
-            )?;
-            let future = file.add_batch(&sub_batch)?;
+    fn fallback_partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>> {
+        self.context.as_ref()?.partitioner.partition_exprs()
+    }
 
-            if let Some(future) = future {
-                let futures = self.upload.pending_uploads.lock().await;
-                futures.push(future);
-            }
+    fn flush_before_watermark(&self) -> bool {
+        self.config.config.rolling_policy.watermark_expiration
+    }
 
-            if self
-                .upload
-                .roll_file_if_ready(&self.config.rolling_policies, self.watermark, file)
-                .await?
-            {
-                self.active.active_partitions.remove(&partition_key);
-            }
-        }
-
-        Ok(())
+    async fn process_partitioned(
+        &mut self,
+        batch: PartitionedBatch,
+        _: &mut OperatorContext,
+        _: &mut dyn Collector,
+    ) -> DataflowResult<()> {
+        let partitions = batch
+            .iter()
+            .map(|p| (Some(p.key.owned()), p.batch))
+            .collect();
+        self.write_partitions(partitions).await
     }
 
     fn future_to_poll(
