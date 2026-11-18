@@ -6,7 +6,7 @@ use crate::{
     ArroyoSchemaProvider, DFField, WindowBehavior, fields_with_qualifiers, find_window,
     schema_from_df_fields_with_metadata,
 };
-use arroyo_rpc::TIMESTAMP_FIELD;
+use arroyo_rpc::{TIMESTAMP_FIELD, UPDATING_META_FIELD};
 use datafusion::common::tree_node::{Transformed, TreeNodeRewriter};
 use datafusion::common::{DFSchema, DataFusionError, Result, not_impl_err, plan_err};
 use datafusion::functions_aggregate::expr_fn::max;
@@ -224,6 +224,14 @@ impl TreeNodeRewriter for AggregateRewriter<'_> {
                 );
             }
         };
+
+        // windowed aggregates treat every row as an insert, so they would count a retraction as another row
+        if input
+            .schema()
+            .has_column_with_unqualified_name(UPDATING_META_FIELD)
+        {
+            return plan_err!("can't handle updating input to a windowed aggregate");
+        }
 
         let key_count = key_fields.len();
         key_fields.extend(fields_with_qualifiers(input.schema()));
