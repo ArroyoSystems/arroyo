@@ -538,8 +538,6 @@ dependencies = [
  "apache-avro 0.18.0",
  "arrow",
  "arrow-schema",
- "arroyo-connector-confluent",
- "arroyo-connector-kafka",
  "arroyo-connectors",
  "arroyo-datastream",
  "arroyo-formats",

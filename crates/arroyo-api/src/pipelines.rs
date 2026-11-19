@@ -23,7 +23,6 @@ use arroyo_rpc::api_types::udfs::{GlobalUdf, Udf, UdfLanguage};
 use arroyo_rpc::api_types::{JobCollection, PaginationQueryParams, PipelineCollection};
 use arroyo_rpc::grpc::api::{ArrowProgram, ConnectorOp};
 
-use arroyo_connector_kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_datastream::logical::{
     ChainedLogicalOperator, LogicalNode, LogicalProgram, OperatorChain, OperatorName,
 };
@@ -32,7 +31,7 @@ use arroyo_planner::{ArroyoSchemaProvider, CompiledSql, PlannerError, SqlConfig}
 use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id, validate_public_id};
-use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
+use arroyo_rpc::schema_resolver::ConfluentSchemaType;
 use arroyo_rpc::{OperatorConfig, error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
@@ -204,25 +203,14 @@ async fn try_register_confluent_schema(
 ) -> anyhow::Result<()> {
     let mut config: OperatorConfig = serde_json::from_str(&sink.config).unwrap();
 
-    let Ok(profile) = serde_json::from_value::<KafkaConfig>(config.connection.clone()) else {
+    let Some(connector) = connector_for_type(&sink.connector) else {
         return Ok(());
     };
 
-    let Ok(table) = serde_json::from_value::<KafkaTable>(config.table.clone()) else {
-        return Ok(());
-    };
-
-    let Some(SchemaRegistry::ConfluentSchemaRegistry {
-        endpoint,
-        api_key,
-        api_secret,
-    }) = profile.schema_registry_enum
+    let Some(schema_registry) = connector.schema_registry(&config.connection, &config.table)?
     else {
         return Ok(());
     };
-
-    let schema_registry =
-        ConfluentSchemaRegistry::new(&endpoint, &table.subject(), api_key, api_secret)?;
 
     match config.format.clone() {
         Some(Format::Avro(mut avro))

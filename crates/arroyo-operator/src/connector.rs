@@ -6,6 +6,7 @@ use arroyo_rpc::api_types::connections::{
     ConnectionProfile, ConnectionSchema, ConnectionType, TestSourceMessage,
 };
 use arroyo_rpc::errors::DataflowError;
+use arroyo_rpc::schema_resolver::ConfluentSchemaRegistry;
 use arroyo_rpc::{ConnectorOptions, OperatorConfig};
 use arroyo_types::DisplayAsSql;
 use async_trait::async_trait;
@@ -115,6 +116,16 @@ pub trait Connector: Send {
         None
     }
 
+    /// Returns a client for the Confluent Schema Registry configured for this table, if any
+    #[allow(unused)]
+    fn schema_registry(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+    ) -> anyhow::Result<Option<ConfluentSchemaRegistry>> {
+        Ok(None)
+    }
+
     #[allow(unused)]
     fn get_autocomplete(
         &self,
@@ -213,6 +224,12 @@ pub trait ErasedConnector: Send {
         profile: &serde_json::Value,
     ) -> Result<Option<oneshot::Receiver<TestSourceMessage>>, serde_json::Error>;
 
+    fn schema_registry(
+        &self,
+        profile: &serde_json::Value,
+        table: &serde_json::Value,
+    ) -> anyhow::Result<Option<ConfluentSchemaRegistry>>;
+
     fn test(
         &self,
         name: &str,
@@ -305,6 +322,14 @@ impl<C: Connector> ErasedConnector for C {
         profile: &serde_json::Value,
     ) -> Result<Option<tokio::sync::oneshot::Receiver<TestSourceMessage>>, serde_json::Error> {
         Ok(self.test_profile(self.parse_config(profile)?))
+    }
+
+    fn schema_registry(
+        &self,
+        profile: &serde_json::Value,
+        table: &serde_json::Value,
+    ) -> anyhow::Result<Option<ConfluentSchemaRegistry>> {
+        self.schema_registry(self.parse_config(profile)?, self.parse_table(table)?)
     }
 
     fn test(
