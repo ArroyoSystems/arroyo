@@ -159,6 +159,14 @@ impl Connector for ConfluentConnector {
         KafkaConnector {}.test_profile(profile)
     }
 
+    fn schema_registry(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+    ) -> anyhow::Result<Option<arroyo_rpc::schema_resolver::ConfluentSchemaRegistry>> {
+        KafkaConnector {}.schema_registry(profile.into(), table)
+    }
+
     fn from_options(
         &self,
         name: &str,

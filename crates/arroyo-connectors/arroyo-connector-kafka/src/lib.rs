@@ -303,6 +303,23 @@ impl Connector for KafkaConnector {
         Some(rx)
     }
 
+    fn schema_registry(
+        &self,
+        profile: Self::ProfileT,
+        table: Self::TableT,
+    ) -> anyhow::Result<Option<ConfluentSchemaRegistry>> {
+        let Some(SchemaRegistry::ConfluentSchemaRegistry {
+            endpoint,
+            api_key,
+            api_secret,
+        }) = profile.schema_registry_enum
+        else {
+            return Ok(None);
+        };
+
+        ConfluentSchemaRegistry::new(&endpoint, &table.subject(), api_key, api_secret).map(Some)
+    }
+
     fn test(
         &self,
         _: &str,

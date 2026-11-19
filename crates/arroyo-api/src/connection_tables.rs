@@ -15,8 +15,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use utoipa::ToSchema;
 
-use arroyo_connector_confluent::ConfluentProfile;
-use arroyo_connector_kafka::{KafkaConfig, KafkaTable, SchemaRegistry};
 use arroyo_connectors::connector_for_type;
 use arroyo_formats::{avro, json, proto};
 use arroyo_operator::connector::ErasedConnector;
@@ -27,9 +25,7 @@ use arroyo_rpc::api_types::connections::{
 use arroyo_rpc::api_types::{ConnectionTableCollection, PaginationQueryParams};
 use arroyo_rpc::formats::{AvroFormat, Format, JsonFormat, ProtobufFormat};
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::schema_resolver::{
-    ConfluentSchemaRegistry, ConfluentSchemaSubjectResponse, ConfluentSchemaType,
-};
+use arroyo_rpc::schema_resolver::{ConfluentSchemaSubjectResponse, ConfluentSchemaType};
 
 use crate::rest::AppState;
 use crate::rest_utils::{
@@ -878,44 +874,16 @@ async fn get_schema(
     )>,
     ErrorResp,
 > {
-    let profile: KafkaConfig = match connector {
-        "kafka" => {
-            // we unwrap here because this should already have been validated
-            serde_json::from_value(profile_config.clone()).expect("invalid kafka config")
-        }
-        "confluent" => {
-            let c: ConfluentProfile =
-                serde_json::from_value(profile_config.clone()).expect("invalid confluent config");
-            c.into()
-        }
-        _ => {
-            return Err(bad_request(
-                "confluent schema registry can only be used for Kafka or Confluent connections",
-            ));
-        }
-    };
-
-    let table: KafkaTable =
-        serde_json::from_value(table_config.clone()).expect("invalid kafka table");
-
-    let Some(SchemaRegistry::ConfluentSchemaRegistry {
-        endpoint,
-        api_key,
-        api_secret,
-    }) = profile.schema_registry_enum
-    else {
-        return Err(bad_request(
-            "schema registry must be configured on the Kafka connection profile",
-        ));
-    };
-
-    let resolver = ConfluentSchemaRegistry::new(
-        &endpoint,
-        &table.subject(),
-        api_key.clone(),
-        api_secret.clone(),
-    )
-    .map_err(|e| bad_request(format!("failed to fetch schemas from schema registry: {e}")))?;
+    let resolver = connector_for_type(connector)
+        .ok_or_else(|| bad_request(format!("Unknown connector '{connector}'")))?
+        .schema_registry(profile_config, table_config)
+        .map_err(|e| bad_request(format!("failed to fetch schemas from schema registry: {e}")))?
+        .ok_or_else(|| {
+            bad_request(
+                "confluent schema registry must be configured on the connection profile; \
+                it can only be used with Kafka or Confluent connections",
+            )
+        })?;
 
     let Some(resp) = resolver.get_schema_for_version(None).await.map_err(|e| {
         bad_request(format!(
