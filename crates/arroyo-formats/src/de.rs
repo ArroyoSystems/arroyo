@@ -15,8 +15,8 @@ use arroyo_rpc::MetadataField;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, SourceError};
 use arroyo_rpc::formats::{AvroFormat, BadData, Format, Framing, JsonFormat, ProtobufFormat};
-use arroyo_rpc::log_event;
 use arroyo_rpc::schema_resolver::{FailingSchemaResolver, FixedSchemaResolver, SchemaResolver};
+use arroyo_rpc::{analytics, log_event};
 use arroyo_types::{LOOKUP_KEY_INDEX_FIELD, to_nanos};
 use prost_reflect::DescriptorPool;
 use serde_json::Value;
@@ -246,14 +246,11 @@ impl BufferDecoder {
                             opt.map(|(batch, mask, _invalid_records, validation_errors)| {
                                 // Report validation errors
                                 for verr in validation_errors {
-                                    log_event!(
-                                        "user_error",
-                                        {
-                                            "error_family": "deserialization",
-                                            "error_type": failure_kind_to_str(verr.failure_kind),
-                                            "details": format_validation_error(&verr),
-                                        }
-                                    );
+                                    log_event!(analytics::UserError {
+                                        error_family: "deserialization",
+                                        error_type: failure_kind_to_str(verr.failure_kind),
+                                        details: &format_validation_error(&verr),
+                                    });
                                 }
                                 (batch.columns().to_vec(), Some(mask))
                             })

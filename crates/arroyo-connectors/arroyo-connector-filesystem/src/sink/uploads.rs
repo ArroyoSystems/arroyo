@@ -1,7 +1,7 @@
 use super::{classify_storage_error, map_storage_error};
 use crate::sink::{FsEventLogger, storage_error_message};
 use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, StorageError};
-use arroyo_rpc::{connector_err, log_event};
+use arroyo_rpc::{analytics, connector_err, log_event};
 use arroyo_storage::StorageProvider;
 use arroyo_types::PIPELINE_ID_ENV;
 use bytes::Bytes;
@@ -222,16 +222,13 @@ async fn validate_already_there(
             %head_error,
             "skipping missing R2 output during commit"
         );
-        log_event!(
-            "filesystem_output_skipped",
-            {
-                "job_id": task_info.job_id,
-                "object": storage.canonical_url_for(path.as_ref()),
-                "operator_id": task_info.operator_id,
-                "pipeline_id": std::env::var(PIPELINE_ID_ENV).unwrap_or_default(),
-            },
-            ["expected_size" => expected_size]
-        );
+        log_event!(analytics::FilesystemOutputSkipped {
+            job_id: &task_info.job_id,
+            object: &storage.canonical_url_for(path.as_ref()),
+            operator_id: &task_info.operator_id,
+            pipeline_id: &std::env::var(PIPELINE_ID_ENV).unwrap_or_default(),
+            expected_size: expected_size as f64,
+        });
         return Ok(());
     }
 

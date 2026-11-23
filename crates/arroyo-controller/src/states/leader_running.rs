@@ -11,7 +11,7 @@ use arroyo_rpc::config::config;
 use arroyo_rpc::errors::RetryHint;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::ErrorDomain;
-use arroyo_rpc::log_event;
+use arroyo_rpc::{analytics, log_event};
 use std::time::{Duration, Instant};
 use tokio::time::MissedTickBehavior;
 use tracing::{error, warn};
@@ -245,17 +245,12 @@ impl State for LeaderRunning {
                     }
                 }
                 _ = log_interval.tick() => {
-                    log_event!(
-                        "job_running",
-                        {
-                            "service": "controller",
-                            "job_id": ctx.config.id,
-                            "scheduler": &config().controller.scheduler,
-                        },
-                        [
-                            "duration_ms" => ctx.last_transitioned_at.elapsed().as_millis() as f64,
-                        ]
-                    );
+                    log_event!(analytics::JobRunning {
+                        service: "controller",
+                        job_id: &ctx.config.id,
+                        scheduler: &config().controller.scheduler,
+                        duration_ms: ctx.last_transitioned_at.elapsed().as_millis() as f64,
+                    });
                 }
             }
         }

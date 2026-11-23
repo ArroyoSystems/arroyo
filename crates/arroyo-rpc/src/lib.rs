@@ -1,3 +1,4 @@
+pub mod analytics;
 pub mod api_types;
 pub mod checkpoints;
 pub mod formats;
@@ -120,7 +121,7 @@ pub enum EventLevel {
 }
 
 pub trait EventLogger: Send + Sync {
-    fn log_event(&self, name: &str, labels: Value, values: Vec<(String, f64)>, level: EventLevel);
+    fn log_event(&self, event: &dyn analytics::AnalyticsEvent, level: EventLevel);
     fn trace_enabled(&self) -> bool {
         false
     }
@@ -138,43 +139,20 @@ pub fn init_event_logger(event_logger: Arc<dyn EventLogger>) {
 
 #[macro_export]
 macro_rules! log_event {
-    ($name:expr, { $($labels:tt)* }, [ $($key:expr => $value:expr),* $(,)? ]) => {
-        if let Some(event_logger) = arroyo_rpc::event_logger() {
-            let labels = serde_json::json!({ $($labels)* });
-            let values = {
-                let mut map = vec![];
-                $(
-                    map.push(($key.to_string(), $value as f64));
-                )*
-                map
-            };
-            event_logger.log_event($name, labels, values, arroyo_rpc::EventLevel::Analytics);
+    ($($event_type:ident)::+ { $($fields:tt)* } $(,)?) => {
+        if let Some(event_logger) = $crate::event_logger() {
+            let level = <$($event_type)::+ as $crate::analytics::AnalyticsEvent>::level();
+            if level != $crate::EventLevel::Trace || event_logger.trace_enabled() {
+                event_logger.log_event(&$($event_type)::+ { $($fields)* }, level);
+            }
         }
-    };
-    ($name:expr, { $($labels:tt)* }) => {
-        log_event!($name, { $($labels)* }, []);
     };
 }
 
 #[macro_export]
 macro_rules! log_trace_event {
-    ($name:expr, { $($labels:tt)* }, [ $($key:expr => $value:expr),* $(,)? ]) => {
-        if let Some(event_logger) = arroyo_rpc::event_logger() {
-            if event_logger.trace_enabled() {
-                let labels = serde_json::json!({ $($labels)* });
-                let values = {
-                    let mut fields = vec![];
-                    $(
-                        fields.push(($key.to_string(), $value as f64));
-                    )*
-                    fields
-                };
-                event_logger.log_event($name, labels, values, arroyo_rpc::EventLevel::Trace);
-            }
-        }
-    };
-    ($name:expr, { $($labels:tt)* }) => {
-        log_trace_event!($name, { $($labels)* }, []);
+    ($($event:tt)*) => {
+        $crate::log_event!($($event)*);
     };
 }
 

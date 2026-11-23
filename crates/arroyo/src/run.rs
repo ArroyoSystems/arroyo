@@ -3,7 +3,7 @@ use anyhow::{anyhow, bail};
 use arroyo_openapi::Client;
 use arroyo_openapi::types::{Pipeline, PipelinePatch, PipelinePost, StopType, ValidateQueryPost};
 use arroyo_rpc::config::{ApiAuthMode, DatabaseType, DefaultSink, Scheduler, config};
-use arroyo_rpc::log_event;
+use arroyo_rpc::{analytics, log_event};
 use arroyo_rpc::{config, init_db_notifier, notify_db, retry};
 use arroyo_server_common::shutdown::{Shutdown, ShutdownHandler, SignalBehavior};
 use arroyo_storage::StorageProvider;
@@ -462,7 +462,7 @@ pub async fn run(args: RunArgs) {
 
     // check if this is the correct database for this pipeline
 
-    log_event!("pipeline_cluster_start", {});
+    log_event!(analytics::PipelineClusterStart {});
 
     let controller_port = arroyo_controller::ControllerServer::new(db.clone())
         .await

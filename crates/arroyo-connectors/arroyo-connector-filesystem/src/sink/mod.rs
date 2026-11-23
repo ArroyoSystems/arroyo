@@ -1,6 +1,6 @@
 use ::arrow::record_batch::RecordBatch;
 use arroyo_rpc::errors::{DataflowError, DataflowResult, ErrorDomain, RetryHint, StorageError};
-use arroyo_rpc::{df::ArroyoSchemaRef, formats::Format, log_trace_event};
+use arroyo_rpc::{analytics, df::ArroyoSchemaRef, formats::Format, log_trace_event};
 use arroyo_types::*;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
@@ -111,24 +111,22 @@ impl FsEventLogger {
         rows_written: u64,
     ) {
         let task_info = self.task_info.as_ref().unwrap();
-        log_trace_event!("filesystem_write",
-        {
-            "operator_id": task_info.operator_id,
-            "operator_name": task_info.operator_name,
-            "connection_id": self.connection_id.as_str(),
-            "write_error_reason": failure_message.as_deref().unwrap_or(""),
-            "subtask_idx": task_info.task_index,
-            "output_format": self.output_format,
-            "table_format": self.table_format,
-        }, [
-            "bytes_written" => bytes as f64,
-            "files_written" => files as f64,
-            "write_time_ms" => write_time.as_millis() as f64,
-            "write_failures" => failures as f64,
-            "row_groups_written" => row_groups_written as f64,
-            "uncompressed_bytes_written" => uncompressed_bytes_written as f64,
-            "rows_written" => rows_written as f64,
-        ]);
+        log_trace_event!(analytics::FilesystemWrite {
+            operator_id: &task_info.operator_id,
+            operator_name: &task_info.operator_name,
+            connection_id: &self.connection_id,
+            write_error_reason: failure_message.as_deref().unwrap_or(""),
+            subtask_idx: task_info.task_index,
+            output_format: self.output_format,
+            table_format: self.table_format,
+            bytes_written: bytes as f64,
+            files_written: files as f64,
+            write_time_ms: write_time.as_millis() as f64,
+            write_failures: failures as f64,
+            row_groups_written: row_groups_written as f64,
+            uncompressed_bytes_written: uncompressed_bytes_written as f64,
+            rows_written: rows_written as f64,
+        });
     }
 }
 

@@ -16,7 +16,7 @@ use arroyo_rpc::grpc::rpc::{
     JobStopMode, OperatorCommitData, StopExecutionReq, StopMode, TableCommitData, TableEnum,
     TaskAssignment, TaskCheckpointEventType, WorkerPhase,
 };
-use arroyo_rpc::log_event;
+use arroyo_rpc::{analytics, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
@@ -379,13 +379,13 @@ impl WorkerJobController {
                                     initial commit replay to complete");
                             }
                             Some(RunningMessage::TaskFailed(event)) => {
-                                log_event!("task_error", {
-                                    "service": "controller",
-                                    "job_id": *self.worker_context.job_id,
-                                    "operator_id": event.operator_id,
-                                    "subtask_index": event.subtask_idx,
-                                    "error": event.reason,
-                                    "domain": event.error_domain.as_str(),
+                                log_event!(analytics::TaskError {
+                                    service: "controller",
+                                    job_id: &self.worker_context.job_id,
+                                    operator_id: &event.operator_id,
+                                    subtask_index: event.subtask_idx,
+                                    error: &event.reason,
+                                    domain: event.error_domain.as_str(),
                                 });
                                 self.fail_job(event.into()).await?;
                                 return Ok(());
@@ -477,13 +477,13 @@ impl WorkerJobController {
                             return Ok(());
                         }
                         Ok(ControllerProgress::TaskFailed(event)) => {
-                            log_event!("task_error", {
-                                "service": "controller",
-                                "job_id": *self.worker_context.job_id,
-                                "operator_id": event.operator_id,
-                                "subtask_index": event.subtask_idx,
-                                "error": event.reason,
-                                "domain": event.error_domain.as_str(),
+                            log_event!(analytics::TaskError {
+                                service: "controller",
+                                job_id: &self.worker_context.job_id,
+                                operator_id: &event.operator_id,
+                                subtask_index: event.subtask_idx,
+                                error: &event.reason,
+                                domain: event.error_domain.as_str(),
                             });
 
                             self.fail_job(event.into()).await?;
@@ -496,10 +496,10 @@ impl WorkerJobController {
                             }
 
                             error!(message = "error while running", error = format!("{:?}", err), job_id = *self.worker_context.job_id);
-                            log_event!("running_error", {
-                                "service": "controller",
-                                "job_id": *self.worker_context.job_id,
-                                "error": format!("{:?}", err),
+                            log_event!(analytics::RunningError {
+                                service: "controller",
+                                job_id: &self.worker_context.job_id,
+                                error: &format!("{err:?}"),
                             });
 
                             self.fail_job(JobFailure {
