@@ -64,7 +64,7 @@ impl SessionAggregatingWindowFunc {
         let result = self
             .keys_by_next_watermark_action
             .first_key_value()
-            .map(|(next_watermark_action, _)| *next_watermark_action < watermark)
+            .map(|(next_watermark_action, _)| *next_watermark_action <= watermark)
             .unwrap_or(false);
         if result {
             debug!("should advance at watermark {:?}", watermark);
@@ -559,12 +559,13 @@ impl KeyComputingHolder {
         &mut self,
         watermark: SystemTime,
     ) -> Result<Vec<SessionWindowResult>> {
-        // Check if the current session is complete. This will happen if max_active_timestamp + gap is less than the watermark.
+        // Check if the current session is complete. This will happen once the watermark reaches max_active_timestamp + gap:
+        // the window's end is exclusive and rows before the watermark are dropped, so nothing can extend it any more.
         // If it is, we need to finish the current session and start a new one.
         let mut results = vec![];
         loop {
             if let Some(active_session) = &mut self.active_session {
-                if active_session.data_end + self.session_window_config.gap < watermark {
+                if active_session.data_end + self.session_window_config.gap <= watermark {
                     let result = self
                         .active_session
                         .take()
