@@ -64,7 +64,7 @@ impl SessionAggregatingWindowFunc {
         let result = self
             .keys_by_next_watermark_action
             .first_key_value()
-            .map(|(next_watermark_action, _)| *next_watermark_action < watermark)
+            .map(|(next_watermark_action, _)| *next_watermark_action <= watermark)
             .unwrap_or(false);
         if result {
             debug!("should advance at watermark {:?}", watermark);
@@ -449,7 +449,7 @@ impl ActiveSession {
             return Ok(None);
         }
 
-        if (to_nanos(self.data_end + gap) as i64) < start {
+        if (to_nanos(self.data_end + gap) as i64) <= start {
             // all data in the batch is after the current session interval
             // return the batch
             warn!("got batch that is entirely after the current session interval");
@@ -464,22 +464,19 @@ impl ActiveSession {
         if start < to_nanos(self.data_start) as i64 {
             self.data_start = from_nanos(start as u128);
         }
-        // TODO: test best way to compute this
-        let mut index = 1;
+        // Walk the sorted batch from its first row: a row within the gap of the session's end
+        // joins the session and moves its end forward, and the first row that is not starts the
+        // remainder.
+        let mut index = 0;
         while index < batch.num_rows() {
             let value = timestamp_column.value(index);
-            index += 1;
-            //
-            if value < to_nanos(self.data_end) as i64 {
-                continue;
+            if value >= to_nanos(self.data_end + gap) as i64 {
+                break;
             }
-            if value < to_nanos(self.data_end + gap) as i64 {
-                // this value is within the current session interval
-                // add it to the current session and update the gap
+            if value > to_nanos(self.data_end) as i64 {
                 self.data_end = from_nanos(value as u128);
-                continue;
             }
-            break;
+            index += 1;
         }
         if index == batch.num_rows() {
             // all data in the batch is within the current session interval
@@ -562,12 +559,13 @@ impl KeyComputingHolder {
         &mut self,
         watermark: SystemTime,
     ) -> Result<Vec<SessionWindowResult>> {
-        // Check if the current session is complete. This will happen if max_active_timestamp + gap is less than the watermark.
+        // Check if the current session is complete. This will happen once the watermark reaches max_active_timestamp + gap:
+        // the window's end is exclusive and rows before the watermark are dropped, so nothing can extend it any more.
         // If it is, we need to finish the current session and start a new one.
         let mut results = vec![];
         loop {
             if let Some(active_session) = &mut self.active_session {
-                if active_session.data_end + self.session_window_config.gap < watermark {
+                if active_session.data_end + self.session_window_config.gap <= watermark {
                     let result = self
                         .active_session
                         .take()
@@ -622,7 +620,7 @@ impl KeyComputingHolder {
             bail!("fill_active_session() should not be called when there is no active session");
         };
         while let Some((first_key, _batches)) = self.batches_by_start_time.first_key_value() {
-            if active_session.data_end + self.session_window_config.gap < *first_key {
+            if active_session.data_end + self.session_window_config.gap <= *first_key {
                 // the next batch is after the current session + gap, so we can stop.
                 break;
             }
@@ -714,6 +712,9 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        if config.gap_micros == 0 {
+            bail!("a session window needs a gap greater than zero");
+        }
         let task_context = new_task_context(registry.as_ref())?;
         let window_field = Arc::new(Field::new(
             config.window_field_name,
@@ -941,5 +942,123 @@ impl ArrowOperator for SessionAggregatingWindowFunc {
             ),
         );
         tables
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_schema::{Schema, TimeUnit};
+    use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+
+    const GAP: Duration = Duration::from_millis(150);
+
+    fn millis(millis: u64) -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_millis(millis)
+    }
+
+    fn batch(millis: &[i64]) -> RecordBatch {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "_timestamp",
+            DataType::Timestamp(TimeUnit::Nanosecond, None),
+            false,
+        )]));
+        let timestamps = TimestampNanosecondArray::from(
+            millis.iter().map(|m| m * 1_000_000).collect::<Vec<_>>(),
+        );
+        RecordBatch::try_new(schema, vec![Arc::new(timestamps)]).unwrap()
+    }
+
+    /// A session that holds one row at `end`, and the batches it is sent.
+    fn session_ending_at(end: u64) -> (ActiveSession, UnboundedReceiver<RecordBatch>) {
+        let (sender, receiver) = unbounded_channel();
+        let schema = batch(&[0]).schema();
+        let session = ActiveSession {
+            data_start: millis(end),
+            data_end: millis(end),
+            sender: Some(sender),
+            result_stream: Box::pin(RecordBatchStreamAdapter::new(
+                schema,
+                futures::stream::empty(),
+            )),
+        };
+        (session, receiver)
+    }
+
+    fn rows_sent(receiver: &mut UnboundedReceiver<RecordBatch>) -> usize {
+        let mut rows = 0;
+        while let Ok(batch) = receiver.try_recv() {
+            rows += batch.num_rows();
+        }
+        rows
+    }
+
+    #[test]
+    fn rows_closer_than_the_gap_stay_in_one_session() {
+        // the batch spans more than the gap, but no two consecutive rows are a gap apart
+        let (mut session, mut receiver) = session_ending_at(1000);
+        let remaining = session
+            .add_batch(batch(&[1100, 1200, 1300, 1400]), GAP, 0)
+            .unwrap();
+
+        assert!(remaining.is_none());
+        assert_eq!(session.data_end, millis(1400));
+        assert_eq!(rows_sent(&mut receiver), 4);
+    }
+
+    #[test]
+    fn a_batch_is_split_before_the_first_row_past_the_gap() {
+        let (mut session, mut receiver) = session_ending_at(1000);
+        let (start, remaining) = session
+            .add_batch(batch(&[1100, 1200, 1400, 1500]), GAP, 0)
+            .unwrap()
+            .expect("the rows after the gap are returned");
+
+        assert_eq!(session.data_end, millis(1200));
+        assert_eq!(rows_sent(&mut receiver), 2);
+        assert_eq!(start, millis(1400));
+        assert_eq!(remaining.num_rows(), 2);
+    }
+
+    #[test]
+    fn a_gap_at_the_last_row_splits_the_batch() {
+        let (mut session, mut receiver) = session_ending_at(1000);
+        let (start, remaining) = session
+            .add_batch(batch(&[1100, 1300]), GAP, 0)
+            .unwrap()
+            .expect("the row after the gap is returned");
+
+        assert_eq!(session.data_end, millis(1100));
+        assert_eq!(rows_sent(&mut receiver), 1);
+        assert_eq!(start, millis(1300));
+        assert_eq!(remaining.num_rows(), 1);
+    }
+
+    #[test]
+    fn a_row_exactly_one_gap_after_the_end_starts_a_new_session() {
+        let (mut session, mut receiver) = session_ending_at(1000);
+        let (start, remaining) = session
+            .add_batch(batch(&[1150, 1200]), GAP, 0)
+            .unwrap()
+            .expect("the batch is returned whole");
+
+        assert_eq!(session.data_end, millis(1000));
+        assert_eq!(rows_sent(&mut receiver), 0);
+        assert_eq!(start, millis(1150));
+        assert_eq!(remaining.num_rows(), 2);
+    }
+
+    #[test]
+    fn rows_before_the_session_end_do_not_move_it_back() {
+        let (mut session, mut receiver) = session_ending_at(1000);
+        session.data_start = millis(900);
+        let remaining = session
+            .add_batch(batch(&[950, 1000, 1100, 1300]), GAP, 0)
+            .unwrap()
+            .expect("the row after the gap is returned");
+
+        assert_eq!(session.data_end, millis(1100));
+        assert_eq!(rows_sent(&mut receiver), 3);
+        assert_eq!(remaining.0, millis(1300));
     }
 }
