@@ -1,7 +1,9 @@
 use super::*;
 use arrow::array::{
-    Array, AsArray, Int32Array, Int64Array, ListBuilder, StringArray, StringBuilder,
+    Array, AsArray, BooleanBuilder, Int32Array, Int32Builder, Int64Array, ListBuilder, StringArray,
+    StringBuilder, StructArray, UInt32Array,
 };
+use arrow::compute::take_record_batch;
 use arrow::datatypes::{Field, Int32Type, Int64Type};
 use datafusion::physical_expr::expressions::Column;
 use std::time::Duration;
@@ -121,4 +123,97 @@ fn sliced_batch_memory_size_scales_with_slice_not_parent() {
     assert!(input.push(full.slice(0, 16)).unwrap().is_none());
     assert!(input.push(full.slice(16, 16)).unwrap().is_none());
     assert_eq!(input.flush().unwrap().unwrap().num_rows(), 32);
+}
+
+/// `n` rows alternating between keys 1 and 2, with dense boolean lists (bit-packed children,
+/// some null lists), a struct holding a list, and a list of lists
+fn list_batch(n: usize) -> RecordBatch {
+    let k = Int32Array::from_iter_values((0..n).map(|i| (i % 2) as i32 + 1));
+
+    let mut flags = ListBuilder::new(BooleanBuilder::new());
+    for i in 0..n {
+        if i % 7 == 3 {
+            flags.append(false);
+        } else {
+            for j in 0..(i % 5) * 64 {
+                flags.values().append_value((i + j) % 3 == 0);
+            }
+            flags.append(true);
+        }
+    }
+    let flags = flags.finish();
+
+    let mut tags = ListBuilder::new(StringBuilder::new());
+    for i in 0..n {
+        for j in 0..i % 3 {
+            tags.values().append_value(format!("tag-{i}-{j}"));
+        }
+        tags.append(true);
+    }
+    let tags: ArrayRef = Arc::new(tags.finish());
+    let meta = StructArray::from(vec![(
+        Arc::new(Field::new("tags", tags.data_type().clone(), true)),
+        tags,
+    )]);
+
+    let mut nested = ListBuilder::new(ListBuilder::new(Int32Builder::new()));
+    for i in 0..n {
+        for j in 0..i % 4 {
+            for v in 0..j {
+                nested.values().values().append_value((i * 10 + v) as i32);
+            }
+            nested.values().append(true);
+        }
+        nested.append(true);
+    }
+    let nested = nested.finish();
+
+    let schema = Schema::new(vec![
+        Field::new("k", DataType::Int32, false),
+        Field::new("flags", flags.data_type().clone(), true),
+        Field::new("meta", meta.data_type().clone(), false),
+        Field::new("nested", nested.data_type().clone(), true),
+    ]);
+    RecordBatch::try_new(
+        Arc::new(schema),
+        vec![
+            Arc::new(k),
+            Arc::new(flags),
+            Arc::new(meta),
+            Arc::new(nested),
+        ],
+    )
+    .unwrap()
+}
+
+#[test]
+fn multi_key_flush_groups_list_columns() {
+    let n = 100;
+    let full = list_batch(n);
+    let mut input = PartitionedInput::new(
+        &full.schema(),
+        vec![Arc::new(Column::new("k", 0))],
+        limits(1 << 30),
+    )
+    .unwrap();
+    // uneven zero-copy slices, so pieces start at non-zero offsets into shared list buffers
+    for (start, len) in [(0, 13), (13, 40), (53, 1), (54, 46)] {
+        assert!(input.push(full.slice(start, len)).unwrap().is_none());
+    }
+    let grouped = input.flush().unwrap().unwrap();
+    assert_eq!(grouped.num_partitions(), 2);
+
+    // key 1 (even rows) then key 2 (odd rows), each in arrival order
+    let order =
+        UInt32Array::from_iter_values((0..n as u32).step_by(2).chain((1..n as u32).step_by(2)));
+    assert_eq!(grouped.data, take_record_batch(&full, &order).unwrap());
+    assert_eq!(grouped.offsets, vec![0, n / 2, n]);
+}
+
+#[test]
+fn row_runs_merge_consecutive_rows_of_a_piece() {
+    assert_eq!(
+        row_runs(&[(0, 0), (0, 1), (1, 0), (0, 2), (0, 4), (0, 5), (1, 1)]),
+        vec![(0, 0, 2), (1, 0, 1), (0, 2, 3), (0, 4, 6), (1, 1, 2)]
+    );
 }

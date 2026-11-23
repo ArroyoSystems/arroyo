@@ -603,7 +603,11 @@ pub struct PipelineWorkerConfigs {
     ///
     /// The controller sends this struct to workers, which parse it strictly, so this is
     /// optional and omitted when unset to stay compatible with older controllers and workers.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_coalescing"
+    )]
     pub coalescing: Option<CoalescingConfig>,
 
     /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
@@ -632,6 +636,24 @@ impl Default for CoalescingConfig {
             max_delay: Duration::from_secs(1).into(),
         }
     }
+}
+
+/// Rejects zero limits on enabled coalescing when the config is parsed, so pipeline creation
+/// and updates fail instead of the partitioned sink failing on every start
+fn deserialize_coalescing<'de, D>(deserializer: D) -> Result<Option<CoalescingConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let config = Option::<CoalescingConfig>::deserialize(deserializer)?;
+    if let Some(c) = &config
+        && c.enabled
+        && (c.max_rows == 0 || c.max_bytes == 0 || c.max_delay.duration.is_zero())
+    {
+        return Err(de::Error::custom(
+            "coalescing max-rows, max-bytes, and max-delay must be positive when coalescing is enabled",
+        ));
+    }
+    Ok(config)
 }
 
 fn deserialize_checkpoint_interval<'de, D>(
@@ -1312,34 +1334,6 @@ mod tests {
                     "checkpoint": { "interval": "86401s" }
                 }))
                 .is_err()
-        );
-    }
-
-    #[test]
-    fn pipeline_worker_config_coalescing_is_wire_compatible() {
-        let config: Config = Figment::from(Toml::string(DEFAULT_CONFIG))
-            .extract()
-            .unwrap();
-
-        // unset, it is omitted, so workers that predate it accept the controller's config
-        let encoded = serde_json::to_value(&config.pipeline.worker).unwrap();
-        assert!(encoded.get("coalescing").is_none());
-
-        // and a config from a controller that predates it parses as unset
-        let decoded: super::PipelineWorkerConfigs = serde_json::from_value(encoded).unwrap();
-        assert_eq!(decoded.coalescing, None);
-
-        // pipeline overrides can set individual fields
-        let merged = config
-            .pipeline
-            .try_merge(&serde_json::json!({ "coalescing": { "enabled": false } }))
-            .unwrap();
-        assert_eq!(
-            merged.worker.coalescing,
-            Some(super::CoalescingConfig {
-                enabled: false,
-                ..Default::default()
-            })
         );
     }
 

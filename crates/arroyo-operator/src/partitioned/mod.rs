@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests;
 
-use arrow::array::{ArrayData, ArrayRef, ByteView, RecordBatch};
-use arrow::compute::{concat_batches, interleave_record_batch};
+use arrow::array::{
+    Array, ArrayData, ArrayRef, ByteView, MutableArrayData, RecordBatch, RecordBatchOptions,
+    make_array,
+};
+use arrow::compute::{concat_batches, interleave};
 use arrow::datatypes::{DataType, Schema};
 use arrow::error::ArrowError;
 use arrow::row::{Row, RowConverter, Rows, SortField};
@@ -131,8 +134,8 @@ impl PartitionedInput {
         Ok(Some(grouped?))
     }
 
-    /// The only copy of the data is one `interleave` over all pieces (or one `concat` when
-    /// there is a single key).
+    /// The only copy of the data is one pass over all pieces (or one `concat` when there is a
+    /// single key); see [`interleave_pieces`].
     fn group(&self, pieces: &[RecordBatch]) -> Result<PartitionedBatch, ArrowError> {
         let total_rows = self.rows.num_rows();
 
@@ -180,8 +183,7 @@ impl PartitionedInput {
                 }
             }
 
-            let refs: Vec<&RecordBatch> = pieces.iter().collect();
-            interleave_record_batch(&refs, &indices)?
+            interleave_pieces(pieces, &indices)?
         };
 
         let mut key_rows = self.converter.empty_rows(
@@ -201,6 +203,70 @@ impl PartitionedInput {
             key_rows,
         })
     }
+}
+
+/// Gathers `indices` (`(piece, row)` pairs) from `pieces` into one batch, like
+/// `interleave_record_batch`, but copies columns containing lists by runs of consecutive rows.
+///
+/// Arrow's `interleave` builds a 16-byte index pair for every list element before copying, so
+/// a list of bit-packed booleans needs 128 times its own size in temporary memory, far beyond
+/// the coalescing limits. A `MutableArrayData` copy extends child ranges instead, as `take` and
+/// `concat` do. Other columns keep `interleave`, which is faster for scattered rows.
+fn interleave_pieces(
+    pieces: &[RecordBatch],
+    indices: &[(usize, usize)],
+) -> Result<RecordBatch, ArrowError> {
+    let schema = pieces[0].schema();
+    let mut runs = None;
+    let columns = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| {
+            let values: Vec<&dyn Array> = pieces.iter().map(|p| p.column(i).as_ref()).collect();
+            if contains_list(field.data_type()) {
+                let runs = runs.get_or_insert_with(|| row_runs(indices));
+                Ok(copy_runs(&values, runs, indices.len()))
+            } else {
+                interleave(&values, indices)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    RecordBatch::try_new_with_options(
+        schema,
+        columns,
+        &RecordBatchOptions::new().with_row_count(Some(indices.len())),
+    )
+}
+
+/// Whether `interleave` reaches its per-element list path for a column of this type
+fn contains_list(data_type: &DataType) -> bool {
+    match data_type {
+        DataType::List(_) | DataType::LargeList(_) => true,
+        DataType::Struct(fields) => fields.iter().any(|f| contains_list(f.data_type())),
+        _ => false,
+    }
+}
+
+/// Collapses `(piece, row)` indices into `(piece, start, end)` runs of consecutive rows
+fn row_runs(indices: &[(usize, usize)]) -> Vec<(usize, usize, usize)> {
+    let mut runs: Vec<(usize, usize, usize)> = vec![];
+    for &(piece, row) in indices {
+        match runs.last_mut() {
+            Some((p, _, end)) if *p == piece && *end == row => *end += 1,
+            _ => runs.push((piece, row, row + 1)),
+        }
+    }
+    runs
+}
+
+fn copy_runs(values: &[&dyn Array], runs: &[(usize, usize, usize)], len: usize) -> ArrayRef {
+    let data: Vec<ArrayData> = values.iter().map(|v| v.to_data()).collect();
+    let mut out = MutableArrayData::new(data.iter().collect(), false, len);
+    for &(piece, start, end) in runs {
+        out.extend(piece, start, end);
+    }
+    make_array(out.freeze())
 }
 
 /// Estimates the memory size of the rows actually present in `batch`, rather than the full
