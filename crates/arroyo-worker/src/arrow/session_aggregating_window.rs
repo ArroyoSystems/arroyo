@@ -711,6 +711,9 @@ impl OperatorConstructor for SessionAggregatingWindowConstructor {
         config: Self::ConfigT,
         registry: Arc<Registry>,
     ) -> anyhow::Result<ConstructedOperator> {
+        if config.gap_micros == 0 {
+            bail!("a session window needs a gap greater than zero");
+        }
         let task_context = new_task_context(registry.as_ref())?;
         let window_field = Arc::new(Field::new(
             config.window_field_name,

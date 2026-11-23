@@ -722,6 +722,10 @@ fn find_window(expression: &Expr) -> Result<Option<WindowType>> {
                     unreachable!("wrong number of arguments for session(), expected one");
                 }
                 let gap = get_duration(&args[0])?;
+                // the gap is carried in microseconds, and a session needs one that is not zero
+                if gap.as_micros() == 0 {
+                    return plan_err!("session() gap must be at least one microsecond");
+                }
                 Ok(Some(WindowType::Session { gap }))
             }
             _ => Ok(None),
