@@ -86,18 +86,25 @@ impl Partitioner {
         !self.exprs.is_empty()
     }
 
+    /// Evaluates the partition expressions over the batch, one key column per expression
+    pub(crate) fn partition_keys(
+        &self,
+        batch: &RecordBatch,
+    ) -> Result<Vec<ArrayRef>, DataFusionError> {
+        self.exprs
+            .iter()
+            .map(|e| e.evaluate(batch)?.into_array(batch.num_rows()))
+            .collect()
+    }
+
     /// Partition the batch by this partitioner
     pub fn partition(
         &self,
         batch: &RecordBatch,
     ) -> Result<Vec<(OwnedRow, RecordBatch)>, DataFusionError> {
-        let key_arrays: Result<Vec<_>, DataFusionError> = self
-            .exprs
-            .iter()
-            .map(|e| e.evaluate(batch)?.into_array(batch.num_rows()))
-            .collect();
-
-        let rows = self.row_converter.convert_columns(&key_arrays?)?;
+        let rows = self
+            .row_converter
+            .convert_columns(&self.partition_keys(batch)?)?;
 
         let mut groups: HashMap<OwnedRow, Vec<u32>> = HashMap::default();
         let mut order: Vec<OwnedRow> = Vec::new();

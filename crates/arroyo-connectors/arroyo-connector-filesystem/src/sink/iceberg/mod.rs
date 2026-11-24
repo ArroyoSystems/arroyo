@@ -3,6 +3,9 @@ pub mod schema;
 mod storage;
 pub mod transforms;
 
+#[cfg(test)]
+mod transform_equivalence;
+
 use crate::config::{IcebergCatalog, IcebergPartitioning, IcebergSink};
 use crate::sink::FinishedFile;
 use crate::sink::iceberg::metadata::build_datafile_from_meta;
