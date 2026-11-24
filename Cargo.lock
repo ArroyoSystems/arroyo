@@ -678,7 +678,6 @@ dependencies = [
  "iceberg-catalog-rest",
  "iceberg-storage-opendal",
  "itertools 0.14.0",
- "murmur3",
  "num-bigint",
  "object_store",
  "parquet",

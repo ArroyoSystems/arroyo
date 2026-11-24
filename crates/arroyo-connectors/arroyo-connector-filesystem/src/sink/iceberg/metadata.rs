@@ -7,13 +7,15 @@ use arroyo_rpc::errors::DataflowResult;
 use bincode::{Decode, Encode};
 use iceberg::spec::{
     DataContentType, DataFile, DataFileBuilder, DataFileFormat, Datum, ListType, Literal, MapType,
-    NestedFieldRef, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema, SchemaVisitor,
-    StructType, Type, visit_schema,
+    NestedFieldRef, PrimitiveLiteral, PrimitiveType, Schema as IceSchema, Schema as IcebergSchema,
+    SchemaVisitor, StructType, Type, visit_schema,
 };
 use iceberg::transform::create_transform_function;
 use itertools::Itertools;
+use parquet::basic::{ConvertedType, LogicalType};
 use parquet::file::metadata::ParquetMetaData;
 use parquet::file::statistics::Statistics;
+use parquet::schema::types::ColumnDescriptor;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -80,7 +82,9 @@ impl IcebergFileMetadata {
                 if let Some(statistics) = col.statistics() {
                     acc.null_values += statistics.null_count_opt().unwrap_or(0);
 
-                    if let Err(e) = min_max_agg.update(field_id, statistics) {
+                    if let Err(e) =
+                        min_max_agg.update(field_id, statistics, is_unsigned(col.column_descr()))
+                    {
                         warn!("unable to compute iceberg statistics for column: {:?}", e);
                     }
                 }
@@ -149,14 +153,36 @@ pub fn build_datafile_from_meta(
         .fields
         .iter()
         .map(|f| {
+            let transform: iceberg::spec::Transform = f.transform_fn.into();
+
+            // void puts every row in the null partition; iceberg-rust's literal transform
+            // returns no value for it, which `transform_literal_result` rejects
+            if transform == iceberg::spec::Transform::Void {
+                return Ok(None);
+            }
+
             let f_id = ice_schema
                 .field_id_by_name(&f.field)
                 .ok_or_else(|| anyhow!("partition field not found in schema '{}'!", f.field))?;
-            let v = lower_bounds
-                .get(&f_id)
-                .ok_or_else(|| anyhow!("no metadata for partition field '{}'", f.field))?;
-            let fun = create_transform_function(&f.transform_fn.into())?;
-            let result = fun.transform_literal_result(v)?;
+            let Some(v) = lower_bounds.get(&f_id) else {
+                if meta
+                    .columns
+                    .get(&f_id)
+                    .is_some_and(|acc| acc.num_values > 0 && acc.null_values == acc.num_values)
+                {
+                    return Ok(None);
+                }
+
+                return Err(anyhow!("no metadata for partition field '{}'", f.field));
+            };
+
+            let result = match (transform, v.literal()) {
+                // iceberg-rust implements truncate for binary arrays, but not for literals
+                (iceberg::spec::Transform::Truncate(width), PrimitiveLiteral::Binary(bytes)) => {
+                    Datum::binary(bytes.iter().take(width as usize).copied())
+                }
+                _ => create_transform_function(&transform)?.transform_literal_result(v)?,
+            };
 
             Ok(Some(Literal::Primitive(result.literal().clone())))
         })
@@ -228,7 +254,7 @@ impl<'a> MinMaxColAggregator<'a> {
     }
 
     /// Update statistics
-    fn update(&mut self, field_id: i32, value: &Statistics) -> anyhow::Result<()> {
+    fn update(&mut self, field_id: i32, value: &Statistics, unsigned: bool) -> anyhow::Result<()> {
         let Some(ty) = self
             .schema
             .field_by_id(field_id)
@@ -246,7 +272,7 @@ impl<'a> MinMaxColAggregator<'a> {
         };
 
         if value.min_is_exact() {
-            let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, value)? else {
+            let Some(min_datum) = get_parquet_stat_min_as_datum(&ty, value, unsigned)? else {
                 bail!("Statistics {} is not match with field type {}.", value, ty);
             };
 
@@ -254,7 +280,7 @@ impl<'a> MinMaxColAggregator<'a> {
         }
 
         if value.max_is_exact() {
-            let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, value)? else {
+            let Some(max_datum) = get_parquet_stat_max_as_datum(&ty, value, unsigned)? else {
                 bail!("Statistics {} is not match with field type {}.", value, ty);
             };
 
@@ -273,6 +299,7 @@ impl<'a> MinMaxColAggregator<'a> {
 pub(crate) fn get_parquet_stat_min_as_datum(
     primitive_type: &PrimitiveType,
     stats: &Statistics,
+    unsigned: bool,
 ) -> anyhow::Result<Option<Datum>> {
     Ok(match (primitive_type, stats) {
         (PrimitiveType::Boolean, Statistics::Boolean(stats)) => {
@@ -287,6 +314,31 @@ pub(crate) fn get_parquet_stat_min_as_datum(
         (PrimitiveType::Long, Statistics::Int64(stats)) => {
             stats.min_opt().map(|val| Datum::long(*val))
         }
+        // unsigned 32-bit ints are Iceberg longs stored as parquet INT32, whose statistics hold
+        // the bits of the unsigned values
+        (PrimitiveType::Long, Statistics::Int32(stats)) => stats.min_opt().map(|val| {
+            Datum::long(if unsigned {
+                *val as u32 as i64
+            } else {
+                *val as i64
+            })
+        }),
+        (PrimitiveType::Decimal { .. }, Statistics::Int32(stats)) => stats
+            .min_opt()
+            .map(|val| decimal_datum(primitive_type, (*val).into()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::Int64(stats)) => stats
+            .min_opt()
+            .map(|val| decimal_datum(primitive_type, (*val).into()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::ByteArray(stats)) => stats
+            .min_bytes_opt()
+            .map(|bytes| Datum::try_from_bytes(bytes, primitive_type.clone()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::FixedLenByteArray(stats)) => stats
+            .min_bytes_opt()
+            .map(|bytes| Datum::try_from_bytes(bytes, primitive_type.clone()))
+            .transpose()?,
         (PrimitiveType::Time, Statistics::Int64(stats)) => {
             let Some(val) = stats.min_opt() else {
                 return Ok(None);
@@ -353,6 +405,7 @@ pub(crate) fn get_parquet_stat_min_as_datum(
 pub fn get_parquet_stat_max_as_datum(
     primitive_type: &PrimitiveType,
     stats: &Statistics,
+    unsigned: bool,
 ) -> anyhow::Result<Option<Datum>> {
     Ok(match (primitive_type, stats) {
         (PrimitiveType::Boolean, Statistics::Boolean(stats)) => {
@@ -367,6 +420,31 @@ pub fn get_parquet_stat_max_as_datum(
         (PrimitiveType::Long, Statistics::Int64(stats)) => {
             stats.max_opt().map(|val| Datum::long(*val))
         }
+        // unsigned 32-bit ints are Iceberg longs stored as parquet INT32, whose statistics hold
+        // the bits of the unsigned values
+        (PrimitiveType::Long, Statistics::Int32(stats)) => stats.max_opt().map(|val| {
+            Datum::long(if unsigned {
+                *val as u32 as i64
+            } else {
+                *val as i64
+            })
+        }),
+        (PrimitiveType::Decimal { .. }, Statistics::Int32(stats)) => stats
+            .max_opt()
+            .map(|val| decimal_datum(primitive_type, (*val).into()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::Int64(stats)) => stats
+            .max_opt()
+            .map(|val| decimal_datum(primitive_type, (*val).into()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::ByteArray(stats)) => stats
+            .max_bytes_opt()
+            .map(|bytes| Datum::try_from_bytes(bytes, primitive_type.clone()))
+            .transpose()?,
+        (PrimitiveType::Decimal { .. }, Statistics::FixedLenByteArray(stats)) => stats
+            .max_bytes_opt()
+            .map(|bytes| Datum::try_from_bytes(bytes, primitive_type.clone()))
+            .transpose()?,
         (PrimitiveType::Time, Statistics::Int64(stats)) => {
             let Some(val) = stats.max_opt() else {
                 return Ok(None);
@@ -429,6 +507,31 @@ pub fn get_parquet_stat_max_as_datum(
             return Ok(None);
         }
     })
+}
+
+/// A decimal of `primitive_type` with the unscaled value `unscaled`
+fn decimal_datum(primitive_type: &PrimitiveType, unscaled: i128) -> anyhow::Result<Datum> {
+    Ok(Datum::try_from_bytes(
+        &unscaled.to_be_bytes(),
+        primitive_type.clone(),
+    )?)
+}
+
+/// Whether a parquet column holds unsigned integers
+fn is_unsigned(column: &ColumnDescriptor) -> bool {
+    matches!(
+        column.logical_type_ref(),
+        Some(LogicalType::Integer {
+            is_signed: false,
+            ..
+        })
+    ) || matches!(
+        column.converted_type(),
+        ConvertedType::UINT_8
+            | ConvertedType::UINT_16
+            | ConvertedType::UINT_32
+            | ConvertedType::UINT_64
+    )
 }
 
 /// A mapping from Parquet column path names to internal field id
@@ -566,7 +669,7 @@ impl SchemaVisitor for IndexByParquetPathName {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Int32Array, Int64Array};
+    use arrow::array::{Int32Array, Int64Array, UInt32Array};
     use arrow::datatypes::{DataType, Field, Schema as ArrowSchema};
     use arrow::record_batch::RecordBatch;
     use std::io::Cursor;
@@ -697,5 +800,46 @@ mod tests {
             PrimitiveLiteral::Int(d) => assert_eq!(*d, 8000),
             other => panic!("unexpected price upper bound: {other:?}"),
         }
+    }
+
+    #[test]
+    fn unsigned_int_bounds_use_unsigned_order() {
+        // an INT UNSIGNED column is an Iceberg long, stored as parquet INT32
+        let schema = Schema::builder()
+            .with_fields(vec![
+                NestedField::optional(1, "n", IT::Primitive(PT::Long)).into(),
+            ])
+            .build()
+            .unwrap();
+        let arrow_schema = Arc::new(ArrowSchema::new(vec![Field::new(
+            "n",
+            DataType::UInt32,
+            true,
+        )]));
+        let batch = RecordBatch::try_new(
+            arrow_schema.clone(),
+            vec![Arc::new(UInt32Array::from(vec![
+                Some(1),
+                Some(4_000_000_000),
+                None,
+            ]))],
+        )
+        .unwrap();
+        let mut writer = ArrowWriter::try_new(Vec::new(), arrow_schema, None).unwrap();
+        writer.write(&batch).unwrap();
+
+        let meta = IcebergFileMetadata::from_parquet(writer.close().unwrap(), &schema);
+        let df = build_datafile_from_meta(
+            &schema,
+            &meta,
+            &IcebergPartitioning::default(),
+            "s3://bucket/data/file.parquet".to_string(),
+            1234,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(df.lower_bounds()[&1], Datum::long(1i64));
+        assert_eq!(df.upper_bounds()[&1], Datum::long(4_000_000_000i64));
     }
 }
