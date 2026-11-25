@@ -33,7 +33,7 @@ use arroyo_rpc::formats::Format;
 use arroyo_rpc::grpc::rpc::compiler_grpc_client::CompilerGrpcClient;
 use arroyo_rpc::public_ids::{IdTypes, generate_id, validate_public_id};
 use arroyo_rpc::schema_resolver::{ConfluentSchemaRegistry, ConfluentSchemaType};
-use arroyo_rpc::{OperatorConfig, error_chain, log_event};
+use arroyo_rpc::{OperatorConfig, analytics, error_chain, log_event};
 use arroyo_udf_host::ParsedUdfFile;
 use prost::Message;
 use serde_json::json;
@@ -477,20 +477,19 @@ pub(crate) async fn create_pipeline_int(
 
     tx.commit().await?;
 
-    log_event!(
-        "job_created",
-        {
-            "service": "api",
-            "is_preview": is_preview,
-            "job_id": job_id,
-            "parallelism": parallelism,
-            "has_udfs": udfs.first().map(|e| !e.definition.trim().is_empty()).unwrap_or(false),
-            "rust_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Rust),
-            "python_udfs": udfs.iter().any(|e| e.language == UdfLanguage::Python),
-            // TODO: program features
-            "features": compiled.program.features(),
-        }
-    );
+    log_event!(analytics::JobCreated {
+        service: "api",
+        is_preview,
+        job_id: &job_id,
+        parallelism,
+        has_udfs: udfs
+            .first()
+            .map(|e| !e.definition.trim().is_empty())
+            .unwrap_or(false),
+        rust_udfs: udfs.iter().any(|e| e.language == UdfLanguage::Rust),
+        python_udfs: udfs.iter().any(|e| e.language == UdfLanguage::Python),
+        features: compiled.program.features(),
+    });
 
     Ok(pub_id)
 }

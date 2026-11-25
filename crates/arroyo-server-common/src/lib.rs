@@ -18,7 +18,7 @@ use once_cell::sync::OnceCell;
 use profile::handle_get_profile;
 use prometheus::{Encoder, IntCounter, ProtobufEncoder, TextEncoder, register_int_counter};
 use reqwest::Client;
-use serde_json::{Number, Value, json};
+use serde_json::{Value, json};
 use std::error::Error;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -42,6 +42,7 @@ use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::prelude::*;
 
+use arroyo_rpc::analytics::AnalyticsEvent;
 use arroyo_rpc::config::{ApiAuthMode, LogFormat, config};
 use arroyo_rpc::{EventLevel, EventLogger, init_event_logger};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
@@ -231,53 +232,47 @@ impl AnalyticsEventLogger {
 }
 
 impl EventLogger for AnalyticsEventLogger {
-    fn log_event(
-        &self,
-        name: &str,
-        mut labels: Value,
-        values: Vec<(String, f64)>,
-        level: EventLevel,
-    ) {
-        if level != EventLevel::Analytics {
+    fn log_event(&self, event: &dyn AnalyticsEvent, level: EventLevel) {
+        if level != EventLevel::Analytics || config().disable_telemetry {
             return;
         }
 
+        let mut labels = match event.to_json() {
+            Ok(labels) => labels,
+            Err(e) => {
+                debug!("Failed to encode analytics event: {e}");
+                return;
+            }
+        };
         let cluster_id = get_cluster_id();
-        if !config().disable_telemetry {
-            let name = name.to_string();
-            let client = self.client.clone();
-            tokio::task::spawn(async move {
-                if let Some(props) = labels.as_object_mut() {
-                    props.insert("distinct_id".to_string(), Value::String(cluster_id));
-                    props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
-                    props.insert("version".to_string(), Value::String(VERSION.to_string()));
-                    props.insert(
-                        "build_timestamp".to_string(),
-                        Value::String(BUILD_TIMESTAMP.to_string()),
-                    );
-                    props.extend(
-                        values
-                            .into_iter()
-                            .filter_map(|(k, v)| Some((k, Value::Number(Number::from_f64(v)?)))),
-                    );
-                }
+        let name = event.event_type();
+        let client = self.client.clone();
+        tokio::task::spawn(async move {
+            if let Some(props) = labels.as_object_mut() {
+                props.insert("distinct_id".to_string(), Value::String(cluster_id));
+                props.insert("git_sha".to_string(), Value::String(GIT_SHA.to_string()));
+                props.insert("version".to_string(), Value::String(VERSION.to_string()));
+                props.insert(
+                    "build_timestamp".to_string(),
+                    Value::String(BUILD_TIMESTAMP.to_string()),
+                );
+            }
 
-                let obj = json!({
-                    "api_key": TELEMETRY_KEY,
-                    "event": name,
-                    "properties": labels,
-                });
-
-                if let Err(e) = client
-                    .post("https://events.arroyo.dev/capture")
-                    .json(&obj)
-                    .send()
-                    .await
-                {
-                    debug!("Failed to record event: {:#}", anyhow::Error::new(e));
-                }
+            let obj = json!({
+                "api_key": TELEMETRY_KEY,
+                "event": name,
+                "properties": labels,
             });
-        }
+
+            if let Err(e) = client
+                .post("https://events.arroyo.dev/capture")
+                .json(&obj)
+                .send()
+                .await
+            {
+                debug!("Failed to record event: {:#}", anyhow::Error::new(e));
+            }
+        });
     }
 }
 

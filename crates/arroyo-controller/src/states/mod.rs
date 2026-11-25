@@ -35,7 +35,7 @@ use arroyo_rpc::errors::ErrorDomain;
 use arroyo_rpc::grpc::rpc;
 use arroyo_rpc::grpc::rpc::JobFailure;
 use arroyo_rpc::public_ids::{IdTypes, generate_id};
-use arroyo_rpc::{errors, log_event};
+use arroyo_rpc::{analytics, errors, log_event};
 use arroyo_server_common::shutdown::ShutdownGuard;
 use arroyo_types::{JobId, PipelineId};
 use prost::Message;
@@ -613,17 +613,14 @@ async fn execute_state<'a>(
                 duration_ms = ctx.last_transitioned_at.elapsed().as_millis()
             );
 
-            log_event!(
-                "state_transition",
-                {
-                    "service": "controller",
-                    "job_id": ctx.config.id,
-                    "from": state_name,
-                    "to": s.state.name(),
-                    "scheduler": &config().controller.scheduler,
-                },
-                ["duration_ms" => ctx.last_transitioned_at.elapsed().as_millis() as f64]
-            );
+            log_event!(analytics::StateTransition {
+                service: "controller",
+                job_id: &ctx.config.id,
+                from: state_name,
+                to: s.state.name(),
+                scheduler: &config().controller.scheduler,
+                duration_ms: ctx.last_transitioned_at.elapsed().as_millis() as f64,
+            });
 
             (s.update_fn)(&mut ctx);
             ctx.retries_attempted = 0;
@@ -645,18 +642,15 @@ async fn execute_state<'a>(
                 error_message = message,
                 error = format!("{:?}", source)
             );
-            log_event!(
-                "fatal_state_error",
-                {
-                    "service": "controller",
-                    "job_id": ctx.config.id,
-                    "state": state_name,
-                    "error_message": message,
-                    "domain": domain.as_str(),
-                    "error": format!("{:?}", source),
-                    "retries": 0,
-                }
-            );
+            log_event!(analytics::FatalStateError {
+                service: "controller",
+                job_id: &ctx.config.id,
+                state: state_name,
+                error_message: &message,
+                domain: domain.as_str(),
+                error: &format!("{source:?}"),
+                retries: 0,
+            });
             ctx.status.failure_message = Some(message);
             ctx.status.failure_domain = Some(domain.as_str().to_string());
             ctx.status.finish_time = Some(OffsetDateTime::now_utc());
@@ -704,18 +698,15 @@ async fn execute_state<'a>(
                 error = format!("{:?}", source),
                 retries,
             );
-            log_event!(
-                "state_error",
-                {
-                    "service": "controller",
-                    "job_id": ctx.config.id,
-                    "state": state_name,
-                    "error_message": message,
-                    "domain": domain.as_str(),
-                    "error": format!("{:?}", source),
-                },
-                ["retries" => retries]
-            );
+            log_event!(analytics::StateError {
+                service: "controller",
+                job_id: &ctx.config.id,
+                state: state_name,
+                error_message: &message,
+                domain: domain.as_str(),
+                error: &format!("{source:?}"),
+                retries: retries as f64,
+            });
 
             state_backoff(
                 ctx.retries_attempted,

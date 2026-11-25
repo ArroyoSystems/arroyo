@@ -1,6 +1,6 @@
 use crate::{AuthData, cloud};
 use arroyo_planner::PlannerError;
-use arroyo_rpc::log_event;
+use arroyo_rpc::{analytics, log_event};
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::http::StatusCode;
@@ -123,7 +123,9 @@ where
     E: core::fmt::Debug,
 {
     error!("Error while handling: {:?}", err);
-    log_event!("api_error", { "error": format!("{:?}", err) });
+    log_event!(analytics::ApiError {
+        error: &format!("{err:?}"),
+    });
     ErrorResp {
         status_code: StatusCode::INTERNAL_SERVER_ERROR,
         message: "Something went wrong".to_string(),

@@ -3,7 +3,7 @@ mod run;
 use anyhow::{anyhow, bail};
 use arroyo_planner::{ArroyoSchemaProvider, SqlConfig};
 use arroyo_rpc::config::{DatabaseType, config};
-use arroyo_rpc::{config, log_event};
+use arroyo_rpc::{analytics, config, log_event};
 use arroyo_server_common::shutdown::{Shutdown, SignalBehavior};
 use arroyo_server_common::start_admin_server;
 use arroyo_worker::{WorkerServer, utils};
@@ -458,13 +458,10 @@ async fn start_control_plane(service: CPService) {
 
     let db = db_source().await;
 
-    log_event!(
-        "service_startup",
-        {
-            "service": service.name(),
-            "scheduler": config.controller.scheduler,
-        }
-    );
+    log_event!(analytics::ServiceStartup {
+        service: service.name(),
+        scheduler: &config.controller.scheduler,
+    });
 
     let shutdown = Shutdown::new(service.name(), SignalBehavior::Handle);
 

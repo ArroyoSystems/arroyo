@@ -8,7 +8,7 @@ use arroyo_rpc::grpc::rpc::{
     TaskCheckpointCompletedReq, TaskCheckpointEventReq,
 };
 use arroyo_rpc::grpc::{api, rpc};
-use arroyo_rpc::{TaskEventSpans, get_event_spans, grpc, log_trace_event};
+use arroyo_rpc::{TaskEventSpans, analytics, get_event_spans, grpc, log_trace_event};
 use arroyo_state::tables::ErasedTable;
 use arroyo_state::tables::expiring_time_key_map::ExpiringTimeKeyTable;
 use arroyo_state::tables::global_keyed_map::GlobalKeyedTable;
@@ -195,19 +195,18 @@ impl CheckpointState {
         }
 
         let name = operator_id.and_then(|id| operator_names.get(id));
-        log_trace_event!("checkpoint", {
-            "operator_id": operator_id,
-            "operator_name": name,
-            "subtask_idx": subtask_idx.map(|i| i.to_string()).unwrap_or_default(),
-            "epoch": epoch.to_string(),
-        }, [
-            "size_bytes" => size as f64,
-            "total_time" => total_time.as_millis() as f64,
-            "alignment_time" => to_duration(spans.alignment),
-            "sync_time" => to_duration(spans.sync),
-            "async_time" => to_duration(spans.r#async),
-            "commit_time" => to_duration(spans.committing),
-        ]);
+        log_trace_event!(analytics::Checkpoint {
+            operator_id,
+            operator_name: name.map(String::as_str),
+            subtask_idx: &subtask_idx.map(|i| i.to_string()).unwrap_or_default(),
+            epoch: &epoch.to_string(),
+            size_bytes: size as f64,
+            total_time: total_time.as_millis() as f64,
+            alignment_time: to_duration(spans.alignment),
+            sync_time: to_duration(spans.sync),
+            async_time: to_duration(spans.r#async),
+            commit_time: to_duration(spans.committing),
+        });
     }
 
     pub fn start_time(&self) -> SystemTime {
