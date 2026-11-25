@@ -201,7 +201,12 @@ async fn pg_pool() -> Pool {
         recycling_method: RecyclingMethod::Fast,
     });
     let pool = match arroyo_server_common::pg_tls::build_pg_tls_connector(&config.tls) {
-        Ok(Some(connector)) => cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), connector),
+        Ok(Some(connector)) => {
+            // tokio-postgres defaults to `sslmode=prefer`, which carries on in cleartext if the
+            // server refuses TLS. A configured TLS mode has to mean an encrypted connection.
+            cfg.ssl_mode = Some(deadpool_postgres::SslMode::Require);
+            cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), connector)
+        }
         Ok(None) => cfg.create_pool(Some(deadpool_postgres::Runtime::Tokio1), NoTls),
         Err(e) => {
             error!("Invalid Postgres TLS configuration: {:?}", e);
@@ -341,6 +346,10 @@ async fn connect(retry: bool) -> anyhow::Result<Client> {
         .options(&options);
 
     let tls_connector = arroyo_server_common::pg_tls::build_pg_tls_connector(&config.tls)?;
+    if tls_connector.is_some() {
+        // As in `pg_pool`: never fall back to cleartext when a TLS mode is configured.
+        pg_cfg.ssl_mode(tokio_postgres::config::SslMode::Require);
+    }
 
     loop {
         let attempt = match &tls_connector {
