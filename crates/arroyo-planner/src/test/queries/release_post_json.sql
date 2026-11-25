@@ -1,9 +1,8 @@
 CREATE TABLE events (
   value JSON
 ) WITH (
-  connector = 'kafka',
-  bootstrap_servers = 'kafka:9092',
-  topic = 'events',
+  connector = 'single_file',
+  path = 'events.json',
   format = 'json',
   type = 'source',
   'json.unstructured' = 'true'

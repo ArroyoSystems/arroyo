@@ -9,9 +9,8 @@ create table events (
     type TEXT NOT NULL,
     properties JSON
 ) with (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
-    topic = 'analytics',
+    connector = 'single_file',
+    path = 'analytics.json',
     format = 'json',
     type = 'source'
 );

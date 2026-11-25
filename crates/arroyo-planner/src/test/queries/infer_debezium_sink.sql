@@ -4,11 +4,10 @@ create table impulse with (
 );
 
 create table sink with (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    connector = 'single_file',
     format = 'debezium_json',
     type = 'sink',
-    topic = 'outputs'
+    path = 'outputs.json'
 );
 
 insert into sink

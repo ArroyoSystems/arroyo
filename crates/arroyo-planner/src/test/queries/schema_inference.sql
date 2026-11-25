@@ -4,11 +4,10 @@ CREATE TABLE nexmark with (
 );
 
 CREATE TABLE output WITH (
-    connector = 'kafka',
+    connector = 'single_file',
     type = 'sink',
-    bootstrap_servers = 'localhost:9092',
     format = 'json',
-    'topic' = 'outputs'
+    path = 'outputs.json'
 );
 
 INSERT INTO output

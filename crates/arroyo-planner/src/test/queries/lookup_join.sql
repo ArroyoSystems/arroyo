@@ -4,11 +4,10 @@ CREATE TABLE events (
     customer_id TEXT,
     event_type TEXT
 ) WITH (
-    connector = 'kafka',
-    topic = 'events',
+    connector = 'single_file',
+    path = 'events.json',
     type = 'source',
-    format = 'json',
-    bootstrap_servers = 'broker:9092'
+    format = 'json'
 );
 
 create temporary table customers (
