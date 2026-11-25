@@ -3,6 +3,7 @@ use crate::context::{
     SourceContext, send_checkpoint_event,
 };
 use crate::inq_reader::InQReader;
+use crate::partitioned::{PartitionedBatch, PartitionedInput};
 use crate::udfs::{ArroyoUdaf, UdafArg};
 use crate::{CheckpointCounter, ControlOutcome, SourceFinishType};
 use anyhow::{anyhow, bail};
@@ -11,6 +12,7 @@ use arrow::datatypes::DataType;
 use arrow::datatypes::Schema;
 use arroyo_datastream::logical::{DylibUdfConfig, PythonUdfConfig};
 use arroyo_metrics::TaskCounters;
+use arroyo_rpc::config::config;
 use arroyo_rpc::df::ArroyoSchema;
 use arroyo_rpc::errors::DataflowResult;
 use arroyo_rpc::grpc::rpc::{TableConfig, TaskCheckpointEventType};
@@ -32,6 +34,7 @@ use datafusion::logical_expr::{
     AggregateUDF, HigherOrderUDF, ScalarUDF, Signature, TypeSignature, Volatility, WindowUDF,
     create_udaf,
 };
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{ExecutionPlan, displayable};
 use dlopen2::wrapper::Container;
 use futures::future::OptionFuture;
@@ -474,6 +477,7 @@ pub struct ChainedOperator {
     pub operator: Box<dyn ArrowOperator>,
     pub context: OperatorContext,
     pub next: Option<Box<ChainedOperator>>,
+    partitioned_input: Option<Box<PartitionedInput>>,
 }
 
 impl ChainedOperator {
@@ -482,7 +486,64 @@ impl ChainedOperator {
             operator,
             context,
             next: None,
+            partitioned_input: None,
         }
+    }
+
+    fn configure_partitioned_input(&mut self) -> DataflowResult<()> {
+        let limits = config()
+            .pipeline
+            .worker
+            .coalescing
+            .clone()
+            .unwrap_or_default();
+        if !limits.enabled || self.next.is_some() {
+            return Ok(());
+        }
+        let Some((schema, rest)) = self.context.in_schemas.split_first() else {
+            return Ok(());
+        };
+        if rest
+            .iter()
+            .any(|s| s.schema != schema.schema || s.timestamp_index != schema.timestamp_index)
+        {
+            return Ok(());
+        }
+        let Some(expressions) = self.operator.fallback_partition_exprs() else {
+            return Ok(());
+        };
+        self.partitioned_input = Some(Box::new(PartitionedInput::new(
+            &schema.schema,
+            expressions,
+            limits,
+        )?));
+        Ok(())
+    }
+
+    async fn write_grouped(
+        &mut self,
+        batch: PartitionedBatch,
+        collector: &mut ArrowCollector,
+    ) -> DataflowResult<()> {
+        trace!(
+            operator_id = %self.context.task_info.operator_id,
+            rows = batch.num_rows(),
+            partitions = batch.num_partitions(),
+            "writing grouped sink input"
+        );
+        self.operator
+            .process_partitioned(batch, &mut self.context, collector)
+            .await
+            .map_err(|err| err.with_operator(self.context.task_info.operator_id.clone()))
+    }
+
+    async fn flush_input(&mut self, collector: &mut ArrowCollector) -> DataflowResult<()> {
+        if let Some(input) = &mut self.partitioned_input
+            && let Some(batch) = input.flush()?
+        {
+            self.write_grouped(batch, collector).await?;
+        }
+        Ok(())
     }
 }
 
@@ -611,7 +672,8 @@ impl ChainedOperator {
                 .map_err(|e| e.with_operator(ctx.task_info.operator_id.clone()))?;
         }
 
-        Ok(())
+        self.configure_partitioned_input()
+            .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))
     }
 
     async fn process_batch_index<'a, 'b>(
@@ -624,6 +686,15 @@ impl ChainedOperator {
     where
         'a: 'b,
     {
+        if let Some(input) = &mut self.partitioned_input {
+            if let Some(grouped) = input
+                .push(batch)
+                .map_err(|err| err.with_operator(self.context.task_info.operator_id.clone()))?
+            {
+                self.write_grouped(grouped, final_collector).await?;
+            }
+            return Ok(());
+        }
         let mut collector = ChainedCollector {
             cur: self,
             index,
@@ -699,6 +770,7 @@ impl ChainedOperator {
                 if counter.mark(idx, t) {
                     debug!("Checkpointing {chain_info}");
 
+                    self.flush_input(collector).await?;
                     self.run_checkpoint(t, control_tx, collector)
                         .await
                         .map_err(|e| e.with_operator(self.context.task_info.operator_id.clone()))?;
@@ -750,6 +822,7 @@ impl ChainedOperator {
             watermark, self.context.task_info,
         );
 
+        let prev_watermark = self.context.watermarks.watermark();
         let watermark = self
             .context
             .watermarks
@@ -759,6 +832,13 @@ impl ChainedOperator {
         let Some(watermark) = watermark else {
             return Ok(());
         };
+
+        if self.partitioned_input.is_some()
+            && self.operator.flush_before_watermark()
+            && prev_watermark != Some(watermark)
+        {
+            self.flush_input(final_collector).await?;
+        }
 
         if let Watermark::EventTime(_t) = watermark {
             // TOOD: pass to table_manager
@@ -987,10 +1067,24 @@ async fn operator_run_behavior(
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let mut shutdown_after_commit = false;
+    let flush_timer = tokio::time::sleep(Duration::ZERO);
+    tokio::pin!(flush_timer);
 
     loop {
         let operator_future: OptionFuture<_> = this.future_to_poll().into();
+        let flush_at = this
+            .partitioned_input
+            .as_deref()
+            .and_then(PartitionedInput::deadline);
+        if let Some(d) = flush_at
+            && d != flush_timer.deadline()
+        {
+            flush_timer.as_mut().reset(d);
+        }
         tokio::select! {
+            _ = &mut flush_timer, if flush_at.is_some() => {
+                this.flush_input(collector).await?;
+            }
             Some(control_message) = control_rx.recv() => {
                 if this.handle_controller_message(&control_message, shutdown_after_commit).await? {
                     break;
@@ -1070,6 +1164,7 @@ async fn operator_run_behavior(
         }
     }
 
+    this.flush_input(collector).await?;
     this.on_close(&final_message, collector).await?;
     Ok(final_message)
 }
@@ -1195,6 +1290,33 @@ pub trait ArrowOperator: Send + 'static {
         ctx: &mut OperatorContext,
         collector: &mut dyn Collector,
     ) -> DataflowResult<()>;
+
+    /// Called instead of `process_batch` for a sink whose input is partitioned (see
+    /// `fallback_partition_exprs`). The runtime delivers the input grouped by key, each key at
+    /// most once per call, and delivers every row before the checkpoint barrier or close that
+    /// follows it.
+    #[allow(unused_variables)]
+    async fn process_partitioned(
+        &mut self,
+        batch: PartitionedBatch,
+        ctx: &mut OperatorContext,
+        collector: &mut dyn Collector,
+    ) -> DataflowResult<()> {
+        unimplemented!("{} does not support partitioned input", self.name())
+    }
+
+    /// For a sink, the expressions that partition its input, for plans that do not carry the
+    /// partition key. Returning `Some` makes the runtime group the input by these expressions
+    /// and deliver it through `process_partitioned`. Called once, after `on_start`, and only
+    /// for an operator that is alone in its chain.
+    fn fallback_partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>> {
+        None
+    }
+
+    /// Whether a partitioned input is flushed when the watermark advances
+    fn flush_before_watermark(&self) -> bool {
+        false
+    }
 
     #[allow(clippy::type_complexity)]
     fn future_to_poll(

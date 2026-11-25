@@ -599,12 +599,61 @@ pub struct PipelineWorkerConfigs {
     /// Size of the queues between nodes in the dataflow graph
     pub queue_size: u32,
 
+    /// Input coalescing for partitioned sinks; unset means [`CoalescingConfig::default`].
+    ///
+    /// The controller sends this struct to workers, which parse it strictly, so this is
+    /// optional and omitted when unset to stay compatible with older controllers and workers.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_coalescing"
+    )]
+    pub coalescing: Option<CoalescingConfig>,
+
     /// Maximum number of checkpoints to keep in history for serving the checkpoint details APIs
     pub checkpoint_details_to_keep: u32,
 
     pub compaction: CompactionConfig,
 
     pub checkpoint: CheckpointConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct CoalescingConfig {
+    pub enabled: bool,
+    pub max_rows: usize,
+    pub max_bytes: usize,
+    pub max_delay: HumanReadableDuration,
+}
+
+impl Default for CoalescingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_rows: 65536,
+            max_bytes: 32 * 1024 * 1024,
+            max_delay: Duration::from_secs(1).into(),
+        }
+    }
+}
+
+/// Rejects zero limits on enabled coalescing when the config is parsed, so pipeline creation
+/// and updates fail instead of the partitioned sink failing on every start
+fn deserialize_coalescing<'de, D>(deserializer: D) -> Result<Option<CoalescingConfig>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let config = Option::<CoalescingConfig>::deserialize(deserializer)?;
+    if let Some(c) = &config
+        && c.enabled
+        && (c.max_rows == 0 || c.max_bytes == 0 || c.max_delay.duration.is_zero())
+    {
+        return Err(de::Error::custom(
+            "coalescing max-rows, max-bytes, and max-delay must be positive when coalescing is enabled",
+        ));
+    }
+    Ok(config)
 }
 
 fn deserialize_checkpoint_interval<'de, D>(

@@ -1,10 +1,12 @@
 use arrow::record_batch::RecordBatch;
 use arroyo_operator::context::OperatorContext;
+use arroyo_operator::partitioned::PartitionedBatch;
 use arroyo_rpc::{connector_err, df::ArroyoSchemaRef, formats::Format};
 use arroyo_storage::StorageProvider;
 use arroyo_types::TaskInfo;
 use async_trait::async_trait;
 use bincode::{Decode, Encode};
+use datafusion::physical_expr::PhysicalExpr;
 use std::io::ErrorKind;
 use std::{collections::HashMap, fs::create_dir_all, io, path::Path, sync::Arc, time::SystemTime};
 use tokio::{fs::OpenOptions, io::AsyncWriteExt};
@@ -298,6 +300,18 @@ impl<V: LocalWriter + Send + 'static> TwoPhaseCommitter for LocalFileSystemWrite
             writer.write_batch(&batch)?;
         }
 
+        Ok(())
+    }
+
+    fn partition_exprs(&self) -> Option<Vec<Arc<dyn PhysicalExpr>>> {
+        self.partitioner.as_ref()?.partition_exprs()
+    }
+
+    async fn insert_partitioned(&mut self, batch: PartitionedBatch) -> DataflowResult<()> {
+        for partition in batch.iter() {
+            self.get_or_insert_writer(&Some(partition.key.owned()))
+                .write_batch(&partition.batch)?;
+        }
         Ok(())
     }
 
