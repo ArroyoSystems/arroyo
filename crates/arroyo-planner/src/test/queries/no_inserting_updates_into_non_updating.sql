@@ -2,20 +2,18 @@ CREATE table debezium_source (
     id INT PRIMARY KEY,
     count int
 ) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    connector = 'single_file',
     type = 'source',
-    topic = 'updating',
+    path = 'updating.json',
     format = 'debezium_json'
 );
 
 CREATE table sink (
     count int
 ) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    connector = 'single_file',
     type = 'sink',
-    topic = 'sink',
+    path = 'sink.json',
     format = 'debezium_json'
 );
 

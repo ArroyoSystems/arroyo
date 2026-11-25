@@ -5,11 +5,10 @@ CREATE TABLE orders (
   timestamp TIMESTAMP GENERATED ALWAYS AS (CAST(date_string as TIMESTAMP)),
   watermark FOR timestamp as CAST(date_string as TIMESTAMP) - INTERVAL '5 seconds'
 ) WITH (
-  connector = 'kafka',
+  connector = 'single_file',
   format = 'json',
   type = 'source',
-  bootstrap_servers = 'localhost:9092',
-  topic = 'order_topic'
+  path = 'order_topic.json'
 );
 
 CREATE TABLE users (
@@ -17,11 +16,10 @@ CREATE TABLE users (
   timestamp TIMESTAMP,
   watermark FOR timestamp
 ) WITH (
-  connector = 'kafka',
+  connector = 'single_file',
   format = 'json',
   type = 'source',
-  bootstrap_servers = 'localhost:9092',
-  topic = 'order_topic'
+  path = 'order_topic.json'
 );
 
 

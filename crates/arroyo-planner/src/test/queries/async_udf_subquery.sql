@@ -1,12 +1,10 @@
 create table logs (
   ip TEXT
 ) with (
-  connector = 'kafka',
-  bootstrap_servers = 'localhost:9092',
+  connector = 'single_file',
   format = 'json',
   type = 'source',
-  topic ='logs',
-  'source.offset' = 'latest'
+  path = 'logs.json'
 );
 
 SELECT count(*) as count, city, hop(interval '5 seconds', interval '15 minutes') as window

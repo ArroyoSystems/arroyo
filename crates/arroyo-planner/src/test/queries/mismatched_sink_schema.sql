@@ -1,15 +1,13 @@
 CREATE TABLE source (a int, b int) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
-    topic = 'source',
+    connector = 'single_file',
+    path = 'source.json',
     format = 'json',
     type = 'source'
 );
 
 CREATE TABLE sink (a text, b text) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
-    topic = 'sink',
+    connector = 'single_file',
+    path = 'sink.json',
     format = 'json',
     type = 'sink'
 );

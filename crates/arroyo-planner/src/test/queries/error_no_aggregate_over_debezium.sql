@@ -2,10 +2,9 @@ CREATE TABLE debezium_input (
     id int PRIMARY KEY,
     count int
 ) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    connector = 'single_file',
     type = 'source',
-    topic = 'updating',
+    path = 'updating.json',
     format = 'debezium_json'
 );
 

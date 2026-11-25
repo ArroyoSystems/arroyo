@@ -12,11 +12,10 @@ CREATE TABLE analytic_events (
     title TEXT,
     url TEXT
 ) WITH (
-    connector = 'kafka',
+    connector = 'single_file',
     format = 'json',
     type = 'source',
-    bootstrap_servers = 'kafka:9092',
-    topic = 'javascript-events'
+    path = 'javascript-events.json'
 );
 
 CREATE TABLE metrics_sink (
@@ -25,12 +24,11 @@ CREATE TABLE metrics_sink (
     value FLOAT,
     tag TEXT
 ) WITH (
-    connector = 'kafka',
+    connector = 'single_file',
     format = 'debezium_json',
     'json.include_schema' = 'true',
     type = 'sink',
-    bootstrap_servers = 'kafka:9092',
-    topic = 'metrics'
+    path = 'metrics.json'
 );
 
 INSERT INTO metrics_sink
@@ -58,12 +56,11 @@ CREATE TABLE top_pages_sink (
     count FLOAT,
     rank FLOAT
 ) WITH (
-    connector = 'kafka',
+    connector = 'single_file',
     format = 'debezium_json',
     'json.include_schema' = 'true',
     type = 'sink',
-    bootstrap_servers = 'kafka:9092',
-    topic = 'metrics'
+    path = 'metrics.json'
 );
 
 INSERT INTO top_pages_sink

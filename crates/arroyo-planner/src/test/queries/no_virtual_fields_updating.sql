@@ -8,10 +8,9 @@ CREATE table debezium_source (
     datetime datetime GENERATED ALWAYS AS (CAST(date_string as timestamp)) STORED,
     "watermark" datetime GENERATED ALWAYS AS (CAST(date_string as timestamp) - interval '1 second') STORED
   ) WITH (
-    connector = 'kafka',
-    bootstrap_servers = 'localhost:9092',
+    connector = 'single_file',
     type = 'source',
-    topic = 'updating',
+    path = 'updating.json',
     format = 'debezium_json'
   );
 SELECT * FROM debezium_source
